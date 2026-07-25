@@ -560,7 +560,7 @@ wheels = [
 
 [[package]]
 name = "curator-data"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "data" }
 dependencies = [
     { name = "curator-schema" },
@@ -592,7 +592,7 @@ provides-extras = ["x402", "test"]
 
 [[package]]
 name = "curator-mcp"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "data/curator_mcp" }
 dependencies = [
     { name = "curator-data" },
@@ -616,7 +616,7 @@ provides-extras = ["test"]
 
 [[package]]
 name = "curator-schema"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/schema/python" }
 dependencies = [
     { name = "pydantic" },
