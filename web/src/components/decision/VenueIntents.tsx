@@ -97,16 +97,24 @@ function SwapVmProgram({
 }: {
   program?: { shape: 'xyc' | 'pegged'; fee_bps?: number }
 }) {
-  const shape = program?.shape ?? 'xyc'
-  const feeBps = program?.fee_bps
-
   return (
     <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 rounded border border-agent/20 bg-agent/[0.05] px-2 py-1.5">
       <span className="text-2xs font-semibold uppercase tracking-[0.09em] text-agent">SwapVM</span>
-      <span className="text-2xs text-muted">
-        {shape === 'xyc' ? 'constant-product (xyc) curve' : 'pegged curve'}
-        {feeBps !== undefined ? ` · ${feeBps} bps maker fee` : null}
-      </span>
+      {program ? (
+        <span className="text-2xs text-muted">
+          {program.shape === 'pegged' ? 'pegged curve' : 'constant-product (xyc) curve'}
+          {program.fee_bps !== undefined ? ` · ${program.fee_bps} bps maker fee` : null}
+        </span>
+      ) : (
+        // `program` is optional on the intent, and a real model-authored ship
+        // (act_000036) omitted it. The zod schema defaults `shape` to `xyc`
+        // *within* a program object, which is not the same as an absent program
+        // meaning xyc — printing a curve the decision never chose would be an
+        // unsourced claim about the most scrutinised part of this integration.
+        <span className="text-2xs text-faint">
+          program parameters not recorded on this decision
+        </span>
+      )}
     </div>
   )
 }

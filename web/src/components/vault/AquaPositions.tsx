@@ -104,11 +104,18 @@ export function AquaPositions({ state }: { state: VaultState }) {
   )
 }
 
-/** The program from the most recent ship in the loaded decision window, if any. */
+/**
+ * The program from the most recent ship in the loaded decision window that
+ * actually recorded one.
+ *
+ * Ships whose intent omitted `program` are skipped rather than defaulted: a
+ * model-authored ship did exactly that, and substituting `xyc` would put a
+ * curve on the page that no decision ever chose.
+ */
 function latestShipProgram(actions: AgentAction[]) {
   for (const action of actions) {
     for (const intent of action.decision?.venue_intents ?? []) {
-      if (intent.kind === 'ship') return intent.program ?? { shape: 'xyc' as const }
+      if (intent.kind === 'ship' && intent.program) return intent.program
     }
   }
   return undefined
