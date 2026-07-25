@@ -3,8 +3,8 @@
 **Everything the agent can see.** A pluggable source registry that merges partial contributions from
 any number of providers into one source-agnostic `MarketSnapshot`.
 
-Four sources ship today — three over HTTP, one reading a contract on-chain. The registry is the
-product; they are its consumers.
+Nine sources ship today — GraphQL subgraphs, REST APIs, a contract read over JSON-RPC, and a
+prediction market. The registry is the product; they are its consumers.
 
 ---
 
@@ -132,15 +132,26 @@ avoid, and it holds a key.
 | `defillama` | `yield`, `tvl` | Every Base pool DefiLlama tracks, in one unauthenticated call | ✅ verified live — 47 facts across ~20 protocols. **No credential** |
 | `feargreed` | `sentiment` | Crypto Fear & Greed index, normalised to 0–1 | ✅ verified live (0.27 — "Fear"). **No credential** |
 | `gas` | `gas` | Base gas price and the USD cost of one rebalance, read on-chain | ✅ verified live ($0.74 per rebalance at 1 gwei). **No credential** |
+| `morpho` | `yield`, `tvl`, `utilization` | Morpho Blue markets on Base, via Morpho's own API | ✅ verified live — 15 markets, USDC/cbBTC at 4.80% on $1.42bn. **No credential** |
+| `prediction` | `sentiment`¹ | Polymarket implied probabilities on rates, inflation and crypto | ✅ verified live (75.2% no change in Fed rates). **No credential**, read-only |
+
+¹ Interim kind. There is no `probability` in the frozen `FactKind`; requested from Lane F and held
+behind one constant in [`sources/prediction.py`](curator_data/sources/prediction.py).
 
 All subgraph IDs live in [`curator_data/sources/protocols.py`](curator_data/sources/protocols.py),
 including a list of candidates **rejected after live testing**, so nobody re-adds them.
 
-### Four sources need no credential, and that is the point
+### The only forward-looking source
 
-Before the last three, every registered source needed a Graph key: a fresh clone produced an empty
-snapshot and four error lines. `defillama`, `feargreed`, `gas` and `chainlink` need none, so cloning
-the repo and running `curator-data snapshot` returns real data in one command.
+Every other source reports what already happened — an APY is what a market paid, TVL is what is
+there now. `prediction` reports what people expect, priced by people with money on it. For a book
+made of lending yield, a 24% implied chance of a rate rise is information no APY series contains.
+
+### Six sources need no credential, and that is the point
+
+Before them, every registered source needed a Graph key: a fresh clone produced an empty snapshot
+and four error lines. `defillama`, `feargreed`, `gas`, `chainlink`, `morpho` and `prediction` need
+none, so cloning the repo and running `curator-data snapshot` returns real data in one command.
 
 ### DefiLlama is breadth. The Graph is depth. Do not confuse them
 
