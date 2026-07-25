@@ -1,7 +1,8 @@
 'use client'
 
-import { useAccount, useConnect, useDisconnect } from 'wagmi'
+import { useState } from 'react'
 import { Button } from '@/components/ui/Button'
+import { useWallet } from '@/lib/chain/account'
 import { shortAddress } from '@/lib/format/units'
 
 /**
@@ -10,15 +11,32 @@ import { shortAddress } from '@/lib/format/units'
  * than a modal.
  */
 export function WalletButton() {
-  const { address, isConnected } = useAccount()
-  const { connect, connectors, isPending, error } = useConnect()
-  const { disconnect } = useDisconnect()
+  const { address, isConnected, hasConnector, connectWallet, disconnectWallet } = useWallet()
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  const injected = connectors[0]
+  async function run(action: () => Promise<void>) {
+    setPending(true)
+    setError(null)
+    try {
+      await action()
+    } catch (caught) {
+      // A user rejecting the wallet prompt is a normal outcome, not a fault.
+      setError(caught instanceof Error ? caught.message : 'Wallet request failed')
+    } finally {
+      setPending(false)
+    }
+  }
 
   if (isConnected && address) {
     return (
-      <Button size="sm" variant="secondary" onClick={() => disconnect()} title={address}>
+      <Button
+        size="sm"
+        variant="secondary"
+        loading={pending}
+        onClick={() => void run(disconnectWallet)}
+        title={`${address} — click to disconnect`}
+      >
         <span className="h-1.5 w-1.5 rounded-full bg-ok" />
         <span className="font-mono">{shortAddress(address)}</span>
       </Button>
@@ -29,17 +47,17 @@ export function WalletButton() {
     <Button
       size="sm"
       variant="secondary"
-      loading={isPending}
-      disabled={!injected}
-      onClick={() => injected && connect({ connector: injected })}
+      loading={pending}
+      disabled={!hasConnector}
+      onClick={() => void run(connectWallet)}
       title={
-        injected
+        error ??
+        (hasConnector
           ? undefined
-          : 'No injected wallet detected — install MetaMask, Rabby or a Coinbase Wallet extension'
+          : 'No injected wallet detected — install MetaMask, Rabby or a Coinbase Wallet extension')
       }
     >
-      {injected ? (isPending ? 'Connecting' : 'Connect wallet') : 'No wallet detected'}
-      {error ? <span className="sr-only">{error.message}</span> : null}
+      {hasConnector ? (pending ? 'Connecting' : 'Connect wallet') : 'No wallet detected'}
     </Button>
   )
 }

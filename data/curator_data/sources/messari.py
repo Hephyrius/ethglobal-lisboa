@@ -27,6 +27,7 @@ from curator_schema.models import Fact
 
 from ..config import Settings
 from ..facts import FactBuilder
+from ..graph.errors import GatewayQueryError
 from ..graph.factory import make_gateway
 from ..graph.gateway import GatewayClient
 from ..ports import BaseSource
@@ -72,6 +73,29 @@ query CuratorLiquidityPools($first: Int!) {
     id
     name
     inputTokens { id symbol decimals }
+    totalValueLockedUSD
+  }
+}
+"""
+
+# A DEX subgraph published by the protocol itself answers its own schema, not
+# Messari's: Uniswap V3's exposes `pools { token0 token1 }` rather than
+# `liquidityPools { inputTokens }`. We cannot tell which a given subgraph
+# implements without querying it, so the standardized shape is tried first and
+# this is the fallback on a GraphQL field error. One wasted round-trip in the
+# fallback case, against losing DEX liquidity entirely on the demo path.
+#
+# Lending needs no such fallback — those subgraphs are Messari's own.
+DEX_QUERY_NATIVE = """
+query CuratorPools($first: Int!) {
+  pools(
+    first: $first
+    orderBy: totalValueLockedUSD
+    orderDirection: desc
+  ) {
+    id
+    token0 { id symbol decimals }
+    token1 { id symbol decimals }
     totalValueLockedUSD
   }
 }
@@ -181,10 +205,37 @@ class MessariSource(BaseSource):
             )
             return self._lending_facts(protocol, data.get("markets") or [], wanted, builder)
 
-        data = await self._gateway.query(
-            protocol.subgraph_id, DEX_QUERY, {"first": MARKET_LIMIT}
-        )
-        return self._dex_facts(protocol, data.get("liquidityPools") or [], wanted, builder)
+        return await self._fetch_dex(protocol, wanted, builder)
+
+    async def _fetch_dex(
+        self, protocol: Protocol, wanted: set[str], builder: FactBuilder
+    ) -> list[Fact]:
+        """Standardized pool shape first, the protocol's own shape as fallback."""
+        try:
+            data = await self._gateway.query(
+                protocol.subgraph_id, DEX_QUERY, {"first": MARKET_LIMIT}
+            )
+            pools = [
+                (p.get("inputTokens") or [], p.get("totalValueLockedUSD"))
+                for p in data.get("liquidityPools") or []
+            ]
+        except GatewayQueryError:
+            # The subgraph rejected the standardized shape, so it is almost
+            # certainly publishing its own. Retrying costs one request and is
+            # the difference between DEX liquidity and no DEX liquidity.
+            data = await self._gateway.query(
+                protocol.subgraph_id, DEX_QUERY_NATIVE, {"first": MARKET_LIMIT}
+            )
+            pools = [
+                ([p.get("token0") or {}, p.get("token1") or {}], p.get("totalValueLockedUSD"))
+                for p in data.get("pools") or []
+            ]
+            self.note(
+                f"{protocol.key}: uses its own pool schema, not the Messari standardized "
+                f"one - fell back (harmless; pin the family in protocols.py to skip the retry)"
+            )
+
+        return self._dex_facts(protocol, pools, wanted, builder)
 
     # ── lending ───────────────────────────────────────────────────────────
 
@@ -243,21 +294,20 @@ class MessariSource(BaseSource):
     def _dex_facts(
         self,
         protocol: Protocol,
-        pools: list[dict],
+        pools: list[tuple[list[dict], Any]],
         wanted: set[str],
         builder: FactBuilder,
     ) -> list[Fact]:
+        """Both pool shapes normalise to (token list, TVL) before reaching here."""
         facts: list[Fact] = []
-        for pool in pools:
-            symbols = [
-                str((t or {}).get("symbol") or "").upper() for t in pool.get("inputTokens") or []
-            ]
+        for tokens, raw_tvl in pools:
+            symbols = [str((t or {}).get("symbol") or "").upper() for t in tokens]
             # Only pools the vault could actually make a market in: every leg
             # must be an asset the mandate permits.
             if wanted and not (len(symbols) >= 2 and all(s in wanted for s in symbols)):
                 continue
 
-            tvl = _to_float(pool.get("totalValueLockedUSD"))
+            tvl = _to_float(raw_tvl)
             if tvl is None:
                 continue
             subject = builder.subject(protocol=protocol.key, pair=symbols[:2])

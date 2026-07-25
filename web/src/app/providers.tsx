@@ -1,10 +1,9 @@
 'use client'
 
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { WagmiProvider } from 'wagmi'
-import { wagmiConfig } from '@/lib/chain/wagmi'
 import { DataModeProvider } from '@/lib/api/mode-context'
+import { reconnectWallet } from '@/lib/chain/account'
 
 export function Providers({ children }: { children: ReactNode }) {
   // Created in state, not at module scope: a module-level client would be
@@ -24,11 +23,16 @@ export function Providers({ children }: { children: ReactNode }) {
       }),
   )
 
+  // `wagmi`'s WagmiProvider did this for us; using @wagmi/core directly means
+  // restoring a previously-authorised wallet is our job. Without it the user
+  // has to reconnect on every page load.
+  useEffect(() => {
+    reconnectWallet()
+  }, [])
+
   return (
-    <WagmiProvider config={wagmiConfig}>
-      <QueryClientProvider client={queryClient}>
-        <DataModeProvider>{children}</DataModeProvider>
-      </QueryClientProvider>
-    </WagmiProvider>
+    <QueryClientProvider client={queryClient}>
+      <DataModeProvider>{children}</DataModeProvider>
+    </QueryClientProvider>
   )
 }

@@ -8,6 +8,70 @@ the hackathon window.
 
 ---
 
+## 2026-07-25 — Lane E: supply-chain policy for the JavaScript tree (all deps ≥180 days old)
+
+**What changed.** Every JavaScript dependency is now pinned to an exact version at least 180 days
+old, install scripts are disabled, and the policy is machine-checkable:
+`pnpm --filter @curator/web audit:deps` walks the whole resolved lockfile against the npm registry
+and exits non-zero if anything is too new. Result: **138 resolved packages, all ≥180 days old**, and
+`pnpm build` green. Root `package.json` (new, pnpm settings only) and root `.npmrc` (new) carry the
+workspace-wide half; `web/package.json` carries the direct pins.
+
+**Why.** npm is the repo's largest untrusted-input surface and compromised releases are typically
+caught and yanked within days-to-weeks, so declining to install anything from the recent window
+removes most of the exposure at almost no cost. Concretely, the first install pulled packages
+published *that same day*.
+
+**Why exact pins rather than carets.** A caret is a standing instruction to fetch whatever was
+published last night — precisely the window an attacker occupies. Exact pins plus a committed
+lockfile also make the 10:00 macOS handoff byte-identical.
+
+**Why `ignore-scripts=true`.** The large majority of npm compromises execute in a `postinstall`
+hook, so refusing to run dependency lifecycle scripts removes the delivery mechanism rather than
+the payload. Nothing here needs one — the only packages that wanted to build natively
+(`bufferutil`, `utf-8-validate`) are optional accelerators for `ws` with pure-JS fallbacks.
+
+**What did *not* work, recorded so nobody retries it.** `resolution-mode=time-based` is set and
+pnpm reports it as active, but it did **not** hold transitive dependencies back: a package published
+the same day still resolved into the tree. It is left in place as a mild bias but it is not the
+mechanism — `pnpm.overrides` is. Do not rely on `time-based` for this.
+
+**The change that did most of the work: dropping `wagmi` for `@wagmi/core` + `viem`.** The `wagmi`
+React package depends on `@wagmi/connectors`, which drags in ~347 packages we never import — the
+entire `@solana/*` kit, Coinbase's CDP SDK, MetaMask SDK, WalletConnect, socket.io, lit, preact,
+axios. They accounted for 77 of the 92 initial policy violations. They had also already broken the
+build once: webpack eagerly resolves the connectors barrel and fails on `@x402/evm` / `@x402/svm`,
+optional peers of the Coinbase SDK. `@wagmi/core` declares three dependencies, each pinned exactly
+by its own author.
+
+- *Alternative rejected — keep `wagmi`, alias the missing modules to `false` in webpack.* Silences
+  the build error but leaves 347 unused packages in the lockfile. It treats the symptom.
+- *Alternative rejected — keep `wagmi`, pin the ~60 offending transitives.* Enormous override block
+  to protect code we never call.
+- *Cost accepted:* we write the React bindings ourselves. That is ~40 lines in
+  `web/src/lib/chain/account.ts` — a `useSyncExternalStore` over `watchAccount` — because
+  `@wagmi/core`'s actions are plain async functions and React Query is already in the stack to drive
+  them. The one subtlety is documented there: `getAccount()` returns a fresh object per call, so the
+  snapshot is cached in module scope or `useSyncExternalStore` re-renders forever.
+
+**Two peer-dependency pins worth knowing about.** `autoInstallPeers` resolved `@tanstack/query-core`
+and `abitype` to *latest* to satisfy loose peer ranges (`>=5.0.0`, `1.x`), even though their parents
+depend on exact versions. Both are pinned to what the parent actually asks for — query-core to
+5.90.5 (`@tanstack/react-query@5.90.5`'s exact dep) and abitype to 1.1.0 (`viem@2.38.5`'s exact
+dep) — so these overrides *reduce* drift rather than force anything.
+
+**Framework versions.** Next 14.2.33 / React 18.3.1 rather than Next 15 / React 19: the wallet stack
+has been stable against React 18 for over a year, React 19's peer changes are a known source of pnpm
+strict-peer failures, and a wallet that will not connect at 03:00 costs more than the modernity is
+worth. No `next/font/google` either — it fetches at build time, which would make a fresh clone on
+the macOS handoff depend on network access.
+
+**Residual risk, stated honestly.** 180 days is a heuristic, not a guarantee: a long-dormant
+compromise or a package that was malicious from publication would pass. The lockfile is committed,
+so what is installed is what was audited here.
+
+---
+
 ## 2026-07-25 — Lane C: three live findings that contradict the documented values
 
 Probed the real endpoints rather than waiting for `GRAPH_API_KEY`. Two of the three would have

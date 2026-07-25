@@ -37,12 +37,11 @@ export function vaultFactoryAddress(): `0x${string}` | null {
 /** Vaults Lane A has deployed, if any. Normalised — the file allows two shapes. */
 export function deployedVaults(): Array<{ address: `0x${string}`; name?: string }> {
   const raw = deployments.vaults ?? []
-  return raw
-    .map((entry) => {
-      if (typeof entry === 'string') return { address: asAddress(entry), name: undefined }
-      return { address: asAddress(entry.address), name: entry.name }
-    })
-    .filter((entry): entry is { address: `0x${string}`; name?: string } => entry.address !== null)
+  return raw.flatMap((entry) => {
+    const address = asAddress(typeof entry === 'string' ? entry : entry.address)
+    if (!address) return []
+    return [{ address, name: typeof entry === 'string' ? undefined : entry.name }]
+  })
 }
 
 export function asAddress(value: string | null | undefined): `0x${string}` | null {

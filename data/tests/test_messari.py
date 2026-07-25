@@ -266,6 +266,89 @@ async def test_dex_pools_produce_liquidity_facts_with_a_pair_subject():
     assert facts[0].subject.pair == ["USDC", "WETH"]
 
 
+async def test_a_dex_subgraph_with_its_own_schema_falls_back_to_the_native_shape():
+    """Uniswap's own subgraph exposes `pools { token0 token1 }`, not Messari's
+    `liquidityPools { inputTokens }`. Losing DEX liquidity entirely because a
+    subgraph is published by its protocol rather than by Messari is avoidable."""
+    documents: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        document = json.loads(request.content)["query"]
+        documents.append(document)
+        if "liquidityPools" in document:
+            return httpx.Response(
+                200,
+                json={"errors": [{"message": "Type `Query` has no field `liquidityPools`"}]},
+            )
+        return httpx.Response(
+            200,
+            json={
+                "data": {
+                    "pools": [
+                        {
+                            "id": "0xpool",
+                            "token0": {"id": "0x1", "symbol": "USDC", "decimals": 6},
+                            "token1": {"id": "0x2", "symbol": "WETH", "decimals": 18},
+                            "totalValueLockedUSD": "9100000",
+                        }
+                    ]
+                }
+            },
+        )
+
+    source = _source(handler, [UNI])
+    facts = await source.fetch(["USDC", "WETH"])
+
+    assert len(documents) == 2, "expected the standardized shape then the native one"
+    assert len(facts) == 1
+    assert facts[0].kind == "liquidity"
+    assert facts[0].value == 9_100_000.0
+    assert facts[0].subject.pair == ["USDC", "WETH"]
+    # The fallback is reported, not silent — it is a config fix worth making.
+    assert "own pool schema" in source.drain_notes()[0]
+
+
+async def test_the_standardized_shape_is_preferred_and_costs_no_extra_request():
+    documents: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        documents.append(json.loads(request.content)["query"])
+        return httpx.Response(
+            200,
+            json={
+                "data": {
+                    "liquidityPools": [
+                        {
+                            "id": "0xpool",
+                            "name": "USDC/WETH",
+                            "inputTokens": [
+                                {"symbol": "USDC"},
+                                {"symbol": "WETH"},
+                            ],
+                            "totalValueLockedUSD": "12400000",
+                        }
+                    ]
+                }
+            },
+        )
+
+    source = _source(handler, [UNI])
+    facts = await source.fetch(["USDC", "WETH"])
+
+    assert len(documents) == 1, "no fallback request when the first shape works"
+    assert facts[0].value == 12_400_000.0
+    assert source.drain_notes() == []
+
+
+async def test_a_dex_subgraph_that_answers_neither_shape_degrades_to_a_note():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"errors": [{"message": "no such field"}]})
+
+    source = _source(handler, [UNI])
+    assert await source.fetch(["USDC", "WETH"]) == []
+    assert "uniswap-v3" in source.drain_notes()[0]
+
+
 async def test_pools_with_a_leg_outside_the_mandate_are_skipped():
     """The vault can only hold permitted assets, so an ineligible pool is noise."""
 

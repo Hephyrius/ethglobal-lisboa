@@ -1,5 +1,17 @@
-import type { ZodType } from 'zod'
+import type { ZodType, ZodTypeDef } from 'zod'
 import { API_BASE } from './routes'
+
+/**
+ * A zod schema constrained on its *output* type only.
+ *
+ * `ZodType<T>` defaults to `ZodType<T, ZodTypeDef, T>` — input and output both
+ * pinned to T. Our schemas use `.default()`, so their input and output types
+ * genuinely differ (`max_position_pct?: number` in, `number` out) and TS
+ * resolves the ambiguity by inferring the *input* side. Every parsed value then
+ * gets typed with optional fields that zod has in fact already filled in.
+ * Leaving the input parameter as `unknown` makes T unambiguously the output.
+ */
+type SchemaOf<T> = ZodType<T, ZodTypeDef, unknown>
 
 /**
  * The fetch layer, and the single most important design decision in this lane.
@@ -39,7 +51,7 @@ export class ApiUnavailable extends Error {}
 
 type FetchOptions<T> = {
   path: string
-  schema: ZodType<T>
+  schema: SchemaOf<T>
   /** Fixture used when the live call cannot be trusted. Lazy — never built unless needed. */
   fallback: () => T
   init?: RequestInit

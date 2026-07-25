@@ -3,29 +3,31 @@
   "version": "0.1.0",
   "private": true,
   "description": "Lane E — judge-facing dApp: genesis chat, vault dashboard, agent decision feed",
+  "comment_versions": "Every version is pinned EXACTLY and drawn from a >=6-month-old release window (see docs/build-log.md). No carets: a caret is a standing instruction to pull whatever was published last night, which is exactly the exposure npm supply-chain attacks rely on.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "audit:deps": "node scripts/audit-dependency-age.mjs"
   },
   "dependencies": {
     "@curator/schema": "workspace:*",
-    "@tanstack/react-query": "^5.51.1",
-    "next": "14.2.5",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "viem": "^2.17.4",
-    "wagmi": "^2.12.2",
-    "zod": "^3.23.8"
+    "@tanstack/react-query": "5.90.5",
+    "@wagmi/core": "2.22.1",
+    "next": "14.2.33",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "viem": "2.38.5",
+    "zod": "3.25.76"
   },
   "devDependencies": {
-    "@types/node": "^20.14.10",
-    "@types/react": "^18.3.3",
-    "@types/react-dom": "^18.3.0",
-    "autoprefixer": "^10.4.19",
-    "postcss": "^8.4.39",
-    "tailwindcss": "^3.4.6",
-    "typescript": "^5.5.4"
+    "@types/node": "20.19.24",
+    "@types/react": "18.3.26",
+    "@types/react-dom": "18.3.7",
+    "autoprefixer": "10.4.21",
+    "postcss": "8.5.6",
+    "tailwindcss": "3.4.18",
+    "typescript": "5.9.3"
   }
 }

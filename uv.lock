@@ -35,8 +35,8 @@ agent = [
     { name = "web3" },
 ]
 data = [
+    { name = "curator-mcp" },
     { name = "eth-account" },
-    { name = "mcp" },
 ]
 dev = [
     { name = "jsonschema" },
@@ -52,6 +52,7 @@ venues = [
 [package.metadata]
 requires-dist = [
     { name = "curator-data", editable = "data" },
+    { name = "curator-mcp", marker = "extra == 'data'", editable = "data/curator_mcp" },
     { name = "curator-schema", editable = "packages/schema/python" },
     { name = "eth-abi", marker = "extra == 'venues'", specifier = ">=5.1" },
     { name = "eth-account", marker = "extra == 'data'", specifier = ">=0.11" },
@@ -59,7 +60,6 @@ requires-dist = [
     { name = "fastapi", marker = "extra == 'agent'", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "jsonschema", marker = "extra == 'dev'", specifier = ">=4.21" },
-    { name = "mcp", marker = "extra == 'data'", specifier = ">=1.2" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },

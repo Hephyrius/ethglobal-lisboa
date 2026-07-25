@@ -1,0 +1,30 @@
+{
+  "name": "curator-workspace",
+  "private": true,
+  "packageManager": "pnpm@9.5.0",
+  "comment": "Workspace root for the JavaScript side (web/ and packages/schema/ts). There is no root application — this file exists to carry the pnpm settings below. Rationale in docs/build-log.md; verify with `pnpm --filter @curator/web audit:deps`.",
+  "comment_overrides": "Every entry is a transitive dependency that resolved to a release newer than the 180-day supply-chain policy. Each pinned version still satisfies its parent's declared range (checked against the registry), so nothing is being forced past a real constraint. @tanstack/query-core and abitype are peer dependencies that autoInstallPeers resolved to latest; they are pinned to the exact versions their parents (@tanstack/react-query, viem) already depend on.",
+  "pnpm": {
+    "overrides": {
+      "zod": "3.25.76",
+      "viem": "2.38.5",
+      "react": "18.3.1",
+      "react-dom": "18.3.1",
+      "@tanstack/query-core": "5.90.5",
+      "abitype": "1.1.0",
+      "baseline-browser-mapping": "2.9.11",
+      "browserslist": "4.28.1",
+      "caniuse-lite": "1.0.30001762",
+      "electron-to-chromium": "1.5.267",
+      "hasown": "2.0.2",
+      "is-core-module": "2.16.1",
+      "nanoid": "3.3.11",
+      "node-releases": "2.0.27",
+      "picomatch@2": "2.3.1",
+      "picomatch@4": "4.0.3",
+      "postcss-selector-parser": "6.1.2",
+      "resolve": "1.22.11",
+      "tinyglobby": "0.2.15"
+    }
+  }
+}
