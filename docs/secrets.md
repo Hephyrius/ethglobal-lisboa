@@ -50,6 +50,42 @@ before the repository goes public.
 | `ETHERSCAN_API_KEY` / `BASESCAN_API_KEY` | Rate limit only; free tier. Rotate for tidiness. |
 | `uniswap_key` | Was only ever in `env.txt` (lowercased), which is why the live Uniswap path was unconfigured for a while. Rotate it and put it in `.env` as `UNISWAP_API_KEY`. |
 
+### 2.2b A different kind of exposure — `XAI_API_KEY`
+
+**This one is not in the repository, and filing it beside the others would misrepresent both.**
+Verified rather than assumed, on 2026-07-26:
+
+| Check | Result |
+|---|---|
+| In any commit, any branch (searched by **value**) | **0 commits** |
+| In any tracked file | **none** |
+| `.env` ignored | yes — `.gitignore:2` |
+| In a local Claude Code transcript | **1 file** — `~/.claude/projects/…/6deb5778-….jsonl` (15.6 MB) |
+
+So the Wave 3 plan's note that it *"was pasted into a chat transcript"* is correct, and that is the
+whole of the exposure. What it means concretely:
+
+- it sits in **plaintext in a user profile**, so anything that reads or syncs that directory — a
+  backup, OneDrive, a shared machine — carries it;
+- transcript content is **sent to Anthropic as conversation context**, so it has been transmitted to
+  a third party;
+- anything that ever attaches a transcript — a bug report, a support upload — would carry it further.
+
+**Why it ranks below §2.1 rather than in it.** Everything in §2.1 is in **pushed git history**, so
+flipping the repository public *publishes* it, and a pushed blob stays fetchable by its SHA
+afterwards. That is why §2.1 gates the repo going public. This one does not: it is not in the
+history, so going public discloses nothing new, and there is no history-rewrite question to weigh.
+
+**Rotate it anyway** — it is live and billable, and rotation is one click in the xAI console followed
+by editing `.env`. It simply does not need to block anything. Ordering it as though it did would push
+the PyPI token down a list, and that is the one credential here that lets someone attack *other
+people*.
+
+> **The general lesson, which outlives this key:** a credential can leak without ever touching git.
+> `scripts/check-secrets.sh` scans the repository and would never have seen this, and it is not a
+> gap in the checker — it is the boundary of what a repository checker can be. Paste a key into a
+> chat, a terminal that logs, or an issue tracker, and the only control left is rotation.
+
 ### 2.3 Not a secret, deliberately
 
 **`AGENT_PRIVATE_KEY` is anvil account #1 and its key is printed in Foundry's own documentation.**
