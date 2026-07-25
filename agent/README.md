@@ -364,16 +364,37 @@ prefix bug — `to_hex_string` now normalizes it, with tests.
 > `GET /vault/{addr}/state` reports the vault's expected `agent`; compare it against the address the
 > harness logs at startup.
 
-**Still not verified — read before the demo:**
+**The model is real and measured.** `qwen2.5:3b-instruct-q4_K_M` on this machine (i5-8265U, no GPU,
+DDR4-2400):
 
-- **The live model path has not run against a real model yet.** Ollama is now installed, but the
-  machine has no GPU (i5-8265U, DDR4-2400), so model choice is bandwidth-bound — see the build log
-  for the sizing. Every layer around the model is tested via the scripted backend and
-  `ModelUnavailable` is handled correctly, but the retry rate of a real small model is unmeasured.
-  Measure it rather than guessing: `uv run python -m agent.bench --model <tag> --runs 3`.
-- **No write path has been executed on-chain.** `state()` is verified; `executeBatch` and
-  `createVault` are not. They are written against Lane A's published ABI and go out as one atomic
-  batch, but the first real submission will be the first real submission.
+| | |
+|---|---|
+| median validated decision | **32.7s** (32.1–33.1s) |
+| validation retries | **0 across every run** |
+| tokens | 983 in / 270 out |
+
+Zero retries is why this model was chosen. Token generation is memory-bandwidth-bound, so a 14B at Q4
+streams ~9 GB per token and costs minutes per tick regardless of how well it reasons — at this scale
+**reliability at structured output beats capability.** Re-measure on any other machine before
+trusting a different tag:
+
+```bash
+uv run python -m agent.bench --model <tag> --runs 3
+```
+
+> **The model's prose is not as trustworthy as its decisions.** On the first live run it cited fact
+> `f6` — a $12.4M *liquidity* figure — as "the highest headline APY of 10.43%". A real id, an
+> invented value. It passed all four validation layers, because grounding catches fabricated **ids**,
+> not fabricated **numbers**. The fact table was rewritten to make units unmisreadable and the
+> misread stopped, but a 3B still makes qualitative errors (it called 91% utilization "low"). The
+> *decision* was safe and mandate-legal throughout — which is exactly why constraints are enforced in
+> code rather than trusted to the reasoning. Read the feed with that in mind.
+
+**Still not verified:**
+
+- **No write has been submitted on-chain.** `state()` is verified against Lane A's deployed vault and
+  the `executeBatch` encoding round-trips byte-identically, but the first real submission will be the
+  first real submission.
 - **`VAULT_FACTORY_ADDRESS` must be set** for live genesis to deploy. Lane A's deploy script writes
   it to `deployments/base-fork.json` — currently `0x0282…F302D`.
 

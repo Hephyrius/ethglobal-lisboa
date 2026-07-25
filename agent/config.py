@@ -68,7 +68,12 @@ class Settings:
 
     # ── model layer ───────────────────────────────────────────────────────
     model_backend: str = "ollama"
-    model_name: str = "qwen2.5:14b-instruct"
+    #: Measured on the build machine (i5-8265U, no GPU, DDR4-2400): this model
+    #: produces a validated decision in ~40s with zero retries across repeated
+    #: runs. Token generation is memory-bandwidth-bound, so a 14B would be ~9 GB
+    #: of weights streamed per token and roughly ten minutes a tick — unusable
+    #: for a live demo. Override on better hardware; `agent.bench` measures it.
+    model_name: str = "qwen2.5:3b-instruct-q4_K_M"
     ollama_base_url: str = "http://localhost:11434/v1"
     vllm_base_url: str = "http://localhost:8000/v1"
     model_timeout_s: float = 120.0
@@ -110,29 +115,34 @@ class Settings:
 
 
 def _build() -> Settings:
-    mode = _env("AGENT_MODE", "fixture").lower()
+    # Defaults are read off the dataclass rather than repeated as literals here.
+    # Declaring them twice is how they drift: tests construct `Settings(...)`
+    # directly and would get the field defaults, while the running process goes
+    # through this function and would get these — so a stale literal produces a
+    # green suite and a differently-configured server. That is exactly what
+    # happened with MODEL_NAME, which stayed on a 14B here after the field
+    # default moved to the 3B.
+    d = Settings()
+
+    mode = _env("AGENT_MODE", d.mode).lower()
     if mode not in {"fixture", "live"}:
         mode = "fixture"
     return Settings(
         mode=mode,
-        model_backend=_env("AGENT_MODEL_BACKEND", "ollama").lower(),
-        model_name=_env("MODEL_NAME", "qwen2.5:14b-instruct"),
-        ollama_base_url=_env("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
-        vllm_base_url=_env("VLLM_BASE_URL", "http://localhost:8000/v1"),
-        model_timeout_s=_env_float("AGENT_MODEL_TIMEOUT_S", 120.0),
-        max_validation_retries=_env_int("AGENT_MAX_VALIDATION_RETRIES", 3),
+        model_backend=_env("AGENT_MODEL_BACKEND", d.model_backend).lower(),
+        model_name=_env("MODEL_NAME", d.model_name),
+        ollama_base_url=_env("OLLAMA_BASE_URL", d.ollama_base_url),
+        vllm_base_url=_env("VLLM_BASE_URL", d.vllm_base_url),
+        model_timeout_s=_env_float("AGENT_MODEL_TIMEOUT_S", d.model_timeout_s),
+        max_validation_retries=_env_int("AGENT_MAX_VALIDATION_RETRIES", d.max_validation_retries),
         data_registry_ref=_env_or_none("AGENT_DATA_REGISTRY"),
         venue_registry_ref=_env_or_none("AGENT_VENUE_REGISTRY"),
-        rpc_url=_env("ANVIL_RPC_URL", "http://localhost:8540"),
+        rpc_url=_env("ANVIL_RPC_URL", d.rpc_url),
         agent_private_key=_env_or_none("AGENT_PRIVATE_KEY"),
         factory_address=_env_or_none("VAULT_FACTORY_ADDRESS"),
-        chain_id=_env_int("CHAIN_ID", 8453),
-        state_dir=(
-            Path(_env("AGENT_STATE_DIR")) if _env("AGENT_STATE_DIR") else REPO_ROOT / ".agent-state"
-        ),
-        cors_origins=_env_list(
-            "AGENT_CORS_ORIGINS", ["http://localhost:3000", "http://127.0.0.1:3000"]
-        ),
+        chain_id=_env_int("CHAIN_ID", d.chain_id),
+        state_dir=Path(_env("AGENT_STATE_DIR")) if _env("AGENT_STATE_DIR") else d.state_dir,
+        cors_origins=_env_list("AGENT_CORS_ORIGINS", d.cors_origins),
     )
 
 

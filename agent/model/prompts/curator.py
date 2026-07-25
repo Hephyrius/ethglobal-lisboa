@@ -73,29 +73,70 @@ def _render_mandate(mandate: Mandate) -> str:
     )
 
 
+#: What each fact kind actually measures, in words the model cannot mistake for
+#: something else. Observed failure: a 3B model read `f6 | liquidity | uniswap-v3
+#: USDC/WETH | $12,400,000` and reported it as "the highest headline APY of
+#: 10.43%" — citing a real fact id while inventing its value and its meaning.
+#: Grounding validation catches invented *ids*, not invented *numbers*, so the
+#: defence has to be that the row cannot be misread in the first place.
+_KIND_LABELS = {
+    "yield": "lending yield",
+    "price": "spot price",
+    "tvl": "total value locked",
+    "liquidity": "pool depth",
+    "volatility": "realized volatility",
+    "utilization": "utilization",
+    "volume": "traded volume",
+}
+
+#: Only these kinds are percentage rates. Spelled out so "12.4M of liquidity"
+#: cannot become "12.4% APY".
+_RATE_KINDS = {"yield"}
+
+
+def _format_value(fact) -> str:
+    if fact.unit == "apy_fraction":
+        return f"{fact.value:.2%} per year"
+    if fact.unit == "usd":
+        if abs(fact.value) >= 1_000_000:
+            return f"${fact.value / 1_000_000:,.1f}M (dollars, not a rate)"
+        return f"${fact.value:,.0f} (dollars, not a rate)"
+    if fact.unit == "ratio":
+        return f"{fact.value:.1%} of capacity"
+    if fact.unit == "bps":
+        return f"{fact.value:g} bps"
+    return f"{fact.value:g} {fact.unit}"
+
+
 def _render_facts(snapshot: MarketSnapshot) -> str:
     if not snapshot.facts:
         return "No market data could be read this tick."
 
-    rows = ["id    | kind        | subject                        | value        | source"]
-    rows.append("-" * 92)
+    rows = [
+        "Each row states what it measures. Only rows saying 'per year' are yields.",
+        "",
+        f"{'id':<5} | {'measures':<20} | {'about':<28} | {'value':<28} | source",
+        "-" * 100,
+    ]
     for fact in snapshot.facts:
         subject = fact.subject
         parts = [p for p in (subject.protocol, subject.market, subject.token) if p]
         if subject.pair:
             parts.append("/".join(subject.pair))
-        label = " ".join(parts) or subject.chain
+        about = " ".join(parts) or subject.chain
+        measures = _KIND_LABELS.get(fact.kind, fact.kind)
 
-        if fact.unit == "apy_fraction":
-            value = f"{fact.value:.2%} APY"
-        elif fact.unit == "usd":
-            value = f"${fact.value:,.0f}"
-        elif fact.unit == "ratio":
-            value = f"{fact.value:.2%}"
-        else:
-            value = f"{fact.value:g} {fact.unit}"
+        rows.append(
+            f"{fact.id:<5} | {measures:<20} | {about:<28} | "
+            f"{_format_value(fact):<28} | {fact.source}"
+        )
 
-        rows.append(f"{fact.id:<5} | {fact.kind:<11} | {label:<30} | {value:<12} | {fact.source}")
+    yields = [f.id for f in snapshot.facts if f.kind in _RATE_KINDS]
+    rows.append("")
+    rows.append(
+        f"Yields available this tick: {', '.join(yields) if yields else 'none'}. "
+        "No other row is a yield. Do not describe one as an APY."
+    )
     return "\n".join(rows)
 
 

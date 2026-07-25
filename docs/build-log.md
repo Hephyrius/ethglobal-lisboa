@@ -789,6 +789,94 @@ one file.
 
 ---
 
+## 2026-07-25 — Lane B: the model is real now — measured, and it confabulated on the first run
+
+**What changed.** Ollama landed, `qwen2.5:3b-instruct-q4_K_M` pulled, and the loop ran end to end
+against an actual model for the first time. Measured rather than estimated, one prompt bug found and
+fixed, defaults retuned. 192 tests green.
+
+### Measured on this machine (i5-8265U, no GPU, 16GB DDR4-2400)
+
+| | before prompt fix | after |
+|---|---|---|
+| median validated decision | 40.6s | **32.7s** |
+| spread | 39.6–47.6s | **32.1–33.1s** |
+| validation retries | 0 of 3 runs | **0 of 3 runs** |
+| tokens | 921 in / 277 out | 983 in / 270 out |
+
+**Zero retries across every run.** That is the finding that decides the model choice. The worry
+going in was the retry multiplier — a model that fumbles JSON twice turns a 40s tick into two
+minutes — and it simply does not materialize with this model on this prompt. Reliability at
+structured output matters more than raw capability at this scale, and a 3B that gets the schema right
+first time beats a 14B that would take ten minutes a token-bound tick regardless of how well it
+reasons. Reproduce with `uv run python -m agent.bench --model <tag> --runs 3`.
+
+### The important finding: it cited a real fact and invented its value
+
+First live run on an all-USDC vault produced this reasoning:
+
+> *"…significantly lower than the highest headline APY of **10.43%** for uniswap-v3 USDC/WETH (f6)"*
+
+**`f6` is `liquidity` — $12.4M of pool depth, not a yield, and 10.43% appears nowhere in the
+snapshot.** The decision passed all four validation layers: the JSON was well-formed, the schema
+matched, no mandate limit was breached, and `f6` is a genuine fact id from the snapshot it was given.
+
+That is the sharpest possible illustration of what this layer can and cannot do. **Grounding
+validation catches invented *ids*; it does not catch invented *numbers*.** Checking quoted values
+against cited facts in free-form prose is a fuzzy problem and not something to hand-roll under time
+pressure with a key on the line, so the defence had to be to make the row unmisreadable instead:
+
+- Each fact now names **what it measures** in words (`pool depth`, `lending yield`) rather than a
+  bare enum.
+- Dollar values are suffixed `(dollars, not a rate)`; only yields render as `% per year`.
+- The table is followed by an explicit line: *"Yields available this tick: f1, f2. No other row is a
+  yield."*
+
+Re-run after the change: the model read f1 and f2 correctly as the only yields and stopped inventing
+an APY for f6. It costs 84 tokens of prefill (+10%) and, unexpectedly, made the whole thing **20%
+faster with a third of the variance** — a clearer table appears to produce a more decisive answer
+rather than a hedging one. Still 3/3 valid.
+
+**Left honest in the README:** the reasoning is better but not right. The same run described 91%
+utilization as "low", which is a qualitative judgement error rather than a fabricated figure. A 3B
+model is a 3B model. The decision it produced was *safe* — legal under the mandate, correctly
+holding — while the prose justifying it was partly wrong, and that gap is precisely why the mandate
+constraints are enforced in code rather than trusted to the model's reasoning.
+
+### The reject-and-retry loop, working against a real model
+
+Same run also produced `action: "hold"` carrying a venue intent. The coherence check caught it, fed
+back *"action is 'hold' but 1 venue intent(s) were supplied"*, and the retry returned a valid
+decision. Cost: 103.9s instead of ~40s. So the retry multiplier is real (≈2.5×) — it just is not
+being paid on the normal path.
+
+### A configuration bug the measurement exposed
+
+`GET /health` reported the configured model as `qwen2.5:14b-instruct` when `.env` contained **no**
+`MODEL_NAME` at all. Cause: defaults were declared **twice** — once as `Settings` dataclass fields,
+once as literals inside `_build()` — and only the field had been updated. Tests construct
+`Settings(...)` directly and would read the field; the running server goes through `settings()` and
+would read the literal. A stale literal therefore yields a green suite and a differently-configured
+process, which is close to the worst shape a config bug can take. `_build()` now reads its fallbacks
+off `Settings()`, and `test_config.py` asserts every defaulted field agrees between the two.
+
+**Defaults retuned:** `MODEL_NAME` → `qwen2.5:3b-instruct-q4_K_M` in `agent/config.py` and
+`.env.example`, with the measurement and the reasoning recorded next to it so the macOS teammate can
+raise it on better hardware and re-measure rather than guess.
+
+**Also corrected: Ollama tags are exact.** The health probe had matched on the base name before the
+colon, so a server holding only the 3B reported ready to serve `qwen2.5:14b-instruct`. Settled
+against the live server — `/api/show` answers 200 for the exact tag and 404 for `qwen2.5:3b`,
+`qwen2.5` and `qwen2.5:14b-instruct` — and matching is now exact, with the single allowance that a
+bare name means `:latest`. I had encoded the wrong assumption into a test, which is why it passed;
+the fix was to go and ask the server instead of reasoning about it.
+
+**Full live stack now green:** `GET /health` in live mode reports `status: ok` with
+`data_registry: curator_data:build_registry`, `venue_registry: venues:get_venue`,
+`model_reachable: true`. Every seam bound to the real thing.
+
+---
+
 ## 2026-07-25 — Lane B: verified against the real fork, and what a real chain caught
 
 **What changed.** `Web3VaultClient` read Lane A's deployed vault on the anvil fork for the first
