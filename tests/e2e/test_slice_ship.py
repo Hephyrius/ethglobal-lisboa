@@ -32,7 +32,13 @@ import json
 import pytest
 from web3.logs import DISCARD
 
-from .conftest import AGENT, DEPOSITOR_KEY
+from .conftest import (
+    AGENT,
+    DEPOSITOR_KEY,
+    create_vault_calldata,
+    send_calldata,
+    vault_created_by,
+)
 from .test_slice_read import ERC20_ABI, _abi, _send
 
 #: anvil account #1 — holds AGENT_ROLE. Reads work with any key; writes do not.
@@ -95,25 +101,26 @@ def two_legged_vault(w3, deployments, usdc, funded_depositor):
         address=w3.to_checksum_address(deployments["contracts"]["VaultFactory"]),
         abi=_abi("VaultFactory"),
     )
-    receipt = _send(
+    # Encoded against the DEPLOYED createVault, and the vault found by diffing
+    # vaults(). Both changed shape in Wave 3; see conftest.
+    before = list(factory.functions.vaults().call())
+    send_calldata(
         w3,
-        factory.functions.createVault(
-            (
-                w3.to_checksum_address(usdc),
-                "E2E Aqua Ship Vault",
-                "e2eAQUA",
-                w3.to_checksum_address(AGENT),
-                w3.to_checksum_address(funded_depositor),
-                w3.keccak(text="e2e-slice-ship"),
-            )
+        to=deployments["contracts"]["VaultFactory"],
+        data=create_vault_calldata(
+            factory_address=deployments["contracts"]["VaultFactory"],
+            asset=w3.to_checksum_address(usdc),
+            name="E2E Aqua Ship Vault",
+            symbol="e2eAQUA",
+            agent=w3.to_checksum_address(AGENT),
+            guardian=w3.to_checksum_address(funded_depositor),
+            mandate_hash=w3.keccak(text="e2e-slice-ship"),
+            deployer=w3.to_checksum_address(funded_depositor),
         ),
-        funded_depositor,
-        DEPOSITOR_KEY,
+        sender=funded_depositor,
+        key=DEPOSITOR_KEY,
     )
-    # DISCARD: the clone emits its own init events, which cannot decode against
-    # the factory ABI and are not meant to.
-    created = factory.events.VaultCreated().process_receipt(receipt, errors=DISCARD)
-    vault = created[0]["args"]["vault"]
+    vault = vault_created_by(w3, factory, before)
 
     # Fund it.
     token = w3.eth.contract(address=w3.to_checksum_address(usdc), abi=ERC20_ABI)

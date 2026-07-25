@@ -18,7 +18,14 @@ import json
 import pytest
 from curator_schema import VaultState
 
-from .conftest import AGENT, DEPOSITOR_KEY, REPO_ROOT
+from .conftest import (
+    AGENT,
+    DEPOSITOR_KEY,
+    REPO_ROOT,
+    create_vault_calldata,
+    send_calldata,
+    vault_created_by,
+)
 
 ABIS = REPO_ROOT / "contracts" / "abis"
 DEPOSIT_USDC = 1_000_000_000  # 1,000 USDC, 6dp
@@ -61,28 +68,28 @@ def fresh_vault(w3, deployments, usdc, funded_depositor) -> str:
     )
     mandate_hash = w3.keccak(text="e2e-slice-read")
 
-    receipt = _send(
+    # Encoded against whichever createVault is actually DEPLOYED, and the new vault
+    # found by diffing vaults() rather than by decoding VaultCreated. Both changed
+    # shape in Wave 3, and neither change has anything to do with what this file
+    # asserts. See conftest for the reasoning.
+    before = list(factory.functions.vaults().call())
+    send_calldata(
         w3,
-        factory.functions.createVault(
-            (
-                w3.to_checksum_address(usdc),
-                "E2E Slice Vault",
-                "e2eUSDC",
-                w3.to_checksum_address(AGENT),
-                w3.to_checksum_address(funded_depositor),
-                mandate_hash,
-            )
+        to=deployments["contracts"]["VaultFactory"],
+        data=create_vault_calldata(
+            factory_address=deployments["contracts"]["VaultFactory"],
+            asset=w3.to_checksum_address(usdc),
+            name="E2E Slice Vault",
+            symbol="e2eUSDC",
+            agent=w3.to_checksum_address(AGENT),
+            guardian=w3.to_checksum_address(funded_depositor),
+            mandate_hash=mandate_hash,
+            deployer=w3.to_checksum_address(funded_depositor),
         ),
-        funded_depositor,
-        DEPOSITOR_KEY,
+        sender=funded_depositor,
+        key=DEPOSITOR_KEY,
     )
-
-    from web3.logs import DISCARD
-
-    # DISCARD: the receipt also carries the clone's own init logs, which this ABI cannot decode.
-    created = factory.events.VaultCreated().process_receipt(receipt, errors=DISCARD)
-    assert created, "factory emitted no VaultCreated event"
-    vault = created[0]["args"]["vault"]
+    vault = vault_created_by(w3, factory, before)
 
     token = w3.eth.contract(address=w3.to_checksum_address(usdc), abi=ERC20_ABI)
     _send(w3, token.functions.approve(vault, DEPOSIT_USDC), funded_depositor, DEPOSITOR_KEY)

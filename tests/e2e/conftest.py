@@ -126,3 +126,102 @@ def w3(fork: str):
 def rpc(method: str, params: list[Any]) -> Any:
     """Raw JSON-RPC, for tests that want it without a web3 dependency."""
     return _rpc(method, params)
+
+
+# ── createVault, across the version boundary Wave 3 opened ────────────────────
+#
+# `CreateParams` gained a 7th `deployer` field (Lane A's #94), so the published
+# ABI and a fork that has not been redeployed disagree — and they disagree in
+# both directions at once. Calling the 7-field selector against the old contract
+# reverts with no message; passing 6 fields to the new ABI raises MismatchedABI
+# before a transaction is ever built.
+#
+# Every e2e file that deploys a vault hit this simultaneously. Selecting on the
+# DEPLOYED BYTECODE is the only check that stays right through the redeploy, so
+# it lives here once rather than in each file: a redeploy mid-wave should not be
+# able to red the suite, and a suite that goes red for a reason unrelated to what
+# it tests teaches everyone to ignore it.
+
+_CREATE_OLD = "createVault((address,string,string,address,address,bytes32))"
+_CREATE_NEW = "createVault((address,string,string,address,address,bytes32,address))"
+
+#: Where a vault with no named deployer is attributed. Only used against the
+#: 7-field factory; the field does not exist on the old one.
+UNATTRIBUTED_DEPLOYER = "0x0000000000000000000000000000000000000000"
+
+
+def selector(signature: str) -> str:
+    from eth_utils import keccak
+
+    return keccak(text=signature)[:4].hex()
+
+
+def factory_takes_deployer(factory_address: str) -> bool:
+    """Whether the *deployed* factory is the 7-field version."""
+    code = _rpc("eth_getCode", [factory_address, "latest"])
+    if selector(_CREATE_NEW) in code:
+        return True
+    if selector(_CREATE_OLD) in code:
+        return False
+    pytest.skip("deployed factory exposes neither createVault signature — redeploy")
+
+
+def create_vault_calldata(
+    *,
+    factory_address: str,
+    asset: str,
+    name: str,
+    symbol: str,
+    agent: str,
+    guardian: str,
+    mandate_hash: bytes,
+    deployer: str = UNATTRIBUTED_DEPLOYER,
+) -> str:
+    """ABI-encoded `createVault` for whichever version is actually deployed.
+
+    Hand-encoded rather than routed through `w3.eth.contract`, because the whole
+    problem is that the contract object is built from an ABI file that may not
+    describe the deployment.
+    """
+    from eth_abi import encode
+
+    takes_deployer = factory_takes_deployer(factory_address)
+    core = (asset, name, symbol, agent, guardian, mandate_hash)
+    params = (*core, deployer) if takes_deployer else core
+    signature = _CREATE_NEW if takes_deployer else _CREATE_OLD
+    types = signature[signature.index("(") + 1 : signature.rindex(")")]
+    return "0x" + selector(signature) + encode([types], [params]).hex()
+
+
+def send_calldata(w3, *, to: str, data: str, sender: str, key: str):
+    """Send pre-encoded calldata. The companion to `create_vault_calldata`."""
+    tx = {
+        "from": sender,
+        "to": w3.to_checksum_address(to),
+        "data": data,
+        "gas": 3_000_000,
+        "nonce": w3.eth.get_transaction_count(sender),
+        "chainId": w3.eth.chain_id,
+        # Hand-built rather than via `build_transaction`, which is what fills this in
+        # normally — and omitting it does not produce a gas failure, it raises
+        # `TypeError: Transaction must include these fields: {'gasPrice'}` at signing.
+        "gasPrice": w3.eth.gas_price,
+    }
+    signed = w3.eth.account.sign_transaction(tx, key)
+    raw = getattr(signed, "raw_transaction", None) or signed.rawTransaction
+    receipt = w3.eth.wait_for_transaction_receipt(w3.eth.send_raw_transaction(raw), timeout=120)
+    assert receipt.status == 1, f"createVault reverted: {receipt.transactionHash.hex()}"
+    return receipt
+
+
+def vault_created_by(w3, factory, before: list[str]) -> str:
+    """The one vault `vaults()` gained, found by diff rather than by event decode.
+
+    `VaultCreated` changed shape in the same wave the function did (`deployer`
+    appended, `agent` demoted from topic to data), so decoding it with the
+    published ABI against an older deployment fails for reasons unrelated to
+    whatever the test is actually asserting.
+    """
+    planted = [v for v in factory.functions.vaults().call() if v not in before]
+    assert len(planted) == 1, f"expected exactly one new vault, saw {planted}"
+    return planted[0]
