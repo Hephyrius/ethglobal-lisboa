@@ -9,11 +9,21 @@ path that produces executable bytes.
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from curator_schema import ExecutionPlan, VaultState, VenueIntent
 
 from .. import fixtures
+from ..clock import utcnow
 
 __all__ = ["FixtureVenue", "FixtureVenueRegistry"]
+
+#: The golden plan carries a fixed `quote_expires_at` of 2026-07-25T14:06:30Z.
+#: Since the harness refuses to submit a stale quote, replaying that timestamp
+#: would make fixture mode work this morning and silently start rejecting every
+#: tick this afternoon. Quotes are re-stamped relative to now, for the same
+#: reason the fixture decision feed is.
+_QUOTE_TTL = timedelta(seconds=60)
 
 
 def _describe(intent: VenueIntent) -> str:
@@ -38,7 +48,11 @@ class FixtureVenue:
     async def plan(self, intent: VenueIntent, vault: VaultState) -> ExecutionPlan:
         golden = fixtures.execution_plan()
         return golden.model_copy(
-            update={"venue": self.key, "expected_effect": _describe(intent)}
+            update={
+                "venue": self.key,
+                "expected_effect": _describe(intent),
+                "quote_expires_at": utcnow() + _QUOTE_TTL,
+            }
         )
 
 

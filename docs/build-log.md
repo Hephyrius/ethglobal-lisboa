@@ -63,6 +63,92 @@ one file.
 
 ---
 
+## 2026-07-25 — Lane B phases 3–6: the decision cycle, the journal, and the signing chain client
+
+**What changed.** The loop is real. `agent/loop/` (engine, planning, cycle, journal), `agent/mandate/`
+(store, amendment), `agent/chain/` (ABI loading, web3 client, stub), `agent/service/live.py` wiring
+it behind the frozen routes, and the genesis prompt. 78 tests green.
+
+**Why every path through the cycle returns a journaled `AgentAction` instead of raising.** This is a
+deliberate contract with Lane E: `POST /tick` renders a feed entry no matter what happened, so the
+dApp never shows "something went wrong" — the feed says what went wrong and the record persists.
+Keeping the five statuses distinct is what makes that honest, and the split that matters most is
+`rejected` vs `failed`. A rejection means validation or a mandate limit stopped it and **nothing
+reached the chain**; a failure means the model, a data source or the chain broke. A dead Ollama is
+`failed`, never `rejected` — reporting an unreachable server as a validation failure would make the
+feed lie about the one thing this project is arguing for.
+
+**Why a whole plan is one `executeBatch` rather than N calls to `execute`.** Lane A published both.
+Submitting steps separately lets a plan land *half* applied — approval granted, swap reverted —
+leaving the vault in a state no decision authored and no depositor was shown. `executeBatch` makes
+the tick atomic and yields one transaction hash, which is also what the feed wants. The `VaultClient`
+port warns that a partially-applied plan is an outcome the caller must record; making it impossible
+is better than recording it accurately.
+
+**Why the rebalance cooldown is checked *before* the model is called.** The alternative is to ask for
+a decision and then refuse to act on it, which spends a model call to learn something already known
+and produces a feed entry where the agent's stated intent contradicts what happened. Only `executed`
+cycles start a cooldown — holding or being rejected did not move capital, so they must not block the
+next tick. The snapshot is still taken and shown, so a cooldown hold still displays what was observed.
+
+**Where each mandate limit is enforced, and why they are not all in one place.** Asset lists, weight
+sums, position caps, the cash floor and action counts are checkable from the decision alone, so they
+live in `mandate/constraints.py` and run inside validation. **Slippage cannot be** — the decision
+expresses intent and only the venue knows the price impact of filling it — so it is checked on the
+merged plan in `loop/planning.py`. Quote staleness likewise. Splitting them by *what information the
+check needs* keeps the constraint module testable with no venue, no model and no event loop.
+
+**Why plans are merged into one.** `AgentAction.plan` is a single `ExecutionPlan` but a mandate may
+allow several intents per tick. Merging is the honest reading rather than a workaround: the vault
+executes a flat ordered sequence of calls, so "the plan for this tick" genuinely is the concatenation.
+Step order is preserved because approvals must precede the calls that need them, and the merged plan
+reports the *worst* slippage and *earliest* expiry of its parts, since those are what actually bind.
+
+**Agent-side mandate amendment, and the invariants free text cannot enforce.** §2 locks the mandate
+as mutable *only by the agent*. An agent that can rewrite its constraints can rewrite them away, and
+`update_rules` is prose that no code can check. So four structural invariants are enforced regardless
+of what the model asks for: `base_asset` can never change (the ERC-4626 asset is fixed at deployment,
+and every share-price calculation would silently change meaning), the base asset must stay in
+`allowed_assets`, `version` is assigned by the harness and always increments, and the merged result
+must satisfy the full schema or it is rejected whole. A refused amendment does not fail the tick —
+the decision may still be sound under the existing mandate — but it is logged.
+
+**Reading `contracts/out/` is integration, not a boundary crossing.** `docs/active-work.md` states
+that directory is committed on purpose as Lane A's way of publishing ABIs. So the harness loads the
+compiled artifact and never opens `contracts/src/`: the ABI is the contract, the Solidity is Lane A's
+business. A minimal fallback ABI covers the case where the artifact is missing (fresh clone, mid
+`forge build`) so the tests still run. Similarly, the base-asset address is read from
+`deployments/base-fork.json` rather than hardcoded — a chain constant in the harness would drift.
+
+**A fixture bug worth recording because it would have surfaced only this afternoon.** The golden
+`execution-plan.json` carries `quote_expires_at: 2026-07-25T14:06:30Z`. The harness refuses to submit
+a stale quote, so replaying that timestamp verbatim made fixture mode work all morning and start
+rejecting *every* tick after 14:06 today — during the demo window. The fixture venue now re-stamps
+quotes relative to now, the same fix already applied to the fixture decision feed. General lesson for
+the other lanes: **golden fixtures contain absolute timestamps, and anything that compares them to
+`now` needs them re-stamped, not replayed.**
+
+**Share price is computed, not read from `convertToAssets`.** Derived from `totalAssets`,
+`totalSupply` and both decimals so it matches the golden fixture's definition exactly — assets per
+whole share in 1e18 fixed point. Two lanes disagreeing about what "share price" scales to is a bug a
+depositor sees before we do.
+
+**Genesis fails differently from the decision loop, on purpose.** A malformed genesis response
+degrades to "show the text, skip the draft update": a human is present, can see what happened and can
+restate themselves. A malformed *decision* has nobody in the loop, so rejection is the only safe
+answer. Same harness, opposite posture, because the trust model differs on either side of genesis.
+`finalize` is strict regardless — it validates the full `Mandate` before deploying, since the mandate
+becomes immutable to humans the moment it does.
+
+**Known gap, stated plainly:** there is no Ollama on this machine (`ollama` is not on PATH, nothing
+listening on 11434), so **the live model path has never run against a real model**, and no anvil fork
+was up, so `Web3VaultClient` has not executed against a real chain. Everything around both is tested
+via the scripted backend and the stub client, and both degrade visibly rather than silently —
+`GET /health` reports `degraded` whenever live mode falls back. Flagged in `agent/README.md` under
+"known gaps" as the first job for whoever has a GPU and a fork.
+
+---
+
 ## 2026-07-25 — Lane B phase 2: the model seam and the validation layer that guards the key
 
 **What changed.** `agent/model/` — an OpenAI-compatible client shared by an Ollama and a vLLM

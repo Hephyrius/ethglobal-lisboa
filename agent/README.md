@@ -177,6 +177,37 @@ Things a caller must guarantee:
 
 ---
 
+## What one tick actually does
+
+`POST /vault/{addr}/tick` runs [`agent/loop/cycle.py`](loop/cycle.py):
+
+```
+mandate -> vault state -> market snapshot -> model -> validation
+        -> venue plan -> executeBatch -> journal
+```
+
+**Every path produces and journals an `AgentAction`; the route never errors on a bad outcome.** The
+five statuses mean five different things, and the difference is the point:
+
+| Status | Means | Reached the chain? |
+|---|---|---|
+| `executed` | the plan was submitted | yes |
+| `held` | the agent chose not to act, or the mandate cooldown is running | no |
+| `rejected` | output validation or a mandate limit stopped it | **no** |
+| `failed` | the model, a data source or the chain broke | maybe, partially |
+
+`rejected` is not an error — it is the safety layer working, and it carries no `plan` and no
+`tx_hashes`. `failed` means something was unreachable. A dead Ollama is `failed`, never `rejected`;
+conflating them would make the feed misreport why a tick produced nothing.
+
+Two mandate limits are enforced outside the model's output because they cannot be judged from it
+alone: the **rebalance cooldown** (checked *before* the model is called — asking it to decide and
+then ignoring the answer is worse than not asking) and the **slippage ceiling**, which only becomes
+knowable once a venue has quoted. A plan whose quote has expired is refused rather than submitted.
+
+A plan's steps go to the chain as a single `executeBatch`, so a tick lands complete or not at all —
+the vault is never left in a half-applied state no decision authored.
+
 ## What fixture mode serves
 
 Fixture mode is the default and is a first-class path, not a placeholder.
@@ -221,23 +252,39 @@ action = await get_vault_service().tick("0x1111111111111111111111111111111111111
 ## Layout
 
 ```
-config.py       env-driven settings; every path derived from the repo root
-clock.py        UTC-with-Z timestamps — the Python→TS format trap, in one place
-fixtures.py     typed access to packages/schema/fixtures
-model/          the OpenAI-compatible seam + validation.py  (phase 2)
-mandate/        canonical hashing, persistence, agent-side amendment
-loop/           decision engine, constraint checks, one cycle             (phase 3–4)
-chain/          VaultClient over Lane A's ABIs                            (phase 5)
-providers/      late binding to Lanes C and D, with fixture fallbacks
-service/        the ports routes depend on, and the fixture implementations
-api/            FastAPI app, routes, request/response schemas
-tests/          pytest — schema conformance, wire format, retry behaviour
+config.py            env-driven settings; every path derived from the repo root
+clock.py             UTC-with-Z timestamps — the Python→TS format trap, in one place
+fixtures.py          typed access to packages/schema/fixtures
+model/
+  openai_compat.py   one HTTP client for every OpenAI-compatible endpoint
+  backends/          ollama · vllm · scripted (tests) — one line each in the table
+  extraction.py      recovering JSON from fences, prose and <think> blocks
+  validation.py      ★ four-layer validation + reject-and-retry
+  prompts/           curator and genesis prompts, kept out of the calling code
+mandate/
+  hashing.py         canonical JSON → keccak256 (identical in both modes)
+  constraints.py     what the mandate permits — testable without a model
+  store.py           atomic per-vault persistence
+  amend.py           agent-side mutation, with invariants code can enforce
+loop/
+  engine.py          DecisionEngine: mandate + snapshot → validated decision
+  planning.py        venue intents → one checked ExecutionPlan
+  cycle.py           one tick, every path journaled
+  store.py           append-only AgentAction journal
+chain/
+  abi.py             loads Lane A's published ABIs, with a minimal fallback
+  vault_client.py    web3.py — reads state, signs and submits executeBatch
+  stub.py            chainless VaultClient for fixture mode and pre-CP1
+providers/           late binding to Lanes C and D, with fixture fallbacks
+service/             the ports routes depend on; fixture and live implementations
+api/                 FastAPI app, routes, request/response schemas
+tests/               78 tests — schema conformance, wire format, retries, the cycle
 ```
 
 ## Tests
 
 ```bash
-uv run pytest agent -q
+uv run pytest agent -q      # 78 tests, no network required
 uv run ruff check agent
 ```
 
@@ -245,8 +292,27 @@ Payloads are validated against `packages/schema/*.json` — the JSON Schema sour
 against the pydantic mirror, so the tests prove agreement with the contract Lane E's zod was written
 from rather than agreement with ourselves.
 
-## Status
+## Status and known gaps
 
-Phase 1 complete: all frozen routes live on fixture data, 20 tests green. Phases 2–6 (model seam and
-validation, mandate store, decision loop, chain client, live genesis) in progress — see
-[plans/2026-07-25-lane-b-agent.md](../plans/2026-07-25-lane-b-agent.md).
+**Complete:** all frozen routes in both modes · four-layer output validation with reject-and-retry ·
+mandate store, hashing and amendment · the decision cycle with cooldown, slippage and stale-quote
+enforcement · the append-only journal · `VaultClient` on web3.py against Lane A's published ABIs ·
+live genesis. 78 tests green, ruff clean, no network needed to run them.
+
+**Not yet verified — read this before the demo:**
+
+- **The live model path has never run against a real model.** There is no Ollama on the build
+  machine (`ollama` is not on PATH and nothing is listening on 11434). Every layer around the model
+  is tested via the scripted backend, and `ModelUnavailable` is handled correctly, but how often a
+  real `qwen2.5:14b-instruct` needs a retry is unmeasured. **First job for whoever has a GPU:**
+  `ollama serve && ollama pull qwen2.5:14b-instruct`, then `AGENT_MODE=live` and
+  `POST /vault/{addr}/tick`. Expect the retry counter to be non-zero; that is the honest cost and it
+  is displayed on purpose.
+- **`Web3VaultClient` has not been run against a live fork.** It is written against Lane A's
+  published ABI (`executeBatch`, `holdings`, `createVault`) but no anvil fork was up during this
+  lane's build. Live mode falls back to the stub client when `AGENT_PRIVATE_KEY` is unset or the RPC
+  is unreachable, and `GET /health` reports `degraded` when that happens — check it first.
+- **`VAULT_FACTORY_ADDRESS` must be set** for live genesis to deploy a real vault. Lane A's deploy
+  script writes the address into `deployments/base-fork.json`.
+
+Lane plan: [plans/2026-07-25-lane-b-agent.md](../plans/2026-07-25-lane-b-agent.md).
