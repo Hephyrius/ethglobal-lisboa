@@ -42,12 +42,12 @@ import { cn } from '@/lib/cn'
 
 /** Same palette and order as AllocationChart. Base asset first. */
 const BANDS = [
-  'rgba(29,59,107,0.85)',
-  'rgba(27,106,102,0.80)',
-  'rgba(20,107,60,0.75)',
-  'rgba(138,82,9,0.70)',
-  'rgba(158,43,32,0.65)',
-  'rgba(91,100,111,0.55)',
+  'rgba(74,59,140,0.85)',
+  'rgba(21,110,106,0.80)',
+  'rgba(19,107,62,0.75)',
+  'rgba(168,128,31,0.70)',
+  'rgba(163,43,33,0.65)',
+  'rgba(87,83,102,0.55)',
 ]
 
 const SIZE = 132

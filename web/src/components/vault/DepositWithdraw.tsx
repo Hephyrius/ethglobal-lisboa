@@ -155,7 +155,7 @@ export function DepositWithdraw({ vault }: { vault: `0x${string}` }) {
             }}
             placeholder="0.0"
             className={cn(
-              'tabular mt-1.5 w-full rounded-lg border bg-base px-3 py-2.5 text-sm text-ink outline-none transition-colors',
+              'tabular mt-1.5 w-full rounded-lg border bg-canvas px-3 py-2.5 text-sm text-ink outline-none transition-colors',
               'placeholder:text-faint focus:border-agent/50',
               overMax ? 'border-bad/50' : 'border-line',
             )}

@@ -32,12 +32,12 @@ const VIEW_H = 120
 
 /** Deliberately the semantic palette, not a rainbow. Base asset first. */
 const BANDS = [
-  'rgba(29,59,107,0.85)', // agent
-  'rgba(27,106,102,0.80)', // data
-  'rgba(20,107,60,0.75)', // ok
-  'rgba(138,82,9,0.70)', // warn
-  'rgba(158,43,32,0.65)', // bad
-  'rgba(91,100,111,0.55)', // muted
+  'rgba(74,59,140,0.85)', // agent
+  'rgba(21,110,106,0.80)', // data
+  'rgba(19,107,62,0.75)', // ok
+  'rgba(168,128,31,0.70)', // gold highlight
+  'rgba(163,43,33,0.65)', // bad
+  'rgba(87,83,102,0.55)', // muted
 ]
 
 export function AllocationChart({

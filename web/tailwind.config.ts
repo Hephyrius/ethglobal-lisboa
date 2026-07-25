@@ -22,7 +22,15 @@ const config: Config = {
         // White, not paper. The ground carries no colour of its own; every
         // tint below leans a few degrees violet so the surface reads as one
         // family rather than as grey with a purple accent bolted on.
-        base: '#FFFFFF',
+        //
+        // NAMED `canvas`, NOT `base`. A colour called `base` collides with
+        // Tailwind's font-size step `text-base`: the utility becomes ambiguous
+        // and Tailwind emits BOTH, so every `text-base` element silently also
+        // gets `color: <that colour>`. It was survivable while the ground was
+        // warm paper — the header wordmark just looked washed out — and became
+        // invisible white-on-white the moment the ground went pure white.
+        // Do not reintroduce a colour token whose name is a font-size step.
+        canvas: '#FFFFFF',
         surface: '#FFFFFF',
         raised: '#F6F5F9', // insets, table stripes
         line: '#E7E5EE', // hairline rules
