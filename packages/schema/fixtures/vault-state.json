@@ -1,0 +1,41 @@
+{
+  "address": "0x1111111111111111111111111111111111111111",
+  "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+  "asset_decimals": 6,
+  "total_assets": "50000000000",
+  "total_supply": "49875000000000000000000",
+  "share_price": "1002506265664160401",
+  "holdings": [
+    {
+      "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "symbol": "USDC",
+      "decimals": 6,
+      "balance": "35000000000",
+      "value_in_asset": "35000000000",
+      "committed_to_venue": null
+    },
+    {
+      "token": "0x4200000000000000000000000000000000000006",
+      "symbol": "WETH",
+      "decimals": 18,
+      "balance": "4661000000000000000",
+      "value_in_asset": "15000000000",
+      "committed_to_venue": "aqua"
+    }
+  ],
+  "agent": "0x2222222222222222222222222222222222222222",
+  "mandate_hash": "0x3a7bd3e2360a3d29eea436fcfb7e44c735d117c42d1c1835420b6b9942dd4f1b",
+  "aqua_strategies": [
+    {
+      "strategy_hash": "0x9f2c1a8e5d4b3f6072e1c8a90b4d7e53f2916ac8d05be4713f8a2c609d5e1b74",
+      "app": "0x499943e74fb0ce105688beee8ef2abec5d936d31",
+      "tokens": [
+        "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "0x4200000000000000000000000000000000000006"
+      ],
+      "shipped_at": "2026-07-25T13:40:00Z"
+    }
+  ],
+  "paused": false,
+  "block_number": 18240113
+}

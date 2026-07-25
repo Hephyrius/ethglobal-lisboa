@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "name": "Conservative Base Yield",
+  "created_at": "2026-07-25T14:00:00Z",
+  "objective": "Earn yield on USDC with low drawdown risk. Prefer lending markets with deep liquidity and high utilization stability over the highest headline APY. Rotate into WETH market-making only when realized volatility is low and the spread justifies the inventory risk. Always keep enough free USDC to honour redemptions without unwinding a position.",
+  "base_asset": "USDC",
+  "constraints": {
+    "allowed_assets": ["USDC", "WETH"],
+    "max_position_pct": 0.6,
+    "min_cash_pct": 0.2,
+    "max_slippage_bps": 50,
+    "rebalance_cooldown_seconds": 3600,
+    "max_actions_per_tick": 2
+  },
+  "permitted_data_sources": ["messari", "token_api"],
+  "permitted_venues": ["uniswap", "aqua"],
+  "risk_posture": "conservative",
+  "update_rules": "May widen allowed_assets only to assets with a Chainlink Base feed and >$50M TVL. May never reduce min_cash_pct below 0.1, and may never remove a data source that is currently the sole provider of a fact class it relies on."
+}

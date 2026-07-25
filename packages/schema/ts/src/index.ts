@@ -1,0 +1,305 @@
+/**
+ * Zod mirror of the frozen JSON Schemas in packages/schema/*.json.
+ *
+ * The JSON Schema files are the source of truth; this is the TypeScript view.
+ * If the two disagree, the JSON is right. The shared golden fixtures in
+ * packages/schema/fixtures/ are validated against both, which is what keeps
+ * the Python and TypeScript sides from drifting.
+ *
+ * FROZEN after Wave 0. Need a change? File a request in docs/active-work.md.
+ */
+
+import { z } from 'zod'
+
+// uint256 exceeds Number.MAX_SAFE_INTEGER, so amounts cross the boundary as
+// decimal strings. Never parse these with Number().
+export const Uint256Str = z.string().regex(/^[0-9]+$/, 'expected uint256 decimal string')
+export const Address = z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'expected 0x address')
+export const Bytes32 = z.string().regex(/^0x[a-fA-F0-9]{64}$/, 'expected 0x bytes32')
+export const HexData = z.string().regex(/^0x([a-fA-F0-9]{2})*$/, 'expected 0x-prefixed hex')
+
+// ── Mandate ───────────────────────────────────────────────────────────────
+
+export const MandateConstraints = z
+  .object({
+    allowed_assets: z.array(z.string()).min(1),
+    max_slippage_bps: z.number().int().min(0).max(10_000),
+    max_position_pct: z.number().min(0).max(1).default(1),
+    min_cash_pct: z.number().min(0).max(1).default(0),
+    rebalance_cooldown_seconds: z.number().int().min(0).default(3600),
+    max_actions_per_tick: z.number().int().min(1).default(3),
+  })
+  .strict()
+
+export const Mandate = z
+  .object({
+    version: z.number().int().min(1),
+    name: z.string().min(1).max(80),
+    objective: z.string().min(1).max(2000),
+    base_asset: z.string(),
+    constraints: MandateConstraints,
+    /** Registry keys resolved by the data layer. Granting a source is a
+     *  mandate edit, not a code change — the extension point for new providers. */
+    permitted_data_sources: z.array(z.string()).min(1),
+    permitted_venues: z.array(z.enum(['uniswap', 'aqua'])).min(1),
+    created_at: z.string().datetime().optional(),
+    risk_posture: z.enum(['conservative', 'balanced', 'aggressive']).default('balanced'),
+    update_rules: z.string().max(1000).optional(),
+  })
+  .strict()
+
+// ── MarketSnapshot ────────────────────────────────────────────────────────
+
+export const FactKind = z.enum([
+  'yield',
+  'price',
+  'tvl',
+  'liquidity',
+  'volatility',
+  'utilization',
+  'volume',
+])
+
+export const FactUnit = z.enum(['apy_fraction', 'usd', 'ratio', 'bps', 'token_amount'])
+
+export const FactSubject = z
+  .object({
+    protocol: z.string().optional(),
+    market: z.string().optional(),
+    token: z.string().optional(),
+    pair: z.tuple([z.string(), z.string()]).optional(),
+    chain: z.string().default('base'),
+  })
+  .strict()
+
+/** One observation carrying its own provenance. Deliberately generic: a source
+ *  describes what it knows and leaves the rest unset. */
+export const Fact = z
+  .object({
+    id: z.string(),
+    kind: FactKind,
+    subject: FactSubject,
+    value: z.number(),
+    /** apy_fraction is 0.0432 for 4.32%. Normalized at the source adapter. */
+    unit: FactUnit,
+    /** Registry key of the contributing source — render this as provenance. */
+    source: z.string(),
+    observed_at: z.string().datetime(),
+    confidence: z.number().min(0).max(1).optional(),
+  })
+  .strict()
+
+export const SourceError = z.object({ source: z.string(), message: z.string() }).strict()
+
+/** Source-agnostic by construction: a flat list of facts, not a provider's
+ *  response shape. */
+export const MarketSnapshot = z
+  .object({
+    taken_at: z.string().datetime(),
+    facts: z.array(Fact).default([]),
+    /** A failing source degrades the snapshot; it never crashes the loop.
+     *  Worth surfacing in the UI — it shows what the agent could not see. */
+    errors: z.array(SourceError).default([]),
+  })
+  .strict()
+
+// ── AllocationDecision ────────────────────────────────────────────────────
+
+export const TargetAllocation = z
+  .object({ asset: z.string(), weight: z.number().min(0).max(1) })
+  .strict()
+
+export const SwapIntent = z
+  .object({
+    venue: z.literal('uniswap'),
+    kind: z.literal('swap'),
+    token_in: z.string(),
+    token_out: z.string(),
+    amount_in: Uint256Str.optional(),
+    pct_of_holdings: z.number().min(0).max(1).optional(),
+  })
+  .strict()
+
+export const AquaProgram = z
+  .object({
+    shape: z.enum(['xyc', 'pegged']).default('xyc'),
+    fee_bps: z.number().int().min(0).max(10_000).optional(),
+  })
+  .strict()
+
+export const AquaShipIntent = z
+  .object({
+    venue: z.literal('aqua'),
+    kind: z.literal('ship'),
+    tokens: z.array(z.string()).min(1),
+    amounts: z.array(Uint256Str).min(1),
+    program: AquaProgram.optional(),
+  })
+  .strict()
+
+export const AquaDockIntent = z
+  .object({
+    venue: z.literal('aqua'),
+    kind: z.literal('dock'),
+    strategy_hash: Bytes32,
+  })
+  .strict()
+
+export const VenueIntent = z.discriminatedUnion('kind', [
+  SwapIntent,
+  AquaShipIntent,
+  AquaDockIntent,
+])
+
+export const MandateAmendment = z
+  .object({ rationale: z.string().max(1000), patch: z.record(z.unknown()) })
+  .strict()
+
+/** What the LLM must emit. The harness validates and reject-and-retries before
+ *  anything reaches the chain. */
+export const AllocationDecision = z
+  .object({
+    /** 'hold' is a first-class answer — a model that never holds churns the vault. */
+    action: z.enum(['hold', 'rebalance', 'enter', 'exit']),
+    /** Rendered verbatim in the decision feed. This is the product. */
+    reasoning: z.string().min(1).max(2000),
+    /** Fact ids that drove the decision — lets the UI draw data → reasoning → tx. */
+    facts_used: z.array(z.string()).default([]),
+    target_allocations: z.array(TargetAllocation).optional(),
+    venue_intents: z.array(VenueIntent).optional(),
+    confidence: z.number().min(0).max(1).optional(),
+    mandate_amendment: MandateAmendment.optional(),
+  })
+  .strict()
+
+// ── ExecutionPlan ─────────────────────────────────────────────────────────
+
+export const ExecutionStep = z
+  .object({
+    /** Must be on the vault's allowlist or execute() reverts. */
+    target: Address,
+    value: Uint256Str.default('0'),
+    calldata: HexData,
+    why: z.string().max(200),
+  })
+  .strict()
+
+export const ExecutionPlan = z
+  .object({
+    venue: z.string(),
+    steps: z.array(ExecutionStep).min(1),
+    expected_effect: z.string().max(500).optional(),
+    expected_slippage_bps: z.number().int().min(0).optional(),
+    quote_expires_at: z.string().datetime().optional(),
+  })
+  .strict()
+
+// ── AgentAction ───────────────────────────────────────────────────────────
+
+export const ModelProvenance = z
+  .object({
+    backend: z.string().optional(),
+    name: z.string().optional(),
+    /** Malformed outputs rejected before a valid one — the honest cost of
+     *  small open models. Worth showing rather than hiding. */
+    validation_retries: z.number().int().min(0).default(0),
+  })
+  .strict()
+
+/** One decision cycle. The audit trail and the demo feed. */
+export const AgentAction = z
+  .object({
+    id: z.string(),
+    vault: Address,
+    timestamp: z.string().datetime(),
+    /** 'rejected' = failed validation, never reached the chain. Render these —
+     *  they evidence that the validation layer is load-bearing. */
+    status: z.enum(['pending', 'executed', 'held', 'rejected', 'failed']),
+    snapshot: MarketSnapshot.optional(),
+    decision: AllocationDecision.optional(),
+    plan: ExecutionPlan.optional(),
+    tx_hashes: z.array(Bytes32).default([]),
+    mandate_version_before: z.number().int().min(1).optional(),
+    mandate_version_after: z.number().int().min(1).optional(),
+    model: ModelProvenance.optional(),
+    error: z.string().nullable().default(null),
+    duration_ms: z.number().int().min(0).optional(),
+  })
+  .strict()
+
+// ── VaultState ────────────────────────────────────────────────────────────
+
+export const Holding = z
+  .object({
+    token: Address,
+    symbol: z.string(),
+    balance: Uint256Str,
+    decimals: z.number().int().min(0).max(36).optional(),
+    value_in_asset: Uint256Str.optional(),
+    /** Venue key if this balance backs an open position. Flags encumbrance,
+     *  not location — the vault still custodies it. */
+    committed_to_venue: z.string().nullable().default(null),
+  })
+  .strict()
+
+export const AquaStrategy = z
+  .object({
+    strategy_hash: Bytes32,
+    tokens: z.array(Address).default([]),
+    app: Address.optional(),
+    shipped_at: z.string().datetime().optional(),
+  })
+  .strict()
+
+/** Invariant: the vault is sole custodian (Pattern 1). Capital never leaves it,
+ *  so `holdings` is literally the vault's balances. */
+export const VaultState = z
+  .object({
+    address: Address,
+    asset: Address,
+    total_assets: Uint256Str,
+    total_supply: Uint256Str,
+    holdings: z.array(Holding).default([]),
+    asset_decimals: z.number().int().min(0).max(36).default(6),
+    share_price: z.string().optional(),
+    /** Holder of AGENT_ROLE — executes directly, no human override. */
+    agent: Address.optional(),
+    /** keccak256 of the canonical mandate, recorded at genesis. Lets a
+     *  depositor verify the mandate shown is the one deployed. */
+    mandate_hash: Bytes32.optional(),
+    aqua_strategies: z.array(AquaStrategy).default([]),
+    paused: z.boolean().default(false),
+    block_number: z.number().int().min(0).optional(),
+  })
+  .strict()
+
+// ── Frozen API contract (agent/api — implemented by Lane B, consumed by E) ──
+
+export const GenesisChatRequest = z
+  .object({
+    messages: z.array(z.object({ role: z.enum(['user', 'assistant']), content: z.string() })),
+  })
+  .strict()
+
+export const GenesisChatResponse = z
+  .object({ reply: z.string(), mandate_draft: Mandate.partial().optional() })
+  .strict()
+
+export const GenesisFinalizeRequest = z.object({ mandate: Mandate }).strict()
+
+export const GenesisFinalizeResponse = z
+  .object({ mandate_hash: Bytes32, deploy_tx: Bytes32, vault: Address })
+  .strict()
+
+// ── Inferred types ────────────────────────────────────────────────────────
+
+export type Mandate = z.infer<typeof Mandate>
+export type MarketSnapshot = z.infer<typeof MarketSnapshot>
+export type Fact = z.infer<typeof Fact>
+export type AllocationDecision = z.infer<typeof AllocationDecision>
+export type VenueIntent = z.infer<typeof VenueIntent>
+export type ExecutionPlan = z.infer<typeof ExecutionPlan>
+export type ExecutionStep = z.infer<typeof ExecutionStep>
+export type AgentAction = z.infer<typeof AgentAction>
+export type VaultState = z.infer<typeof VaultState>
+export type Holding = z.infer<typeof Holding>

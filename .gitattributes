@@ -1,0 +1,14 @@
+# Normalize line endings. Windows now, macOS from 10:00 — without this the
+# handoff produces whole-file diffs that bury the real changes and make the
+# commit history useless as an audit trail.
+* text=auto eol=lf
+
+# Shell scripts must stay LF or they break in WSL and on macOS.
+*.sh text eol=lf
+
+# Binary — never touch.
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff binary
+*.woff2 binary

@@ -1,0 +1,66 @@
+{
+  "taken_at": "2026-07-25T14:05:00Z",
+  "facts": [
+    {
+      "id": "f1",
+      "kind": "yield",
+      "subject": { "protocol": "aave-v3", "market": "USDC", "chain": "base" },
+      "value": 0.0432,
+      "unit": "apy_fraction",
+      "source": "messari",
+      "observed_at": "2026-07-25T14:04:12Z"
+    },
+    {
+      "id": "f2",
+      "kind": "yield",
+      "subject": { "protocol": "morpho-blue", "market": "USDC", "chain": "base" },
+      "value": 0.0587,
+      "unit": "apy_fraction",
+      "source": "messari",
+      "observed_at": "2026-07-25T14:04:12Z"
+    },
+    {
+      "id": "f3",
+      "kind": "tvl",
+      "subject": { "protocol": "morpho-blue", "market": "USDC", "chain": "base" },
+      "value": 84200000.0,
+      "unit": "usd",
+      "source": "messari",
+      "observed_at": "2026-07-25T14:04:12Z"
+    },
+    {
+      "id": "f4",
+      "kind": "utilization",
+      "subject": { "protocol": "morpho-blue", "market": "USDC", "chain": "base" },
+      "value": 0.91,
+      "unit": "ratio",
+      "source": "messari",
+      "observed_at": "2026-07-25T14:04:12Z"
+    },
+    {
+      "id": "f5",
+      "kind": "price",
+      "subject": { "token": "WETH", "chain": "base" },
+      "value": 3218.44,
+      "unit": "usd",
+      "source": "token_api",
+      "observed_at": "2026-07-25T14:04:58Z",
+      "confidence": 0.99
+    },
+    {
+      "id": "f6",
+      "kind": "liquidity",
+      "subject": { "protocol": "uniswap-v3", "pair": ["USDC", "WETH"], "chain": "base" },
+      "value": 12400000.0,
+      "unit": "usd",
+      "source": "messari",
+      "observed_at": "2026-07-25T14:04:12Z"
+    }
+  ],
+  "errors": [
+    {
+      "source": "token_api",
+      "message": "no volatility series for WETH on base; agent must reason without it"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "action": "rebalance",
+  "reasoning": "Morpho Blue USDC is paying 5.87% against Aave v3's 4.32% on comparable Base liquidity, and its $84.2M TVL with 91% utilization suggests the rate is demand-driven rather than an incentive artifact. Utilization at 91% is high enough to watch but not high enough to threaten withdrawals at our size. I am rotating a portion of idle USDC toward WETH to open a tight market-making range against the $12.4M USDC/WETH pool, which is deep enough that a 50bp slippage ceiling is comfortable. Holding cash at 20% per the mandate floor rather than deploying fully, because I could not read a volatility series for WETH this tick and I would rather size the inventory conservatively than guess.",
+  "facts_used": ["f1", "f2", "f3", "f4", "f5", "f6"],
+  "target_allocations": [
+    { "asset": "USDC", "weight": 0.7 },
+    { "asset": "WETH", "weight": 0.3 }
+  ],
+  "venue_intents": [
+    {
+      "venue": "uniswap",
+      "kind": "swap",
+      "token_in": "USDC",
+      "token_out": "WETH",
+      "pct_of_holdings": 0.3
+    }
+  ],
+  "confidence": 0.68
+}

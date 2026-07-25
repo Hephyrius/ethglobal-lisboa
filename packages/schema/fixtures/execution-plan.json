@@ -1,0 +1,20 @@
+{
+  "venue": "uniswap",
+  "steps": [
+    {
+      "target": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "value": "0",
+      "calldata": "0x095ea7b3000000000000000000000000000000000022d473030f116ddee9f6b43ac78ba300000000000000000000000000000000000000000000000000000002540be400",
+      "why": "approve Permit2 to move 10,000 USDC"
+    },
+    {
+      "target": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "value": "0",
+      "calldata": "0x3593564c0000000000000000000000000000000000000000000000000000000000000060",
+      "why": "swap 10,000 USDC for WETH via UniversalRouter"
+    }
+  ],
+  "expected_effect": "swap 10,000 USDC for ~3.10 WETH",
+  "expected_slippage_bps": 12,
+  "quote_expires_at": "2026-07-25T14:06:30Z"
+}
