@@ -108,7 +108,9 @@ class SentimentSource(BaseSource):
         try:
             raw = float(row.get("value"))
         except (TypeError, ValueError) as exc:
-            raise RuntimeError(f"Fear & Greed value was not a number: {row.get('value')!r}") from exc
+            raise RuntimeError(
+                f"Fear & Greed value was not a number: {row.get('value')!r}"
+            ) from exc
 
         if not 0 <= raw <= 100:
             # Out of range means the API changed shape. Reporting it as 0–1
