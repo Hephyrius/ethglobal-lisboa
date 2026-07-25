@@ -68,7 +68,24 @@ class ActionJournal:
         return actions[:limit]
 
     def count(self, vault: str) -> int:
+        """Readable records. Use `next_index` for id assignment, not this."""
         return len(self._all(vault))
+
+    def next_index(self, vault: str) -> int:
+        """A monotonically increasing sequence number for the next action.
+
+        Counts **lines**, not parsed records, for two reasons. It never parses,
+        so assigning an id costs nothing as the journal grows; and more
+        importantly it cannot go backwards. `count()` skips unreadable records,
+        so a truncated line would shrink it and the next tick would reuse an id
+        that is already in the feed — where the dApp uses ids as list keys and
+        would silently render one entry over another.
+        """
+        path = self._path(vault)
+        if not path.is_file():
+            return 1
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            return sum(1 for line in handle if line.strip()) + 1
 
     def last_executed(self, vault: str) -> AgentAction | None:
         """The most recent cycle that actually moved capital.

@@ -249,7 +249,7 @@ class _Recorder:
 
     def _emit(self, status: str, **fields) -> AgentAction:
         action = AgentAction(
-            id=f"act_{self._journal.count(self._vault) + 1:06d}",
+            id=f"act_{self._journal.next_index(self._vault):06d}",
             vault=self._vault,
             timestamp=self._timestamp,
             status=status,

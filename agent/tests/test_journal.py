@@ -103,6 +103,26 @@ def test_a_record_that_no_longer_matches_the_schema_is_skipped(tmp_path):
     assert [a.id for a in journal.recent(VAULT, 10)] == ["act_000001"]
 
 
+def test_a_corrupt_line_does_not_cause_the_next_id_to_be_reused(tmp_path):
+    """Ids are list keys in the dApp, so a duplicate renders one entry over
+    another. `count()` skips unreadable records and would shrink; `next_index`
+    counts lines and cannot go backwards."""
+    journal = ActionJournal(tmp_path)
+    journal.append(_action(1))
+    journal.append(_action(2))
+
+    path = tmp_path / "actions" / f"{VAULT.lower()}.jsonl"
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write('{"id": "act_000003", "vault": "0x111\n')  # truncated
+
+    assert journal.count(VAULT) == 2, "the corrupt record is not readable"
+    assert journal.next_index(VAULT) == 4, "but it still consumed a sequence number"
+
+
+def test_next_index_starts_at_one_for_a_new_vault(tmp_path):
+    assert ActionJournal(tmp_path).next_index(VAULT) == 1
+
+
 def test_blank_lines_are_ignored(tmp_path):
     journal = ActionJournal(tmp_path)
     journal.append(_action(1))
