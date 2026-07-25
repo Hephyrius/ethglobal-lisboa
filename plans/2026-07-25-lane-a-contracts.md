@@ -161,12 +161,36 @@ be tested without deploying one.
 | Chainlink staleness fails on a pinned fork | `priceMaxAge = 0` disables it; fork deploys use 0 (§2.3). |
 | `out/` bloats the repo | `build_info = false`, minimal `extra_output`. |
 
-## 6. Definition of done
+## 6. Definition of done — ✅ MVP complete
 
-- [ ] `forge build` clean; `forge test` green with **no network access**
-- [ ] Fork tests green against real Base state when `BASE_RPC_URL` is set
-- [ ] `contracts/abis/*.json` + `contracts/out/**` committed and pushed
-- [ ] `deployments/base-fork.json` written by the deploy script, with a confirmed `executeAllowlist`
-- [ ] `contracts/README.md` covers purpose, interface, data shapes, deps, example, invariants
-- [ ] Build-log entries for the role graph, the valuation approximation, and the decimals offset
-- [ ] Claim released in `docs/active-work.md`
+- [x] `forge build` clean (zero warnings on a cold build); `forge test` green with **no network
+      access** — 69 unit tests pass, 7 fork tests skip cleanly
+- [x] Fork tests green against real Base state — **76/76** with an RPC
+- [x] `contracts/abis/*.json` + `contracts/out/**` committed and pushed
+- [x] `deployments/base-fork.json` written by the deploy script from a live fork run, with the
+      confirmed 7-target `executeAllowlist`
+- [x] `contracts/README.md` covers purpose, interface, data shapes, deps, example, invariants
+- [x] Build-log entry covering the role-graph split, the valuation asymmetry, the decimals offset,
+      the vendoring decision and the three test bugs found
+- [x] Cross-lane requests #1, #2, #7, #8, #11 closed; #13 and #14 filed
+- [x] **Fresh-clone check passed** — `git clone` → `forge build` → `forge test` green with no
+      submodule init, no dependency install and no network
+- [x] Claim released in `docs/active-work.md`
+
+### What changed from the original plan
+
+- **`VenueAllowlist.sol` was never written.** OpenZeppelin's `EnumerableSet.AddressSet` is exactly
+  that data structure, already audited. One fewer file to own.
+- **`executeBatch` was added** and is now the recommended path — an `ExecutionPlan` is ordered and
+  must not land half-applied.
+- **Dependencies were re-vendored into `lib/oz*` with unused trees pruned**, after Lane D found that
+  the original paths broke `git clone` on Windows (request #11).
+- **`holdings()` was added** so the harness can fill `VaultState.holdings` in one call rather than
+  N+1 round-trips.
+
+### Known gaps, deliberately left (Stretch, not MVP)
+
+- One base-asset unit is treated as exactly $1; the asset leg is not priced through its own feed.
+- No ENS subname minting, no pause, no richer accounting.
+- `aqua_strategies[]` in `VaultState` is not tracked on-chain — the harness records it at ship time.
+- The vault holds no native ETH (no `receive()`); native-ETH swap legs are unsupported, use WETH.

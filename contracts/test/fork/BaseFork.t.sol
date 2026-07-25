@@ -112,7 +112,10 @@ contract BaseForkTest is Test {
         assertGt(answer, 0, "feed is reporting");
         assertGt(updatedAt, 0, "round completed");
         // Wide bounds on purpose: this asserts the feed is a real ETH/USD price, not a specific one.
+        // Casts are safe — `answer > 0` is asserted immediately above.
+        // forge-lint: disable-next-line(unsafe-typecast)
         assertGt(uint256(answer), 100e8, "ETH above $100");
+        // forge-lint: disable-next-line(unsafe-typecast)
         assertLt(uint256(answer), 100_000e8, "ETH below $100,000");
     }
 
@@ -160,6 +163,9 @@ contract BaseForkTest is Test {
         deal(WETH, address(vault), 1e18); // one real WETH in the vault
 
         (, int256 answer,,,) = IAggregatorV3(ETH_USD_FEED).latestRoundData();
+        assertGt(answer, 0, "feed is reporting");
+        // Cast is safe given the assertion above.
+        // forge-lint: disable-next-line(unsafe-typecast)
         uint256 expectedWethValue = uint256(answer) / 100; // 8-decimal USD price -> 6-decimal USDC
 
         assertApproxEqAbs(

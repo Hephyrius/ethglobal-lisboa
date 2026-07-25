@@ -16,7 +16,7 @@ bottom and let the owner do it.
 | Lane | Directory | Status | Owner / instance | Claimed | Released |
 |---|---|---|---|---|---|
 | **Wave 0** | `packages/schema/`, `docs/`, `plans/`, root config | ✅ **complete — interface frozen** | scaffolding instance | 2026-07-25 | 2026-07-25 |
-| **A** | `contracts/` | 🔵 in progress | Lane A instance (Claude Code) | 2026-07-25 01:35Z | |
+| **A** | `contracts/` | ✅ **MVP done** — 76 tests green, deployed to a live Base fork, ABIs + addresses published | Lane A instance (Claude Code) | 2026-07-25 01:35Z | 2026-07-25 04:05Z |
 | **B** | `agent/` | 🔵 in progress | Lane B instance | 2026-07-25 T+1:00 | |
 | **C** | `data/` | ✅ **MVP done** — registry, 2 Graph sources, standalone MCP server, x402; live path blocked only on `GRAPH_API_KEY` | Lane C instance | 2026-07-25 | 2026-07-25 02:13Z |
 | **D** | `venues/` | ✅ **MVP done** — both venues behind the frozen `Venue` port; `ship()`/`dock()` verified against the **real deployed Aqua** on a Base fork. Claim held open only until Lane A answers requests 7/8 (the vault allowlist). | Lane D instance | 2026-07-25 02:10 | 2026-07-25 03:45Z |
