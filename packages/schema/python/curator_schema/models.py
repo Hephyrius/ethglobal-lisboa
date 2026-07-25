@@ -124,8 +124,18 @@ FactKind = Literal[
     #: What it costs to transact. A 3 bps edge is not an edge if the
     #: rebalance that captures it costs more than it earns.
     "gas",
+    #: Market-implied likelihood of ONE NAMED EVENT. Deliberately not folded
+    #: into `sentiment`: a mood index has no event attached, so a consumer
+    #: filtering on one must not silently receive the other. It is also the
+    #: only forward-looking kind here — everything else describes what already
+    #: happened, which is why it is worth weighing against a trailing APY.
+    "probability",
 ]
-FactUnit = Literal["apy_fraction", "usd", "ratio", "bps", "token_amount"]
+#: `probability` is 0-1 and, unlike `ratio`, bounded and complementary: a binary
+#: market's two outcomes sum to 1, so one may be subtracted from the other —
+#: never safe for a ratio. Keeping them apart lets a renderer format 0.752 as
+#: "75.2% chance" without inspecting the kind.
+FactUnit = Literal["apy_fraction", "usd", "ratio", "bps", "token_amount", "probability"]
 
 
 class FactSubject(Frozen):

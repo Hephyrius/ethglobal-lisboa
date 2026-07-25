@@ -58,8 +58,8 @@
         },
         "kind": {
           "type": "string",
-          "enum": ["yield", "price", "tvl", "liquidity", "volatility", "utilization", "volume", "sentiment", "gas"],
-          "description": "Extend this list rather than overloading an existing kind. 'sentiment' is a normalised 0-1 market-mood index (0 = extreme fear); 'gas' is the cost of transacting, which is what makes a small yield edge not worth chasing."
+          "enum": ["yield", "price", "tvl", "liquidity", "volatility", "utilization", "volume", "sentiment", "gas", "probability"],
+          "description": "Extend this list rather than overloading an existing kind. 'sentiment' is a normalised 0-1 market-mood index (0 = extreme fear); 'gas' is the cost of transacting, which is what makes a small yield edge not worth chasing. 'probability' is a market-implied likelihood of ONE NAMED EVENT — separate from 'sentiment' because the two are not comparable and a consumer filtering on one must not silently receive the other: a mood index has no event attached, while P(Fed holds rates) = 0.752 is a claim about a specific future. It is also the only forward-looking kind in this list — every other fact here describes what has already happened, which is exactly why it is worth weighing against a backward-looking APY."
         },
         "subject": {
           "type": "object",
@@ -81,8 +81,8 @@
         "value": { "type": "number" },
         "unit": {
           "type": "string",
-          "enum": ["apy_fraction", "usd", "ratio", "bps", "token_amount"],
-          "description": "apy_fraction is 0.0432 for 4.32%, never 4.32. Normalize at the source adapter."
+          "enum": ["apy_fraction", "usd", "ratio", "bps", "token_amount", "probability"],
+          "description": "apy_fraction is 0.0432 for 4.32%, never 4.32. Normalize at the source adapter. 'probability' is 0-1 and, unlike 'ratio', is bounded and complementary — the odds on a binary market's two outcomes sum to 1, so a reader may subtract one from the other, which is never safe for a ratio. Keeping them apart means a renderer can format 0.752 as '75.2% chance' without first inspecting the kind."
         },
         "source": {
           "type": "string",

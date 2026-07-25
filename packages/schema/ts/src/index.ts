@@ -100,9 +100,23 @@ export const FactKind = z.enum([
   'sentiment',
   /** What it costs to transact — why a 3 bps edge may not be worth chasing. */
   'gas',
+  /** Market-implied likelihood of ONE NAMED EVENT. Not folded into 'sentiment':
+   *  a mood index has no event attached, so a consumer filtering on one must not
+   *  silently receive the other. The only forward-looking kind in this list. */
+  'probability',
 ])
 
-export const FactUnit = z.enum(['apy_fraction', 'usd', 'ratio', 'bps', 'token_amount'])
+/** 'probability' is 0-1 and, unlike 'ratio', bounded and complementary — a
+ *  binary market's two outcomes sum to 1, so one may be subtracted from the
+ *  other, which is never safe for a ratio. Render it as "75.2% chance". */
+export const FactUnit = z.enum([
+  'apy_fraction',
+  'usd',
+  'ratio',
+  'bps',
+  'token_amount',
+  'probability',
+])
 
 export const FactSubject = z
   .object({
