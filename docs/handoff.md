@@ -229,3 +229,124 @@ Ollama tags are **exact** — pull the exact tag in `.env` or `/health` reports 
   script has none, so `POST /tick` returns `failed: no mandate stored`. Store one first.
 - Three integration tests reach the live Graph gateway and are skipped by default; run them with
   `AGENT_TEST_NETWORK=1`.
+
+---
+
+## Lane A — `contracts/` · the vault and the agent's authorization boundary
+
+**Docs:** [contracts/README.md](../contracts/README.md) — the full integration surface ·
+[plans/2026-07-25-lane-a-contracts.md](../plans/2026-07-25-lane-a-contracts.md)
+
+### Run it
+
+```sh
+cd contracts
+forge build
+forge test            # 79 pass, 7 fork tests skip — no network needed
+```
+
+**A fresh clone needs nothing.** No `forge install`, no `git submodule update`, no network, no
+credentials. Dependencies are vendored into `contracts/lib/` at pinned tags and committed;
+`./script/install-deps.sh` regenerates them but you should not need to. **Verified by actually doing
+it** — cloning this repo to a temp dir and running the two commands above.
+
+On macOS, `foundryup` installs natively; there is no WSL step. Everything in `script/` is POSIX bash
+that runs under the bash 3.2 macOS ships (no arrays, no `jq`).
+
+Fork tests, when you have an RPC:
+
+```sh
+ANVIL_RPC_URL=http://127.0.0.1:8540 forge test   # 86 pass
+```
+
+Point it at a running `scripts/anvil-fork.sh` rather than upstream — anvil caches forked state, so
+it is far kinder to a rate-limited endpoint.
+
+### What works
+
+- **`CuratedVault`** — ERC-4626, sole custodian (Pattern 1). `execute(target, value, data)` and
+  `executeBatch(Call[])` behind `AGENT_ROLE` against a target allowlist; `approveVenue`;
+  `totalAssets()` = base balance + registered holdings priced through Chainlink; `holdings()` returns
+  the whole priced position in one call.
+- **`VaultFactory`** — EIP-1167 clones, mutable default config that each vault snapshots and freezes.
+- **86 tests.** 79 mock-based (no network) + 7 against real Base state.
+- **Published and consumed by three lanes:** `contracts/abis/*.json` (flat ABI arrays) and
+  `deployments/base-fork.json`. Lane D reads the allowlist from that file; Lane E verified every read
+  function against the deployed vault; Lane B's `Web3VaultClient` reads it correctly.
+- **Proven on-chain, by Lane B's real agent write** — tx
+  `0x789066d43ed0f54be903312dbc732a5c1b03ffb14dcdac0a5cd1e6f8ffa28a4b` on the fork. One atomic
+  `executeBatch` emitting three `Executed` events: `USDC.approve` (a *token* as target — request #8),
+  `Permit2.approve`, then `UniversalRouter.execute` (the router from request #7). All three targets
+  were on the allowlist. This is the best validation the lane has: `executeBatch` doing exactly what
+  it was built for, and every answer given to Lane D holding up in production.
+- **Chainlink valuation confirmed against a real mixed-holding vault.** The vault now holds 1,750
+  USDC + 0.4034 WETH. Recomputing the WETH leg independently from the live feed answer gives
+  `749880448`, which is exactly what `holdings()` reports — so `totalAssets()` = `2499880448`. Agent,
+  contract and UI all agree.
+
+### What is stubbed or deliberately absent
+
+- **No pause, no emergency withdrawal, no human override.** Deliberate — the locked trust model
+  ([initiate_plan.md](../plans/initiate_plan.md) §2). `DEFAULT_ADMIN_ROLE` is granted to nobody and
+  grant/revoke/renounce all revert, so the role graph is frozen at genesis.
+- **One base-asset unit is treated as exactly $1.** True enough for USDC; the single approximation in
+  the share-price path. Pricing the asset leg through its own feed was left as Stretch.
+- **The vault holds no native ETH** (no `receive()`). `execute`'s `value` parameter exists because the
+  frozen `ExecutionPlan` shape has one; in practice it is always `"0"`. Native-ETH swap legs are
+  unsupported — use WETH.
+- **`aqua_strategies[]` is not tracked on-chain.** The vault does not know what an Aqua position is;
+  the harness records it at ship time.
+- **No ENS subnames.** Explicitly cut in phase 2 §3.4.
+
+### Known-broken / unverified — read this before trusting anything
+
+- **`script/verify.sh` has never been run against a live Blockscout instance.** It is written, its
+  error paths and address extraction are tested, but nothing is deployed to real Base because
+  `DEPLOYER_PRIVATE_KEY` is unfunded. Expect to debug it on first real use. Use Blockscout, not
+  Etherscan — there is no free Etherscan path for Base (request #23).
+- **`priceMaxAge` is `0` on the fork, which means staleness checking is OFF.** Required there: a
+  pinned fork's feed `updatedAt` is frozen while `block.timestamp` advances, so any real bound starts
+  failing minutes into a session. It is set automatically to 3600 on any non-fork network and the
+  deploy script now **refuses** to deploy to one with it disabled.
+- **No mainnet deployment.** The deploy script guards it (below) but the path is untested end to end.
+
+### Gotchas that will cost you an hour
+
+- **Shares are 18-decimal over a 6-decimal asset** (`_decimalsOffset() = 12`). So
+  `convertToAssets(1e18)` — one whole share — returns a **6-decimal** number: `1000000` means 1.00
+  USDC per share, *not* `1e18`. Lane E got this right; the Wave 0 fixture
+  `packages/schema/fixtures/vault-state.json` has a `share_price` 10^12 too large for its own
+  totals, so develop against the fixture but do not derive the formula from it.
+- **`totalAssets()` reverts rather than returning a wrong number** when a feed for a token the vault
+  actually *holds* is stale, zero, negative or mid-round. That blocks deposits and withdrawals, which
+  is the intended failure — valuing a held token at zero would let a withdrawal quietly take value
+  from everyone still in. A token with a **zero balance is skipped before its feed is read**, so a
+  broken feed only bites while the vault holds that token.
+- **A token the vault holds but was never registered for valuation is invisible to
+  `totalAssets()`.** The sharpest edge in the design: the mandate must confine the agent to tokens
+  the vault can price. `valuedTokens()` is WETH only on this deployment.
+- **`cast` and `forge` hang on *direct* external HTTPS in this WSL setup** while `curl` to the same
+  endpoint returns instantly. Not a blocker and probably not present on macOS: `anvil --fork-url`
+  works fine, and once anvil holds the fork everything else talks to localhost. Point `forge test`
+  and `forge script` at the anvil endpoint.
+- **The deploy script will refuse a misconfigured mainnet run, on purpose.** It reverts with
+  `UnsafeAnvilKeyOnRealNetwork` if the deployer, agent or guardian is an anvil account — their keys
+  are published in Foundry's docs, and `AGENT_ROLE` can never be revoked — and with
+  `StalenessCheckDisabledOnRealNetwork` if `priceMaxAge` is 0. An unrecognised `DEPLOY_NETWORK` is
+  treated as real, so a typo fails safe. If it stops you, it is doing its job; set the env vars.
+
+### If you need to redeploy
+
+```sh
+DEPLOY_NETWORK=base-fork forge script script/Deploy.s.sol \
+  --rpc-url http://127.0.0.1:8540 --broadcast
+```
+
+⚠️ **This overwrites `deployments/base-fork.json`, and Lanes B, D and E all read the vault address
+from it.** The currently-deployed vault `0x0E2c0e50E67B96C9C401C94e111a3DBD00DEB5d1` holds real
+positions those lanes assert against. Only redeploy if anvil has been restarted, and tell the other
+lanes when you do.
+
+For a real network, set `DEPLOY_NETWORK`, `DEPLOYER_PRIVATE_KEY`, `AGENT_ADDRESS` and
+`GUARDIAN_ADDRESS` to funded, non-anvil values; `priceMaxAge` defaults to 3600 automatically. Then
+`./script/verify.sh <network>`.
