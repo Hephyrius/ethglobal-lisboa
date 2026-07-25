@@ -247,6 +247,7 @@ class Web3VaultClient:
             block_number,
             agent,
             mandate_hash,
+            paused,
         ) = await asyncio.gather(
             fns.asset().call(),
             fns.totalAssets().call(),
@@ -256,6 +257,10 @@ class Web3VaultClient:
             self._w3.eth.block_number,
             self._maybe(fns.agent()),
             self._maybe(fns.mandateHash()),
+            # `_maybe`, so a vault deployed before Lane A's SSA2 pause reads
+            # `None` rather than failing the whole state read. Absent means not
+            # paused: a contract with no pause cannot be in wind-down.
+            self._maybe(fns.paused()),
         )
 
         # Wave 2 — the token metadata, which needed the holdings list to exist.
@@ -301,6 +306,12 @@ class Web3VaultClient:
             holdings=holdings,
             agent=agent,
             mandate_hash=to_hex_string(mandate_hash),
+            # Real since Wave 3 (Lane A §A2); it was hardcoded `false` before.
+            # This flag flips the whole objective of a tick, so it has to be read
+            # rather than assumed — a paused vault whose harness believes it is
+            # trading normally does nothing at all, and its depositors are the
+            # ones waiting for the book to converge on cash.
+            paused=bool(paused),
             block_number=block_number,
         )
 

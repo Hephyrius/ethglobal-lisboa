@@ -112,6 +112,33 @@ def merge_plans(plans: list[ExecutionPlan]) -> ExecutionPlan:
     )
 
 
+#: Intents that *free* tokens must precede intents that spend them. An Aqua
+#: position is encumbered rather than absent — the tokens sit in the vault with a
+#: claim recorded against them — and a lending position is held as a receipt
+#: token, so in both cases a swap of the underlying reverts until the position is
+#: released. Lower sorts first.
+_RELEASE_FIRST = {"dock": 0, "withdraw": 0}
+_THEN_EVERYTHING_ELSE = 1
+
+
+def _ordered(intents: list[VenueIntent]) -> list[VenueIntent]:
+    """Free encumbered tokens before selling them, preserving order otherwise.
+
+    Matters most during a wind-down, where the natural decision is *dock the Aqua
+    position and sell what it was holding* — and a model that lists those in the
+    order it thought of them produces a batch that reverts on the swap. The whole
+    plan goes to chain as one `executeBatch`, so getting this wrong costs the
+    entire tick rather than one step.
+
+    A stable sort, so within each group the agent's own sequencing survives. This
+    reorders **what already passed validation** and never adds, drops or resizes
+    anything: the agent still chooses the route and the size.
+    """
+    return sorted(
+        intents, key=lambda i: _RELEASE_FIRST.get(i.kind, _THEN_EVERYTHING_ELSE)
+    )
+
+
 async def build_execution_plan(
     decision: AllocationDecision,
     mandate: Mandate,
@@ -122,7 +149,7 @@ async def build_execution_plan(
 
     Raises `PlanRejected` — never returns a plan the mandate forbids.
     """
-    intents = decision.venue_intents or []
+    intents = _ordered(decision.venue_intents or [])
     if not intents:
         raise PlanRejected("decision requested an action but carried no venue intents")
 

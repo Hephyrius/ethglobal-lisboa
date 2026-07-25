@@ -42,6 +42,7 @@ __all__ = [
     "Violation",
     "check_decision",
     "check_rebalance_direction",
+    "check_wind_down_direction",
     "check_projected_outcome",
     "check_plan",
     "describe",
@@ -490,6 +491,73 @@ def check_rebalance_direction(
     return problems
 
 
+def check_wind_down_direction(
+    decision: AllocationDecision, mandate: Mandate, vault: VaultState | None
+) -> list[Violation]:
+    """While the vault is paused, every trade must move toward the base asset.
+
+    **Added as its own check rather than by relaxing `check_rebalance_direction`,
+    and that is deliberate.** Wave 1's worst bug was a golden-fixture *exemption*
+    inside an existing check that let a bad liquidation through — a widened check
+    is how you get another one. These two are mutually exclusive by construction:
+    `validate_decision` runs exactly one of them, chosen by `vault.paused`.
+
+    The rule is the off-chain twin of Lane A's §A2b on-chain check: after the
+    batch, the base-asset balance may not fall and no non-base balance may rise.
+    Stating it here as well is not redundant — the contract *reverts*, which
+    costs gas and surfaces as a failed tick with no explanation, while this
+    rejects with a correction the model can act on. The contract remains the
+    thing that makes it true; this is what makes it teachable.
+
+    Note what is **not** checked: which asset, how much, or through which venue.
+    Those stay the agent's choice under the same allowlists, because a guardian
+    who can name the trade picks the timing and can trade ahead of it — a worse
+    power than the one the pause exists to contain (§A2b).
+    """
+    intents = decision.venue_intents or []
+    if not intents or vault is None:
+        return []
+
+    base = mandate.base_asset
+    problems: list[Violation] = []
+    for position, intent in enumerate(intents):
+        if intent.kind == "swap":
+            if intent.token_out != base:
+                problems.append(
+                    Violation(
+                        f"venue_intents[{position}]",
+                        f"buys {intent.token_out} while the vault is winding down. "
+                        f"Paused means the objective is to convert holdings to "
+                        f"{base}, so every swap must have {base} as `token_out`. "
+                        f"The vault itself will revert anything else",
+                    )
+                )
+            elif intent.token_in == base:
+                problems.append(
+                    Violation(
+                        f"venue_intents[{position}]",
+                        f"spends {base} while the vault is winding down. "
+                        f"{base} is what depositors are paid out of and it may only "
+                        f"go up while paused",
+                    )
+                )
+        elif intent.kind in ("ship", "supply"):
+            # Both commit capital rather than freeing it. Neither is a *balance*
+            # increase the contract would catch — an Aqua ship moves no tokens at
+            # all — so this is the only layer that can refuse them.
+            verb = "posts liquidity into" if intent.kind == "ship" else "supplies to"
+            problems.append(
+                Violation(
+                    f"venue_intents[{position}]",
+                    f"{verb} {intent.venue} while the vault is winding down. "
+                    f"That commits capital instead of freeing it. Withdraw and "
+                    f"dock existing positions instead, then sell for {base}",
+                )
+            )
+
+    return problems
+
+
 def _projected_weights(
     decision: AllocationDecision, vault: VaultState
 ) -> dict[str, float] | None:
@@ -609,6 +677,19 @@ def check_projected_outcome(
         intent.kind in _EXPOSURE_MOVING_KINDS for intent in decision.venue_intents or []
     )
     if not moves_exposure:
+        return problems
+
+    # While the vault is paused its target allocations are suspended: the
+    # objective is 100% base asset, whatever the mandate's targets say. Judging
+    # a liquidation against them would reject *every* wind-down trade for moving
+    # away from a target the vault is no longer pursuing.
+    #
+    # Only this rule is skipped. The floor and ceiling above still run, and they
+    # are the ones that could hide a bad trade — which is why they are not an
+    # exemption but a no-op: selling raises cash and lowers positions, so a
+    # wind-down trade cannot breach either. `check_wind_down_direction` supplies
+    # the direction rule this paragraph stands down.
+    if vault.paused:
         return problems
 
     targets = {a.asset: a.weight for a in decision.target_allocations or []}

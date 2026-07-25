@@ -396,6 +396,114 @@ def _render_holdings(vault: VaultState | None, marked: set[str] = frozenset()) -
     return "\n".join(lines)
 
 
+def _render_wind_down(mandate: Mandate, vault: VaultState | None) -> str:
+    """What a paused vault is for, which is not what an unpaused one is for.
+
+    **Not "hold".** A paused vault that holds is a vault whose depositors still
+    cannot leave: `redeem` pays in the base asset, so a holder whose claim
+    exceeds the vault's cash cannot exit through it at all. Converging on cash is
+    the thing that makes ordinary redemption work again for everyone who would
+    rather wait than take `redeemInKind`'s basket.
+
+    Placed above the mandate block and phrased as a suspension of it, because the
+    mandate's target allocations are still rendered below and the model has to be
+    told which one wins. Leaving both without a precedence rule is how you get a
+    tick that rebalances toward a target the vault has stopped pursuing.
+    """
+    if vault is None or not vault.paused:
+        return ""
+
+    encumbered = sorted(
+        {h.committed_to_venue for h in vault.holdings if h.committed_to_venue}
+    )
+    lines = [
+        "THIS VAULT IS WINDING DOWN. The guardian has paused it.",
+        "",
+        f"Your objective this tick is not the mandate's allocation. It is to "
+        f"convert what the vault holds into {mandate.base_asset}, at good "
+        f"execution, so depositors can redeem. The target weights stated below "
+        f"are suspended until the pause is lifted.",
+        "",
+        "What this means concretely:",
+        f"- Every swap must have {mandate.base_asset} as `token_out`. The vault "
+        f"itself reverts a paused batch that raises any other balance, so a buy "
+        f"is not merely wrong here, it cannot execute.",
+        "- Do not supply to a lending market and do not ship into Aqua. Both "
+        "commit capital when the job is to free it.",
+        "- Sell in bounded steps rather than all at once. Dumping the whole book "
+        "in one tick maximises slippage, and that cost falls on the depositors "
+        "who have not left yet.",
+        "- Holding is only correct once there is nothing left to sell. Say so if "
+        "that is the case.",
+    ]
+    if encumbered:
+        lines.append(
+            f"- Positions at {', '.join(encumbered)} are encumbered, not absent. "
+            f"Free them first: `dock` an Aqua position, `withdraw` a lending "
+            f"one, because a swap of tokens that are still committed reverts."
+        )
+    lines.append("")
+    lines.append(
+        f"**Withdrawals are not paused and never can be.** Depositors can already "
+        f"exit in kind, receiving a slice of every token the vault holds. Your job "
+        f"is to make the simpler exit work too, by getting the book into "
+        f"{mandate.base_asset}."
+    )
+    return "\n".join(lines) + "\n"
+
+
+_NORMAL_PROCEDURE = """\
+Decide what to do with this vault now. Work in this order:
+
+1. Read your objective above and write down the allocation it asks for.
+2. Compare it with the percentages already shown under THE VAULT CURRENTLY HOLDS.
+3. If they differ by more than your objective tolerates, rotate to close the gap.
+4. Whether or not you rotate, look at the idle figure in the table above. \
+**Capital sitting idle above the mandate's cash floor is not neutral. It is a \
+position, and the position is earning nothing.** Deploying it into a permitted \
+venue is the default: lending it earns yield, and posting it into Aqua earns \
+fees while moving no tokens at all. **The idle figure already excludes the cash \
+floor, so deploying all of it is permitted, but the floor is the entire \
+withdrawal buffer: deploying right down to it leaves depositors with the bare \
+minimum they can exit against.** Of two venues paying similarly, prefer the one \
+you can unwind sooner.
+5. Hold only if you can say why. Holding is legitimate and often right, but it \
+is a choice, so `reasoning` must name the reason: the idle share is immaterial, \
+the yields on offer do not cover the cost of moving, or the data you needed was \
+missing. "The book is balanced" is a reason to stop rotating, not a reason to \
+leave capital idle."""
+
+
+def _render_procedure(mandate: Mandate, vault: VaultState | None) -> str:
+    """The numbered steps, which are different jobs paused and unpaused.
+
+    **Replaced rather than appended to.** The normal procedure's step 4 tells the
+    model that idle capital is a position earning nothing and that deploying it
+    is the default — which is exactly backwards during a wind-down, where cash is
+    the goal. Showing both and hoping the model picks the right one is how a
+    paused vault ends up supplying to Aave, getting rejected by layer 5, and
+    burning the tick it was supposed to spend selling.
+    """
+    if vault is None or not vault.paused:
+        return _NORMAL_PROCEDURE
+
+    base = mandate.base_asset
+    return f"""\
+Decide what to sell now. Work in this order:
+
+1. Look at THE VAULT CURRENTLY HOLDS and list everything that is not {base}.
+2. Free anything encumbered first: `dock` an Aqua position, `withdraw` a lending \
+position. Those tokens cannot be sold while they are committed.
+3. Sell the freed holdings for {base}, largest first, in bounded steps. Use the \
+market data to choose sizes that do not move the price against you; the \
+slippage falls on the depositors who have not left yet.
+4. Set `target_allocations` to 100% {base}. That is where this vault is going, \
+and every other weight is suspended until the pause lifts.
+5. Hold only if there is genuinely nothing left to sell, and say so plainly. \
+Holding with non-{base} assets still on the book leaves depositors unable to \
+redeem, which is the situation this pause exists to end."""
+
+
 def decision_messages(
     mandate: Mandate,
     snapshot: MarketSnapshot,
@@ -418,7 +526,7 @@ def decision_messages(
     load-bearing half cannot be switched off by omission.
     """
     user = f"""\
-YOUR MANDATE
+{_render_wind_down(mandate, vault)}YOUR MANDATE
 {_render_mandate(mandate)}
 {_render_holdings(vault, marked)}
 {reflection}
@@ -426,25 +534,7 @@ YOUR MANDATE
 MARKET DATA. Cite these ids in `facts_used`:
 {_render_facts(snapshot, marked)}{_render_gaps(snapshot)}{_render_notes(snapshot)}
 
-Decide what to do with this vault now. Work in this order:
-
-1. Read your objective above and write down the allocation it asks for.
-2. Compare it with the percentages already shown under THE VAULT CURRENTLY HOLDS.
-3. If they differ by more than your objective tolerates, rotate to close the gap.
-4. Whether or not you rotate, look at the idle figure in the table above. \
-**Capital sitting idle above the mandate's cash floor is not neutral. It is a \
-position, and the position is earning nothing.** Deploying it into a permitted \
-venue is the default: lending it earns yield, and posting it into Aqua earns \
-fees while moving no tokens at all. **The idle figure already excludes the cash \
-floor, so deploying all of it is permitted, but the floor is the entire \
-withdrawal buffer: deploying right down to it leaves depositors with the bare \
-minimum they can exit against.** Of two venues paying similarly, prefer the one \
-you can unwind sooner.
-5. Hold only if you can say why. Holding is legitimate and often right, but it \
-is a choice, so `reasoning` must name the reason: the idle share is immaterial, \
-the yields on offer do not cover the cost of moving, or the data you needed was \
-missing. "The book is balanced" is a reason to stop rotating, not a reason to \
-leave capital idle.
+{_render_procedure(mandate, vault)}
 
 `target_allocations` is where you want the vault to BE, not where it already is. \
 If your targets differ from the current percentages, you must supply the \

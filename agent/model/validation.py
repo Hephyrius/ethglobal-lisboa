@@ -55,6 +55,7 @@ from ..mandate.constraints import (
     check_decision,
     check_projected_outcome,
     check_rebalance_direction,
+    check_wind_down_direction,
     describe,
 )
 from .extraction import ExtractionError, extract_json_object
@@ -231,7 +232,22 @@ def validate_decision(
         raise ValueError(problem)
 
     # 5 — direction. Needs the vault, so it only runs when one was supplied.
-    if violations := check_rebalance_direction(decision, vault):
+    #
+    # **Two mutually exclusive rules, never one widened rule.** A paused vault is
+    # winding down: its target allocations are suspended and the only correct
+    # direction is toward the base asset, so judging it against the mandate's
+    # targets would reject every liquidation. The paused case is a *separate*
+    # check rather than an exemption inside the normal one, because Wave 1's
+    # worst bug was exactly such an exemption — a golden-fixture carve-out that
+    # let a bad liquidation through.
+    if vault is not None and vault.paused:
+        if violations := check_wind_down_direction(decision, mandate, vault):
+            raise ValueError(
+                f"this vault is winding down, so every trade must move it toward "
+                f"{mandate.base_asset} — {describe(violations)}. Return a corrected "
+                "decision that only sells."
+            )
+    elif violations := check_rebalance_direction(decision, vault):
         raise ValueError(
             f"your trades move the vault away from your own targets — {describe(violations)}. "
             "Return a corrected decision whose swaps close the gap."

@@ -203,16 +203,21 @@ async def test_the_state_read_is_unchanged_by_the_batching(client):
 
 
 async def test_one_state_read_costs_far_fewer_round_trips_than_it_did(client):
-    """28 was the measured cost of the first read; 11 is what it costs now.
+    """28 was the measured cost of the first read; 12 is what it costs now.
 
-    Eight vault reads, one `symbol()` per token, and a single `eth_chainId` —
+    Nine vault reads, one `symbol()` per token, and a single `eth_chainId` —
     with the base asset's decimals taken from `holdings()` rather than asked for
     separately. The bound is what fails a regression.
+
+    Was 11 until Wave 3 added `paused()`, which is a real new read and worth its
+    round trip: it decides whether the tick is trading or winding down. It joins
+    wave 1's `gather`, so it costs a call and no wall-clock — the budget is
+    raised deliberately rather than the read being smuggled in under it.
     """
     vault_client, provider = client
     await vault_client.state(VAULT)
 
-    assert provider.round_trips <= 11, f"N+1 is back: {provider.calls}"
+    assert provider.round_trips <= 12, f"N+1 is back: {provider.calls}"
 
 
 async def test_the_reads_actually_overlap():
