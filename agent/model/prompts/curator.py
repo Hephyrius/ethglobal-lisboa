@@ -87,6 +87,8 @@ _KIND_LABELS = {
     "volatility": "realized volatility",
     "utilization": "utilization",
     "volume": "traded volume",
+    "sentiment": "market mood",
+    "gas": "cost of transacting",
 }
 
 #: Only these kinds are percentage rates. Spelled out so "12.4M of liquidity"
@@ -95,6 +97,17 @@ _RATE_KINDS = {"yield"}
 
 
 def _format_value(fact) -> str:
+    # Kind first, then unit. Two kinds share `ratio` and mean entirely different
+    # things by it — a utilization of 0.78 is "78% of capacity", a sentiment of
+    # 0.78 is "extreme greed" — and rendering the second as the first is exactly
+    # the misread `_KIND_LABELS` exists to prevent.
+    if fact.kind == "sentiment":
+        return f"{fact.value:.2f} on a 0-1 scale (0 = extreme fear, 1 = extreme greed)"
+    if fact.kind == "gas":
+        if fact.unit == "usd":
+            return f"${fact.value:,.2f} per rebalance (dollars, not a rate)"
+        return f"{fact.value:.4g} gwei (a gas price, not a rate)"
+
     if fact.unit == "apy_fraction":
         return f"{fact.value:.2%} per year"
     if fact.unit == "usd":

@@ -48,6 +48,9 @@ BASE: tuple[PriceFeed, ...] = (
     PriceFeed("USDC", "0x7e860098F58bBFC8648a4311b374B1D669a2bc6B", "USDC / USD"),
     PriceFeed("cbBTC", "0x07DA0E54543a844a80ABE69c8A12F22B3aA59f9D", "cbBTC / USD"),
     PriceFeed("DAI", "0x591e79239a7d679378eC8c847e5038150364C78F", "DAI / USD"),
+    # Added in the Wave 1 universe expansion, verified the same way:
+    #     0x4EC5970f…fcfF0  "AERO / USD"  8 decimals  $0.4164
+    PriceFeed("AERO", "0x4EC5970fC728C5f65ba413992CD5fF6FD70fcfF0", "AERO / USD"),
 )
 
 FEEDS: dict[str, tuple[PriceFeed, ...]] = {"base": BASE}

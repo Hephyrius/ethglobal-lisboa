@@ -77,14 +77,16 @@ class RpcClient:
     def client(self) -> httpx.AsyncClient:
         return self._http.get_client()
 
-    async def call(self, to: str, selector: str) -> bytes:
-        """`eth_call` a no-argument view function. Returns raw return data."""
-        payload = {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "eth_call",
-            "params": [{"to": to, "data": selector}, "latest"],
-        }
+    async def request(self, method: str, params: list) -> object:
+        """Any JSON-RPC method. Raises `RpcError` for transport and node errors.
+
+        Extracted from `call` when the gas source needed `eth_gasPrice`. Kept
+        general rather than adding a second bespoke method: the transport
+        handling — unreachable node, HTTP error, non-JSON body, JSON-RPC error
+        object — is identical for every method, and duplicating it is how one
+        copy quietly stops raising.
+        """
+        payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
         try:
             response = await self.client.post(self.url, json=payload)
         except httpx.HTTPError as exc:
@@ -99,9 +101,18 @@ class RpcClient:
             raise RpcError("node returned non-JSON") from exc
 
         if isinstance(body, dict) and body.get("error"):
-            raise RpcError(f"eth_call failed: {body['error'].get('message', body['error'])}")
+            raise RpcError(f"{method} failed: {body['error'].get('message', body['error'])}")
 
-        result = body.get("result") if isinstance(body, dict) else None
+        return body.get("result") if isinstance(body, dict) else None
+
+    async def call(self, to: str, selector: str) -> bytes:
+        """`eth_call` a view function. Returns raw return data.
+
+        `selector` may carry ABI-encoded arguments appended to it; nothing here
+        inspects it beyond passing it through.
+        """
+        result = await self.request("eth_call", [{"to": to, "data": selector}, "latest"])
+
         if not isinstance(result, str) or not result.startswith("0x"):
             raise RpcError(f"unusable eth_call result: {result!r}")
         # `0x` means the call reverted or the address holds no code. Callers

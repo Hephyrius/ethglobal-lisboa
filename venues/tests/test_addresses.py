@@ -69,10 +69,32 @@ class TestAllowlistSource:
         }
         assert addresses.allowlist() == published
 
-    def test_our_fallback_agrees_with_what_lane_a_actually_deployed(self):
-        """Reconciliation. The fallback exists for a fresh clone, so it should
-        not quietly disagree with the deployed vault — if it does, one of us
-        changed an address and the other has not noticed."""
+    def test_the_fallback_covers_everything_the_deployed_vault_allows(self):
+        """Reconciliation, in the direction that can actually bite.
+
+        This originally asserted the reverse — that the fallback contained
+        *nothing* the deployed vault would reject — and the Wave 1 universe
+        expansion made that assumption false in a way worth recording, because
+        the obvious fix is the wrong one.
+
+        cbBTC, DAI and AERO joined `FALLBACK_ALLOWLIST` (a token is an
+        `execute()` target because an approval step targets the token, not the
+        venue — request #8). They are **not** in the manifest, because
+        `executeAllowlist.targets` is a snapshot of what the demo vault was
+        deployed with and a vault's allowlist is set at `initialize`. New vaults
+        get the widened factory defaults; existing ones keep what they were born
+        with. Both facts are correct simultaneously.
+
+        The superset is harmless: `allowlist()` prefers the manifest and ignores
+        the fallback entirely whenever one exists, so plans against the deployed
+        vault are still checked against exactly what that vault allows. The
+        fallback only applies on a fresh clone, where there is no deployed vault
+        to reject anything.
+
+        What *would* bite is the other direction — the fallback missing
+        something the deployed vault allows — because then a fresh clone would
+        reject a legitimate plan and the failure would look like a venue bug.
+        """
         manifest = addresses.deployments_path()
         if not manifest.exists():
             pytest.skip("no deployment manifest to reconcile against")
@@ -83,9 +105,10 @@ class TestAllowlistSource:
                 "targets"
             ]
         }
-        missing = addresses.FALLBACK_ALLOWLIST - published
+        missing = published - addresses.FALLBACK_ALLOWLIST
         assert not missing, (
-            f"this lane can emit targets the deployed vault will reject: {sorted(missing)}"
+            f"the deployed vault allows targets a fresh clone would refuse to emit: "
+            f"{sorted(missing)} — add them to FALLBACK_ALLOWLIST"
         )
 
     def test_a_missing_manifest_falls_back_instead_of_failing(self, monkeypatch, tmp_path):

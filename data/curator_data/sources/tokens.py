@@ -25,6 +25,21 @@ BASE: dict[str, str] = {
     "USDC": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
     # Canonical Base WETH predeploy.
     "WETH": "0x4200000000000000000000000000000000000006",
+    # ── Wave 1 universe expansion ─────────────────────────────────────────
+    #
+    # Each verified live against the running Base fork by calling `symbol()`
+    # and `decimals()` on the contract itself, and each has a Chainlink USD
+    # feed in `feeds.py` (also verified via `description()`). A token with no
+    # verified feed does not belong here: the vault values its holdings through
+    # Chainlink, so an asset it cannot price is an asset it cannot hold.
+    "cbBTC": "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf",  # 8 decimals
+    "DAI": "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb",
+    "AERO": "0x940181a94A35A4569E4529A3CDfB74e38FD98631",
+    # wstETH is deliberately ABSENT. Its Base feed 0x43a5…251a reports
+    # "WSTETH / ETH" at 18 decimals, not USD, and `CuratedVault.totalAssets()`
+    # assumes a USD-quoted 8-decimal feed. Composing it through ETH/USD is a
+    # second oracle hop and a second staleness surface, and a wrong price mints
+    # wrong shares. It stays out until it can be done properly.
 }
 
 TOKENS: dict[str, dict[str, str]] = {"base": BASE}

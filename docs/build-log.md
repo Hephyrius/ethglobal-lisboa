@@ -8,6 +8,63 @@ the hackathon window.
 
 ---
 
+## 2026-07-25 — Wave 1 P3: two assets and two protocols was not a universe
+
+**What changed.** cbBTC, DAI and AERO join the tradeable set; `defillama`, `feargreed` and `gas`
+join the data registry; `scripts/expand-universe.sh` widens the factory defaults. New `Fact.kind`s
+`sentiment` and `gas`. 12 new tests.
+
+**Every address was verified live before it was written down.** `symbol()` and `decimals()` off each
+token, `description()` off each Chainlink aggregator, and both aTokens confirmed two ways
+(`UNDERLYING_ASSET_ADDRESS()` and `Pool.getReserveData(asset)[8]`). The script re-verifies at run
+time and refuses to register anything that fails, because a wrong feed does not error — it returns a
+confident, well-formed, completely wrong price, and the vault mints shares against it.
+
+**wstETH was excluded after checking, not skipped.** Its Base feed `0x43a5…251a` reports
+`WSTETH / ETH` at **18 decimals**, not USD at 8. `CuratedVault.totalAssets()` assumes a USD-quoted
+feed, so registering it would misprice the holding by a factor of ~1858. Composing it through ETH/USD
+is a second oracle hop and a second staleness surface; it stays out until that can be done properly.
+
+**No contract change was needed, and that is worth knowing.** `VaultFactory.setDefaultValuation` and
+`setDefaultTarget` are `onlyOwner`, and `initialize` snapshots the defaults — so widening the universe
+is a transaction. **Existing vaults are unchanged**, deliberately: per-vault valuations are immutable
+because whoever can register one can register a bogus feed and mint against it (`VaultFactory`'s own
+header argues this and it is right). The demo therefore creates a fresh vault, which is arguably
+better framing anyway — the genesis conversation is where a depositor picks what their curator may
+touch.
+
+**The DefiLlama judgement I would defend hardest: yields are `apyBase`, never the headline.** The
+first live run put `aerodrome-slipstream USDC-CBBTC at 91.14%` above `aave-v3 USDC at 3.50%`, and an
+agent told to pursue yield reads that as Aave being 26× worse. It is not. 91% was
+`apyBase + apyReward`; the reward leg is a token emission — a bet on the emitted token's price, with
+a different risk profile and an expiry date, not interest. The base figure was 14.66%. An arbitrary
+APY cap was the alternative and it is worse: it encodes a guess about what counts as too good, and it
+would still show a 40% emission farm as a yield. This uses a distinction the data already carries.
+
+**And DefiLlama is explicitly not a peer of the subgraph sources.** Its facts carry lower
+`Fact.confidence` and the prompt prefers a subgraph where they disagree. The Graph stays the depth
+layer; this is breadth. Stating that deliberately, because a Graph judge will look for exactly this
+dilution and "we added an aggregator" is not an answer.
+
+**`sentiment` and `gas` are new kinds rather than overloaded `ratio`s.** `_KIND_LABELS` exists in the
+curator prompt because a 3B model read `f6 | liquidity | $12.4M` as *"the highest headline APY of
+10.43%"*. A utilization of 0.78 and a sentiment of 0.78 mean opposite things; sharing a kind is how
+that misread happens again. `_format_value` now branches on kind before unit for the same reason.
+
+**A bug the tests caught, which is the argument for writing them.** `GasSource._eth_usd` caught
+`(RpcError, ValueError)`, so a plain `RuntimeError` from the transport escaped and took down the
+whole source — losing the gwei reading too, over an *optional* USD multiplication. Now catches
+everything, with the reason written next to it.
+
+**Two process notes.** Rewriting a shell script with a Python round-trip turned it CRLF despite
+`.gitattributes` `*.sh text eol=lf`, and it failed in WSL with `$'\r': command not found` —
+`.gitattributes` governs what git stores, not what a tool writes to the working tree. And the first
+version of the verification loop ran twice, because `echo … | while` puts the loop in a subshell
+where its failure flag is discarded. Fixed with a heredoc redirect, which halved the runtime: every
+uncached `cast call` against a fork is forwarded to the upstream RPC and takes seconds.
+
+---
+
 ## 2026-07-25 — Wave 1 P2: a curve that starts before we shipped the curve
 
 **What changed.** `VaultPerformance` / `PerformancePoint` / `PerformanceSummary` in the schema;

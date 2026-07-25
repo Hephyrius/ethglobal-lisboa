@@ -53,7 +53,7 @@ established. Never invent a constraint the user did not agree to. Its shape:
   "objective": "what it is trying to achieve, in plain language",
   "base_asset": "USDC",
   "constraints": {
-    "allowed_assets": ["USDC", "WETH"],
+    "allowed_assets": ["USDC", "WETH"],   // choose from the tradeable list below
     "max_slippage_bps": 50,
     "max_position_pct": 0.6,
     "min_cash_pct": 0.2,
@@ -80,19 +80,37 @@ def genesis_schema() -> dict:
 
 
 def genesis_messages(
-    messages: list[ChatMessage], sources: list[str], venues: list[str]
+    messages: list[ChatMessage],
+    sources: list[str],
+    venues: list[str],
+    assets: list[str] | None = None,
 ) -> list[dict[str, str]]:
     """The conversation so far, with the real choices available to the user.
 
-    `sources` comes from the live data registry rather than a hardcoded list, so
-    the model can only offer sources that actually exist. A mandate naming a
-    source the registry has never heard of produces a vault whose agent is
-    silently blind to a data class it believes it has.
+    Every list here comes from what is actually registered rather than from a
+    hardcoded menu, because a mandate that names something the system does not
+    have produces a vault that is broken in a way nobody notices until it
+    trades:
+
+    - a **source** the registry never heard of leaves the agent silently blind
+      to a data class it believes it has;
+    - an **asset** with no registered Chainlink valuation is invisible to
+      `totalAssets()`, so buying it makes the vault's reported worth *fall by
+      the amount spent*. That one fails silently and in the direction of
+      losing depositors money on paper.
+
+    `assets` defaults to the venue layer's token table — see
+    `agent/mandate/universe.py` for why that is the right authority.
     """
+    from ...mandate.universe import offerable_assets
+
+    tradeable = assets if assets is not None else offerable_assets()
     context = (
         f"Data sources this agent can be granted: {', '.join(sources) or 'none registered'}. "
         f"Execution venues available: {', '.join(venues) or 'none registered'}. "
-        "Only ever offer the user these."
+        f"Assets this vault can hold and price: {', '.join(tradeable)}. "
+        "Only ever offer the user these. An asset outside that list cannot be valued "
+        "on-chain, so a vault holding it would report the wrong share price."
     )
     return [
         {"role": "system", "content": SYSTEM_PROMPT},

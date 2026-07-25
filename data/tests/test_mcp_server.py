@@ -71,11 +71,21 @@ async def _call(server, name: str, args: dict) -> dict:
 
 
 async def test_missing_credentials_degrade_into_errors_not_an_exception():
-    """The thirty-seconds-after-install experience must be a clear message."""
+    """The thirty-seconds-after-install experience must be a clear message.
+
+    It no longer has to be an *empty* one. Before Wave 1 every registered
+    source needed a Graph credential, so an uncredentialled install answered
+    every question with nothing. `defillama`, `feargreed` and `gas` need no
+    key, so a partial answer plus a clear note about what is missing is now the
+    honest degraded state — and a much better first impression than a blank.
+
+    What must not change: the missing credential is still *reported*. A
+    partial answer presented as a complete one is the failure this test exists
+    to catch.
+    """
     payload = await _call(build_server(NO_CREDS), "compare_protocols", {"asset": "USDC"})
 
     assert payload["asset"] == "USDC"
-    assert payload["protocols"] == []
     assert payload["errors"], "a failure must be reported, never silently empty"
     assert any("GRAPH_API_KEY" in e["message"] for e in payload["errors"])
 

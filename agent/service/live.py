@@ -26,6 +26,7 @@ from ..loop.engine import LlmDecisionEngine
 from ..loop.store import ActionJournal
 from ..mandate.hashing import mandate_hash
 from ..mandate.store import MandateStore
+from ..mandate.universe import offerable_assets
 from ..model.backends import build_backend
 from ..model.extraction import ExtractionError, extract_json_object
 from ..model.openai_compat import ModelUnavailable
@@ -162,7 +163,10 @@ class LiveGenesisService:
         where there is nobody to recover and rejection is the only safe answer.
         """
         conversation = genesis_messages(
-            messages, self.available_sources(), self.available_venues()
+            messages,
+            self.available_sources(),
+            self.available_venues(),
+            offerable_assets(),
         )
         try:
             raw = await self._backend.complete(

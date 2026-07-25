@@ -54,7 +54,38 @@ def test_verify_live_exits_nonzero_without_credentials(capsys):
 
 
 def test_snapshot_exits_nonzero_when_it_produced_no_facts(capsys):
-    assert main(["snapshot", "--assets", "USDC"]) == 1
+    """With only credentialled sources granted, no key means no facts.
+
+    Named sources rather than the default set, because the default set is no
+    longer credential-only: the Wave 1 sources (`defillama`, `feargreed`,
+    `gas`) need no key, so `snapshot` on a fresh clone now legitimately
+    succeeds. That is the point of adding them — this test's job is the
+    narrower claim that a *Graph* source without `GRAPH_API_KEY` produces
+    nothing and says so.
+    """
+    assert main(["snapshot", "--assets", "USDC", "--sources", "messari,aave"]) == 1
+
+
+def test_a_fresh_clone_gets_real_facts_without_any_credential(capsys, monkeypatch):
+    """The thirty-seconds-after-clone experience, asserted.
+
+    Before Wave 1 every source needed a Graph credential, so someone cloning
+    the repo saw an empty snapshot and four error lines. `defillama` alone
+    covers dozens of Base protocols unauthenticated.
+
+    Skipped offline — this deliberately hits the real API, because a mocked
+    version of this test would assert nothing about the claim it is making.
+    """
+    import httpx
+
+    try:
+        httpx.get("https://yields.llama.fi/pools", timeout=10.0)
+    except httpx.HTTPError:  # pragma: no cover - network-dependent
+        pytest.skip("no network")
+
+    assert main(["snapshot", "--assets", "USDC", "--sources", "defillama"]) == 0
+    out = capsys.readouterr().out
+    assert "GRAPH_API_KEY" not in out
 
 
 def test_snapshot_json_is_schema_valid_even_when_degraded(capsys):
