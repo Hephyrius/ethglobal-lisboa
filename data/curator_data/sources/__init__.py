@@ -31,6 +31,7 @@ from .gas import make_gas_source
 from .messari import make_messari_source
 from .morpho import make_morpho_source
 from .peers import make_peer_source
+from .prediction import make_prediction_source
 from .sentiment import make_sentiment_source
 from .token_api import make_token_api_source
 
@@ -58,6 +59,10 @@ SOURCE_FACTORIES: Mapping[str, SourceFactory] = {
     # because the only Morpho Base subgraph on the network indexes a dead
     # deployment - see sources/morpho.py.
     "morpho": make_morpho_source,
+    # The only forward-looking source here: everything else reports what
+    # already happened, and a curator allocating for the next period has
+    # nothing that says what people expect.
+    "prediction": make_prediction_source,
     # ── Wave 1: three more, each one file and one line ────────────────────
     #
     # All three are free and none is token-gated, which matters for a judge
