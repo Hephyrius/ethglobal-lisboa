@@ -8,6 +8,54 @@ the hackathon window.
 
 ---
 
+## 2026-07-25 — Lane B: an FYI that turned out to be the most dangerous row in the table
+
+Lane C's #65 was marked *"(FYI — nothing needed)"* for this lane. It reported that wstETH, cbETH and
+rETH now all have working Chainlink Base feeds, via ETH-quoted feeds composed with ETH/USD. Checking
+it rather than filing it found the worst failure mode this component has.
+
+**The golden mandate's `update_rules` permit new assets *"if they have a Chainlink Base feed"*.**
+That sentence became literally true for three assets, in the same wave, and remained unsafe — because
+every LST feed on Base is **18-decimal and ETH-quoted**, not the 8-decimal USD the vault assumes.
+Lane C measured wstETH at **$12,399,811,032** read the wrong way, and handled it by composing with
+ETH/USD in Python. `CuratedVault.totalAssets()` registers **one** `priceFeed` per token and cannot
+compose. The gap is not in Lane C's code or Lane A's — it is between them.
+
+`apply_amendment` enforced `base_asset` immutability and base-asset-stays-in-`allowed_assets`, but
+nothing stopped `allowed_assets` from *growing*. The whole chain:
+
+1. the model reads a rule the asset genuinely satisfies, and amends honestly;
+2. nothing downstream objects, because the amended mandate now permits the asset;
+3. the vault buys it, `totalAssets()` cannot see it, and the vault's reported worth falls by the
+   amount spent;
+4. **`priceFeed` registrations are immutable after `initialize`** — the vault cannot be repaired,
+   only redeployed, with depositors already in.
+
+Today step 2 fails loudly at plan time, because `venues.addresses.TOKENS` has no LSTs and the symbol
+does not resolve. **That is luck, not design.** The moment Lane D adds them — which #65 actively
+invites, since the data side really can price them now — it goes silent.
+
+**The gate cannot be the rule, because free text cannot be enforced.** It is `offerable_assets()`:
+the same "the venue layer can resolve this symbol" intersection genesis already offers, curated on
+exactly the verified-on-chain-*and*-has-a-verified-feed basis this needs. Two properties, both
+deliberate. **Additions only** — a vault deployed under an older universe keeps what it already
+names, or one widening of the token table would strand it permanently. And it **fails closed**: if
+the venue layer cannot be imported the offerable set falls back to USDC/WETH and a widening
+amendment is refused, because a rejected amendment is logged and recoverable while a collapsed share
+price is not.
+
+The rejection message explains *why* a Chainlink feed is not sufficient. "Not allowed" would invite
+the model to retry with the same reasoning, which was correct as far as it went.
+
+**The reusable lesson is about the FYI.** A cross-lane note saying "nothing needed" is the author's
+assessment of *their* lane's consequences, not of yours. This one was accurate about Lane C and
+wrong about Lane B, and the row that would have caused the damage was addressed elsewhere. Filed
+back as #78 — a *do-not* rather than a do: `universe.py` derives the genesis menu straight from Lane
+D's token table, so adding an LST there widens both what genesis offers and what the agent may amend
+into.
+
+---
+
 ## 2026-07-25 — Lane B: serving Lane D's manifest, and a finding that contradicts my own work
 
 ### #73 · `GET /venues`, and the response model that is deliberately absent
