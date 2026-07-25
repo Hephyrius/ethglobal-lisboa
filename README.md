@@ -81,6 +81,23 @@ other code changes. `MarketSnapshot` is deliberately **source-agnostic**: a flat
 carrying its own `source`, merged from partial contributions. No field is named after any provider,
 which is why Chainlink or Pyth would drop in unchanged.
 
+**Eight sources ship, and the claim above is exercised rather than asserted.** Four were added after
+the registry froze, each as one file plus one line: `chainlink` (a *contract read*, not an HTTP API —
+the strongest evidence the registry merges kinds of provider, not just endpoints), `defillama`,
+`feargreed` and `gas`. Two of those needed a new `Fact.kind`, which is the schema's documented
+extension point being used as designed.
+
+> **The Graph is the depth layer and DefiLlama is breadth — the distinction is deliberate.**
+> The Messari and Aave subgraph sources are queried per-protocol against indexed chain state and are
+> the sources of record. DefiLlama is a third-party aggregator, so its facts carry a lower
+> `Fact.confidence` and the curator prompt prefers a subgraph where they disagree. What it buys is a
+> real gap closed: before it, the agent compared Aave against Moonwell and we called that a
+> multi-protocol comparison.
+>
+> Its yields are `apyBase`, never the headline. The first live run put `aerodrome-slipstream
+> USDC-CBBTC at 91.14%` above `aave-v3 USDC at 3.50%` — but 76 points of that was `apyReward`, a
+> token emission with a different risk profile and an expiry date, not interest.
+
 ### Uniswap — the Trading API · rotation
 
 An Aqua maker is passive: it posts liquidity and waits to be filled, so it cannot decide to change
@@ -88,7 +105,7 @@ what it holds. Uniswap is the taker-side path that lets the agent actually rotat
 
 | What | Where |
 |---|---|
-| Trading API client — `POST /quote`, `POST /swap`, `x-api-key` | [`venues/uniswap/client.py:154`](venues/uniswap/client.py#L154) · [`:159`](venues/uniswap/client.py#L159) |
+| Trading API client — `POST /quote`, `POST /swap`, `x-api-key` | [`venues/uniswap/client.py:155`](venues/uniswap/client.py#L155) · [`:160`](venues/uniswap/client.py#L160) |
 | API response → executable transaction plan | [`venues/uniswap/plan.py`](venues/uniswap/plan.py) |
 | Venue adapter behind the shared port | [`venues/uniswap/venue.py`](venues/uniswap/venue.py) |
 | Developer feedback | [`FEEDBACK.md`](FEEDBACK.md) |

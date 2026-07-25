@@ -134,7 +134,12 @@ class Reflection:
             "What this IS good for: if your trades keep costing more than the edge you "
             "traded for, stop trading for that edge. Say so in your reasoning."
         )
-        return "\n".join(lines)
+        # Coerced at the exit, not at each source. The first version asciified
+        # only the venue-supplied text, and my own verdict strings then leaked
+        # em dashes into the prompt — the same bug one layer up. Doing it here
+        # makes the guarantee a property of the block rather than a discipline
+        # every future line has to remember.
+        return _asciify("\n".join(lines))
 
 
 def _price(point: PerformancePoint | None) -> float | None:

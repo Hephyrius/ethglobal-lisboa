@@ -196,3 +196,20 @@ def test_venue_text_is_coerced_to_ascii():
     assert all(ord(ch) < 128 for ch in intent), f"non-ASCII survived: {intent!r}"
     assert "0xd1f99f37..." in intent, "the ellipsis should degrade, not vanish"
     assert "- tokens stay in the vault" in intent
+
+
+def test_the_whole_rendered_block_is_ascii_not_just_the_venue_text():
+    """Coercion at the exit, not at each source.
+
+    The first version asciified only venue-supplied text, and the module's own
+    verdict strings ("too early to tell — under 6h") then leaked em dashes into
+    the prompt: the same bug one layer up. Asserting on the whole block makes
+    the guarantee structural rather than something every future line has to
+    remember.
+    """
+    actions = [_executed(2.0, effect="ship into Aqua (0xabc…) — held"), _rejected(1.0)]
+    points = [_point(2.1, 1_000_000), _point(1.9, 999_000), _point(0.0, 999_500)]
+    text = build_reflection(actions, points).render()
+
+    offenders = sorted({ch for ch in text if ord(ch) > 127})
+    assert not offenders, f"non-ASCII in the reflection block: {offenders}"

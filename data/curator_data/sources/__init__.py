@@ -29,6 +29,7 @@ from .chainlink import make_chainlink_source
 from .defillama import make_defillama_source
 from .gas import make_gas_source
 from .messari import make_messari_source
+from .peers import make_peer_source
 from .sentiment import make_sentiment_source
 from .token_api import make_token_api_source
 
@@ -69,6 +70,13 @@ SOURCE_FACTORIES: Mapping[str, SourceFactory] = {
     # `gas` closes a real blind spot: the agent could see a 3 bps edge and had
     # no way to know that capturing it costs more than it earns.
     "gas": make_gas_source,
+    # `peers` is the only source whose facts are about other AGENTS rather than
+    # about markets, and the only one that could create herding if it were
+    # designed carelessly. It reports outcomes -- return, drawdown, size -- and
+    # never a peer's current holdings, so it informs judgement without enabling
+    # tick-by-tick mirroring. See the module docstring for the reflexivity
+    # argument, which is stated rather than left to be discovered.
+    "peers": make_peer_source,
 }
 
 

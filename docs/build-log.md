@@ -8,6 +8,49 @@ the hackathon window.
 
 ---
 
+## 2026-07-25 — Wave 1 P7: can Sam snoop on the USDC vault? Yes, and here is the boundary
+
+**What changed.** A `peers` data source: how every *other* curated vault on the deployment is doing,
+read on-chain from `VaultFactory.vaults()`. 12 tests, 621 passing. Plus a README line-link fix the
+Uniswap submission depends on.
+
+**Why it earns its place.** A curator with a mandate and no peers has no way to know whether 3 bps a
+day is good. One that can see a rival running the same base asset at half its drawdown has learned
+something real *and verifiable* — the numbers come from each vault's own `convertToAssets`, not from
+a leaderboard anyone could game. It also makes the demo's best sentence possible: *"the conservative
+vault is beating me with half my drawdown."*
+
+**The risk is reflexivity, and it is designed against rather than hoped away.** If every vault copies
+the leader, the leader's edge becomes the crowd and supposedly-independent vaults correlate to one at
+exactly the wrong moment. Three bounds, of which the second is load-bearing:
+
+1. Peer facts are advisory — every mandate constraint still binds.
+2. **Only outcomes cross, never positions.** Return, drawdown, size. *Not* what a peer currently
+   holds. Publishing allocations would put herding one prompt away; publishing results makes it an
+   argument the agent has to reason through. There is a test asserting no fact carries a token
+   subject, because that is the property, not the intention.
+3. The mandate gates it. A vault whose `permitted_data_sources` omits `peers` never sees any of this.
+
+**Two filters, both found by running it against the real fork rather than by reasoning.** The first
+live run reported eight peers, of which **seven were e2e test vaults holding exactly 1,000 USDC at
+exactly 0.000%** — identical, uninformative, and they buried the one real rival. So a vault still
+sitting at its inception price is not a peer: it has never traded and has no track record. It is a
+deployment artifact. (The other filter, a minimum size, catches the dozens of never-funded vaults a
+fork accumulates from genesis experiments; reporting those as "flat" would read as a rival that is
+steady rather than one that never started.)
+
+Return since inception needs no history at all: a vault starts at exactly 1.000000 by construction,
+so the deviation from `1e6` *is* the return. That is what makes this cheap enough to do per-peer
+inside a single tick.
+
+**A README link had drifted, and it is the one Uniswap asks for.** Their requirement is that the
+README point at the exact contracts and lines. `venues/uniswap/client.py:154` / `:159` had become
+`:155` / `:160` when the `LoopBoundClient` change added a line earlier today. Audited all nine
+line-anchored links; the Aqua and `CuratedVault` ones were still exact. Worth noting that a
+submission requirement can be silently broken by an unrelated refactor two files away.
+
+---
+
 ## 2026-07-25 — Wave 1 P4/P5: the agent can act on what it reads, and remember how it went
 
 **What changed.** `SupplyIntent` / `WithdrawIntent` and an Aave venue; `Holding.represents`;
