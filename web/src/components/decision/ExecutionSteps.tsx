@@ -17,9 +17,12 @@ import { shortHash } from '@/lib/format/units'
 export function ExecutionSteps({
   plan,
   txHashes,
+  maxSlippageBps,
 }: {
   plan?: ExecutionPlan
   txHashes: string[]
+  /** The mandate's ceiling, so an over-limit plan explains its own rejection. */
+  maxSlippageBps?: number
 }) {
   const steps = plan?.steps ?? []
   const paired = steps.length > 0 && steps.length === txHashes.length
@@ -28,14 +31,12 @@ export function ExecutionSteps({
 
   return (
     <div className="space-y-2.5">
-      {plan?.expected_effect ? (
+      {plan?.expected_effect || plan?.expected_slippage_bps !== undefined ? (
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-ink">{plan.expected_effect}</span>
-          {plan.expected_slippage_bps !== undefined ? (
-            <Badge tone="neutral" title="Expected slippage on this plan">
-              {plan.expected_slippage_bps} bps slip
-            </Badge>
+          {plan?.expected_effect ? (
+            <span className="text-xs text-ink">{plan.expected_effect}</span>
           ) : null}
+          <Slippage bps={plan?.expected_slippage_bps} maxSlippageBps={maxSlippageBps} />
         </div>
       ) : null}
 
@@ -74,6 +75,42 @@ export function ExecutionSteps({
         </div>
       ) : null}
     </div>
+  )
+}
+
+/**
+ * `ExecutionPlan.expected_slippage_bps` is a **ceiling, not an estimate.**
+ *
+ * The field name says "expected", but Lane D populates it from the Uniswap
+ * API's slippage *tolerance* — 250 bps by default, where the realised fill was
+ * 0.035% (cross-lane request #26). Rendering that as "250 bps slip" claims a
+ * low-drawdown vault just took a 2.5% hit, which is both wrong and precisely
+ * the number a judge would stop on. So it reads as a limit.
+ *
+ * When it exceeds the mandate's own ceiling the badge turns red, because that
+ * is exactly why the harness refuses to execute — the reader should not have to
+ * infer the cause of a rejection that is sitting right there in the numbers.
+ */
+function Slippage({ bps, maxSlippageBps }: { bps?: number; maxSlippageBps?: number }) {
+  if (bps === undefined) return null
+
+  const overLimit = maxSlippageBps !== undefined && bps > maxSlippageBps
+
+  return (
+    <Badge
+      tone={overLimit ? 'bad' : 'neutral'}
+      title={
+        `Slippage tolerance the venue quoted, not a prediction of impact.` +
+        (maxSlippageBps !== undefined
+          ? overLimit
+            ? ` It exceeds the mandate ceiling of ${maxSlippageBps} bps, so the harness refuses to execute this plan.`
+            : ` Inside the mandate ceiling of ${maxSlippageBps} bps.`
+          : '')
+      }
+    >
+      ≤ {bps} bps slippage
+      {overLimit ? ` · over the ${maxSlippageBps} bps mandate limit` : null}
+    </Badge>
   )
 }
 

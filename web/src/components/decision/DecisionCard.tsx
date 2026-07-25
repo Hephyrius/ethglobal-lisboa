@@ -8,6 +8,7 @@ import { BlindSpots } from './BlindSpots'
 import { ExecutionSteps } from './ExecutionSteps'
 import { VenueIntents } from './VenueIntents'
 import { YieldComparison } from './YieldComparison'
+import type { FeedContext } from './feed-context'
 import { clockTime, formatDuration, fullTimestamp, relativeTime } from '@/lib/format/time'
 import { cn } from '@/lib/cn'
 
@@ -33,12 +34,11 @@ const STATUS: Record<AgentAction['status'], { tone: BadgeTone; label: string }> 
 export function DecisionCard({
   action,
   isLatest,
-  tokenDecimals,
+  context,
 }: {
   action: AgentAction
   isLatest?: boolean
-  /** symbol → decimals, from the vault's holdings; lets intent amounts be scaled. */
-  tokenDecimals?: Record<string, number>
+  context?: FeedContext
 }) {
   const status = STATUS[action.status]
   const facts = action.snapshot?.facts ?? []
@@ -147,7 +147,7 @@ export function DecisionCard({
               {action.decision.venue_intents?.length ? (
                 <VenueIntents
                   intents={action.decision.venue_intents}
-                  tokenDecimals={tokenDecimals}
+                  tokenDecimals={context?.tokenDecimals}
                 />
               ) : null}
             </>
@@ -163,7 +163,7 @@ export function DecisionCard({
           title={action.status === 'executed' ? 'Executed' : 'Outcome'}
           accent={action.status === 'executed' ? 'text-ok' : 'text-muted'}
         >
-          <Outcome action={action} />
+          <Outcome action={action} maxSlippageBps={context?.maxSlippageBps} />
         </Stage>
       </div>
     </article>
@@ -192,9 +192,15 @@ function Stage({
   )
 }
 
-function Outcome({ action }: { action: AgentAction }) {
+function Outcome({ action, maxSlippageBps }: { action: AgentAction; maxSlippageBps?: number }) {
   if (action.status === 'executed' || action.tx_hashes.length > 0) {
-    return <ExecutionSteps plan={action.plan} txHashes={action.tx_hashes} />
+    return (
+      <ExecutionSteps
+        plan={action.plan}
+        txHashes={action.tx_hashes}
+        maxSlippageBps={maxSlippageBps}
+      />
+    )
   }
 
   if (action.status === 'held') {
@@ -210,20 +216,43 @@ function Outcome({ action }: { action: AgentAction }) {
 
   if (action.status === 'rejected') {
     return (
-      <div className="rounded-lg border border-bad/25 bg-bad/[0.05] p-3">
-        <p className="text-xs leading-relaxed text-bad/90">
-          Nothing reached the chain. Output validation rejected the model&apos;s response before it
-          could be turned into calldata — the agent holds a key, so malformed output is discarded
-          rather than repaired.
-        </p>
+      <div className="space-y-2.5">
+        <div className="rounded-lg border border-bad/25 bg-bad/[0.05] p-3">
+          <p className="text-xs leading-relaxed text-bad/90">
+            Nothing reached the chain. Validation rejected the decision before it could be
+            submitted — the agent holds a key, so a plan that breaches the mandate is discarded
+            rather than trimmed to fit.
+          </p>
+        </div>
+
+        {/* A plan rejected on slippage still has a plan, and the numbers that
+            caused the rejection are in it. Showing them turns "rejected" from
+            an assertion into something the reader can check. */}
+        {action.plan ? (
+          <ExecutionSteps plan={action.plan} txHashes={[]} maxSlippageBps={maxSlippageBps} />
+        ) : null}
       </div>
     )
   }
 
   if (action.status === 'failed') {
     return (
-      <div className="rounded-lg border border-bad/25 bg-bad/[0.05] p-3">
-        <p className="text-xs leading-relaxed text-bad/90">{action.error ?? 'Execution failed.'}</p>
+      <div className="space-y-2.5">
+        <div className="rounded-lg border border-bad/25 bg-bad/[0.05] p-3">
+          <p className="break-words text-xs leading-relaxed text-bad/90">
+            {action.error ?? 'Execution failed.'}
+          </p>
+        </div>
+
+        {/* A plan that reverted on-chain is still the plan that was built, and
+            its steps and slippage are what a reader needs to see why. */}
+        {action.plan ? (
+          <ExecutionSteps
+            plan={action.plan}
+            txHashes={action.tx_hashes}
+            maxSlippageBps={maxSlippageBps}
+          />
+        ) : null}
       </div>
     )
   }

@@ -243,7 +243,13 @@ rounding, in the vault's favour) and zero shares. Tx hashes are in
 **Still not exercised: the browser wallet handshake.** Connecting MetaMask and having it sign is
 `@wagmi/core` plus the extension rather than our code, and needs a human with a wallet installed.
 *~2 min:* import anvil account #0 into MetaMask, add a network on `http://localhost:8540` with chain
-id `8453`, open `/vault/0x0E2c0e50E67B96C9C401C94e111a3DBD00DEB5d1`, connect, deposit 1 USDC.
+id `8453`, open the vault from the list on `/` (or `/vault/<demoVault.address from
+deployments/base-fork.json>`), connect, deposit 1 USDC.
+
+> Don't hardcode the vault address anywhere. Anvil holds fork state in memory, so the phase-2
+> cold-start replay — and any restart — deploys a **new** vault and rewrites
+> `deployments/base-fork.json`. The app already follows that file; if you land on a dead address the
+> page says **NO CONTRACT AT THIS ADDRESS** and tells you why rather than quietly showing fixtures.
 
 ## Visual language
 

@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { DecisionCard } from './DecisionCard'
 import { useVaultDecisions, useVaultTick } from '@/lib/api/vault-queries'
+import type { FeedContext } from './feed-context'
 
 /**
  * The decision feed — newest first.
@@ -14,11 +15,11 @@ import { useVaultDecisions, useVaultTick } from '@/lib/api/vault-queries'
  */
 export function DecisionFeed({
   address,
-  tokenDecimals,
+  context,
 }: {
   address: string
-  /** symbol → decimals, from the vault's holdings. Threaded to the intent renderer. */
-  tokenDecimals?: Record<string, number>
+  /** Vault/mandate facts an AgentAction does not carry. See feed-context.ts. */
+  context?: FeedContext
 }) {
   const { data, isPending } = useVaultDecisions(address)
   const tick = useVaultTick(address)
@@ -69,7 +70,7 @@ export function DecisionFeed({
               key={action.id}
               action={action}
               isLatest={index === 0}
-              tokenDecimals={tokenDecimals}
+              context={context}
             />
           ))}
         </div>

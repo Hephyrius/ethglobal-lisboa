@@ -1,7 +1,7 @@
 'use client'
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { readContract, waitForTransactionReceipt, writeContract } from '@wagmi/core'
+import { getBytecode, readContract, waitForTransactionReceipt, writeContract } from '@wagmi/core'
 import { maxUint256 } from 'viem'
 import { erc20Abi, erc4626Abi } from './abis'
 import { readShareDecimals } from './vault-state'
@@ -34,6 +34,33 @@ export function useShareDecimals(vault: `0x${string}`) {
     retry: false,
     staleTime: Number.POSITIVE_INFINITY,
     enabled: Boolean(vault),
+  })
+}
+
+/**
+ * Does a contract actually exist at this address on the configured RPC?
+ *
+ * Anvil holds fork state in memory, so restarting it destroys every deployed
+ * vault while addresses live on in `deployments/base-fork.json`, in this
+ * browser's localStorage, and in any URL someone bookmarked. The symptom is
+ * listed in the runbook as "vault address 404s", and without this check the
+ * page just quietly falls back to fixtures — honest, because the badge says
+ * FIXTURES, but it does not tell you *why*, which is the thing that costs
+ * twenty minutes at 3am.
+ *
+ * Distinguishes "no code here" from "cannot reach the node": only a successful
+ * read that comes back empty means the vault is gone.
+ */
+export function useVaultExists(vault: `0x${string}`) {
+  return useQuery({
+    queryKey: ['vault-exists', vault],
+    enabled: Boolean(vault),
+    retry: false,
+    staleTime: 30_000,
+    queryFn: async (): Promise<boolean> => {
+      const bytecode = await getBytecode(wagmiConfig, { address: vault })
+      return Boolean(bytecode && bytecode !== '0x')
+    },
   })
 }
 

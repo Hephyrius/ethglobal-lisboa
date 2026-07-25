@@ -12,7 +12,8 @@ import { VaultHeader } from './VaultHeader'
 import { VaultStats } from './VaultStats'
 import { useVaultState } from '@/lib/api/vault-queries'
 import { useVaultMandate } from '@/lib/mandate/use-mandate'
-import { useShareDecimals } from '@/lib/chain/vault-contract'
+import { useShareDecimals, useVaultExists } from '@/lib/chain/vault-contract'
+import { networkLabel } from '@/lib/chain/explorer'
 
 export function VaultDashboard({ address }: { address: `0x${string}` }) {
   const { data, isPending } = useVaultState(address)
@@ -20,6 +21,10 @@ export function VaultDashboard({ address }: { address: `0x${string}` }) {
   // Read rather than assumed — the share scale is what makes share price
   // correct or wrong by 1e12. See VaultStats.
   const shareDecimals = useShareDecimals(address)
+  // Anvil keeps fork state in memory: a restart destroys deployed vaults while
+  // their addresses survive in localStorage, in deployments/base-fork.json and
+  // in bookmarks. Catch that explicitly rather than leaving a silent fallback.
+  const vaultExists = useVaultExists(address)
 
   if (isPending || !data) {
     return <DashboardSkeleton />
@@ -30,6 +35,8 @@ export function VaultDashboard({ address }: { address: `0x${string}` }) {
   return (
     <div className="space-y-8">
       <VaultHeader state={state} name={mandate.name} />
+
+      {vaultExists.data === false ? <MissingVaultNotice address={address} /> : null}
 
       <ModeNotice />
 
@@ -65,7 +72,40 @@ export function VaultDashboard({ address }: { address: `0x${string}` }) {
         }
       />
 
-      <DecisionFeed address={address} tokenDecimals={tokenDecimals(state)} />
+      <DecisionFeed
+        address={address}
+        context={{
+          tokenDecimals: tokenDecimals(state),
+          maxSlippageBps: mandate.constraints.max_slippage_bps,
+        }}
+      />
+    </div>
+  )
+}
+
+/**
+ * The vault address resolves to nothing on the configured RPC.
+ *
+ * Almost always means anvil was restarted: fork state lives in memory, so the
+ * deployed vault is gone while its address survives everywhere it was written
+ * down. Anything else on this page is therefore describing a contract that no
+ * longer exists, which is worth saying loudly rather than leaving the reader to
+ * work out from an amber badge.
+ */
+function MissingVaultNotice({ address }: { address: string }) {
+  return (
+    <div className="rounded border border-bad/25 bg-bad/[0.05] px-4 py-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge tone="bad">NO CONTRACT AT THIS ADDRESS</Badge>
+        <span className="font-mono text-2xs text-bad/80">{address}</span>
+      </div>
+      <p className="mt-2 text-xs leading-relaxed text-bad/90">
+        Nothing is deployed here on <span className="font-medium">{networkLabel}</span>. If anvil was
+        restarted, its fork state was in memory and every vault deployed into it is gone — the
+        address survives only in this browser and in{' '}
+        <span className="font-mono">deployments/base-fork.json</span>. Re-run the deploy and seed
+        scripts; the file will have the new address and this page will follow it.
+      </p>
     </div>
   )
 }
