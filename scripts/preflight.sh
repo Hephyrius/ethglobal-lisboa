@@ -69,17 +69,71 @@ rpc() {
 json_str() { echo "$1" | sed -n "s/.*\"$2\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -1; }
 json_addr() { sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\(0x[0-9a-fA-F]\{40\}\)\".*/\1/p" "$DEPLOYMENTS" | head -1; }
 
+# ── localhost is not one place on this machine ────────────────────────────────────────────────
+#
+# anvil runs inside WSL while ollama, the API and the dApp run on the Windows host, so a
+# `localhost` URL means a different machine depending on which side this script is run from. Run
+# from WSL, preflight reported ollama AND the agent API as unreachable while both were serving
+# happily — two blocking failures, zero real problems, at exactly the moment someone would trust
+# it. A gate that cries wolf is a gate people learn to ignore.
+#
+# So: try the URL as given, and if that fails while we are inside WSL, try the Windows host from
+# the default route. Report which one answered, because "reachable, but only via 172.23.112.1" is
+# a different fact from "reachable".
+
+WSL_HOST=""
+if grep -qi microsoft /proc/version 2>/dev/null; then
+  WSL_HOST="$(ip route show default 2>/dev/null | awk '{print $3}' | head -1)"
+fi
+
+#: Echoes a reachable form of $1, or nothing. Sets REACHED_VIA to "" or "windows host".
+REACHED_VIA=""
+reachable_url() {
+  _url="$1"; _path="${2:-}"
+  REACHED_VIA=""
+  if curl -s -m 6 -o /dev/null "$_url$_path" 2>/dev/null; then echo "$_url"; return 0; fi
+  case "$_url" in
+    *localhost*|*127.0.0.1*)
+      [ -n "$WSL_HOST" ] || return 1
+      _alt="$(echo "$_url" | sed -e "s#localhost#$WSL_HOST#" -e "s#127\.0\.0\.1#$WSL_HOST#")"
+      if curl -s -m 6 -o /dev/null "$_alt$_path" 2>/dev/null; then
+        REACHED_VIA="windows host"
+        echo "$_alt"
+        return 0
+      fi ;;
+  esac
+  return 1
+}
+
 [ "$QUIET" -eq 1 ] || echo "Preflight — is the stack demo-ready?"
 [ "$QUIET" -eq 1 ] || echo
 
+# The agent's own health answer is fetched first because check 1 needs it. It is also the only
+# witness that matters for the model: the question is not whether PREFLIGHT can reach ollama, it is
+# whether the AGENT can. Those differ whenever this runs from a different side of the WSL boundary
+# than the API does.
+API_URL_OK="$(reachable_url "$API" "/health")" || API_URL_OK=""
+API_VIA="$REACHED_VIA"
+HEALTH=""
+[ -n "$API_URL_OK" ] && HEALTH="$(curl -s -m 10 "$API_URL_OK/health" 2>/dev/null)"
+
 # ── 1. model ──────────────────────────────────────────────────────────────
-if curl -s -m 6 "$OLLAMA_ROOT/api/tags" >/dev/null 2>&1; then
-  PS="$(curl -s -m 6 "$OLLAMA_ROOT/api/ps" 2>/dev/null)"
+OLLAMA_OK="$(reachable_url "$OLLAMA_ROOT" "/api/tags")" || OLLAMA_OK=""
+OLLAMA_VIA="$REACHED_VIA"
+if [ -n "$OLLAMA_OK" ]; then
+  PS="$(curl -s -m 6 "$OLLAMA_OK/api/ps" 2>/dev/null)"
   case "$PS" in
     *'"models":[]'*|'') warn "ollama up, but NO MODEL RESIDENT — first tick pays a ~2GB cold load" \
-                             "warm it: curl $OLLAMA_ROOT/api/generate -d '{\"model\":\"$MODEL\",\"prompt\":\"ok\",\"keep_alive\":\"30m\",\"stream\":false}'" ;;
-    *) ok "ollama up, model resident ($(json_str "$PS" name))" ;;
+                             "warm it: curl $OLLAMA_OK/api/generate -d '{\"model\":\"$MODEL\",\"prompt\":\"ok\",\"keep_alive\":\"30m\",\"stream\":false}'" ;;
+    *) ok "ollama up, model resident ($(json_str "$PS" name))${OLLAMA_VIA:+ — via the $OLLAMA_VIA}" ;;
   esac
+elif [ "$(json_str "$HEALTH" model_reachable)" = "true" ] || \
+     case "$HEALTH" in *'"model_reachable":true'*) true ;; *) false ;; esac; then
+  # ollama binds 127.0.0.1 by default, so from inside WSL it is genuinely unreachable — and
+  # genuinely irrelevant, because the agent that uses it runs beside it on the host and says so.
+  # Believing the direct probe here would block a demo that works.
+  warn "ollama not reachable from here, but the agent API reports the model IS reachable" \
+       "expected when preflight runs inside WSL and ollama binds 127.0.0.1 on the host — not a blocker"
 else
   bad "ollama unreachable at $OLLAMA_ROOT" "OLLAMA_KEEP_ALIVE=30m ollama serve"
 fi
@@ -133,7 +187,6 @@ if [ -n "$CHAIN" ]; then
 fi
 
 # ── 5. agent API — the one that lies ──────────────────────────────────────
-HEALTH="$(curl -s -m 8 "$API/health" 2>/dev/null)"
 if [ -z "$HEALTH" ]; then
   bad "agent API unreachable at $API" "uv run uvicorn agent.api.app:app --port 8000"
 else
@@ -141,7 +194,7 @@ else
   DATA="$(json_str "$HEALTH" data_registry)"
   VENUE="$(json_str "$HEALTH" venue_registry)"
   if [ "$MODE" = "live" ] && [ "$DATA" != "fixture" ] && [ "$VENUE" != "fixture" ]; then
-    ok "agent API live on all three seams — data=$DATA venue=$VENUE"
+    ok "agent API live on all three seams — data=$DATA venue=$VENUE${API_VIA:+ (via the $API_VIA)}"
   else
     bad "agent API is serving FIXTURES (mode=$MODE data=$DATA venue=$VENUE) — every request will succeed over invented numbers" \
         "set AGENT_MODE=live, AGENT_DATA_REGISTRY, AGENT_VENUE_REGISTRY in .env and RESTART the API"
@@ -149,8 +202,9 @@ else
 fi
 
 # ── 6. dApp ───────────────────────────────────────────────────────────────
-if curl -s -m 8 -o /dev/null "$WEB" 2>/dev/null; then
-  ok "dApp responding at $WEB"
+WEB_OK="$(reachable_url "$WEB" "")" || WEB_OK=""
+if [ -n "$WEB_OK" ]; then
+  ok "dApp responding at $WEB_OK${REACHED_VIA:+ — via the $REACHED_VIA}"
 else
   warn "dApp not responding at $WEB" "pnpm --filter @curator/web dev   (only needed for the browser demo)"
 fi
