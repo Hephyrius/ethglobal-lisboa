@@ -560,7 +560,7 @@ wheels = [
 
 [[package]]
 name = "curator-data"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "data" }
 dependencies = [
     { name = "curator-schema" },
@@ -592,7 +592,7 @@ provides-extras = ["x402", "test"]
 
 [[package]]
 name = "curator-mcp"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "data/curator_mcp" }
 dependencies = [
     { name = "curator-data" },
