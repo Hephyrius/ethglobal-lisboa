@@ -196,7 +196,13 @@ def _render_holdings(vault: VaultState | None) -> str:
         committed = (
             f" [committed to {holding.committed_to_venue}]" if holding.committed_to_venue else ""
         )
-        lines.append(f"- {amount:,.6f} {holding.symbol}: {valued}{committed}")
+        # The raw balance is here because an Aqua ship is denominated in base
+        # units. Without it the model has to compute 0.672 WETH -> 18 decimals
+        # itself, which is exactly the kind of arithmetic it gets wrong.
+        lines.append(
+            f"- {amount:,.6f} {holding.symbol} (base units: {holding.balance}): "
+            f"{valued}{committed}"
+        )
 
     lines.append(
         "These percentages are already computed for you. Compare them directly with your "
@@ -234,12 +240,25 @@ Return exactly this JSON shape:
   "reasoning": "what you saw, what you concluded, what you were unsure about",
   "facts_used": ["ids of the facts above that justify this"],
   "target_allocations": [{{"asset": "SYMBOL", "weight": 0.0}}],
-  "venue_intents": [
-    {{"venue": "uniswap", "kind": "swap", "token_in": "A", "token_out": "B",
-      "pct_of_holdings": 0.0}}
-  ],
+  "venue_intents": [ ...one of the two shapes below... ],
   "confidence": 0.0
 }}
+
+There are exactly two kinds of venue intent.
+
+To CHANGE what the vault holds, swap through Uniswap. `pct_of_holdings` is the \
+fraction of the input token's holdings to sell:
+{{"venue": "uniswap", "kind": "swap", "token_in": "A", "token_out": "B", \
+"pct_of_holdings": 0.0}}
+
+To EARN FEES on what the vault already holds, post it as passive liquidity in \
+Aqua. The tokens never leave the vault. Aqua records a claim against them, so \
+this changes no balances and costs no slippage. `amounts` are in each token's \
+smallest unit, which is the "base units" figure shown for each holding above; \
+never post more than the vault holds:
+{{"venue": "aqua", "kind": "ship", "tokens": ["A", "B"], \
+"amounts": ["<base units of A>", "<base units of B>"], \
+"program": {{"shape": "xyc", "fee_bps": 30}}}}
 
 If you choose "hold", omit `venue_intents` entirely. If you choose any other \
 action, you must supply the venue intents that carry it out. An action with no \
