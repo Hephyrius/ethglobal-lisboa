@@ -209,17 +209,25 @@ def test_fixture_mode_never_probes_the_model(monkeypatch):
 @pytest.mark.parametrize(
     ("wanted", "served", "expected"),
     [
-        ("qwen2.5:3b", ["qwen2.5:3b"], True),
-        # Ollama lists the full tag but answers to the bare name.
-        ("qwen2.5:3b", ["qwen2.5:3b-instruct-q4_K_M"], True),
-        ("qwen2.5:3b-instruct-q4_K_M", ["qwen2.5:3b"], True),
+        ("qwen2.5:3b-instruct-q4_K_M", ["qwen2.5:3b-instruct-q4_K_M"], True),
+        # A bare name means :latest — Ollama's own default-tag rule.
+        ("qwen2.5", ["qwen2.5:latest"], True),
+        ("qwen2.5", ["qwen2.5:3b-instruct-q4_K_M"], False),
+        # Everything else is exact. These four are the live-verified cases:
+        # with only q4_K_M pulled, /api/show 404s for every one of them.
+        ("qwen2.5:3b", ["qwen2.5:3b-instruct-q4_K_M"], False),
+        ("qwen2.5:14b-instruct", ["qwen2.5:3b-instruct-q4_K_M"], False),
         ("qwen2.5:3b", [], False),
         ("qwen2.5:3b", ["llama3.2:3b"], False),
-        ("qwen2.5:14b-instruct", ["qwen2.5:3b-instruct-q4_K_M"], True),
     ],
 )
-def test_model_name_matching_tolerates_tags(wanted, served, expected):
-    """A health signal that cries wolf gets ignored on the night it is right."""
+def test_model_matching_is_exact_because_ollama_tags_are(wanted, served, expected):
+    """Tag matching must not be generous.
+
+    Reporting a server that holds the 3B as ready to serve the 14B is the exact
+    false green this check exists to prevent — health says fine, the first tick
+    dies with `model not found`.
+    """
     from agent.model.openai_compat import model_is_served
 
     assert model_is_served(wanted, served) is expected

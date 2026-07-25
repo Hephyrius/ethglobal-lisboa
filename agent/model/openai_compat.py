@@ -30,20 +30,23 @@ __all__ = ["OpenAICompatClient", "ModelUnavailable", "model_is_served"]
 
 
 def model_is_served(wanted: str, served: list[str]) -> bool:
-    """Whether `wanted` is among `served`, tolerating tag differences.
+    """Whether `wanted` is among `served`.
 
-    Ollama lists models with their full tag (`qwen2.5:3b-instruct-q4_K_M`) but
-    also answers to the bare name (`qwen2.5:3b`), and vLLM reports whatever path
-    it was launched with. An exact-match-only check would report a correctly
-    pulled model as missing, which is worse than not checking — a health signal
-    that cries wolf gets ignored on the night it is right.
+    **Ollama tags are exact.** Verified against a live server holding only
+    `qwen2.5:3b-instruct-q4_K_M`: `/api/show` answers 200 for that exact tag and
+    **404 for `qwen2.5:3b`, `qwen2.5`, and `qwen2.5:14b-instruct`**. An earlier
+    version of this matched on the base name before the colon, which reported a
+    server with the 3B pulled as ready to serve the 14B — the precise false
+    green this check exists to prevent.
 
-    So: exact match, or the same base name before the tag separator.
+    The one allowance is Ollama's own default-tag rule: a bare name means
+    `:latest`. Everything else must match exactly.
     """
     if wanted in served:
         return True
-    base = wanted.split(":")[0]
-    return any(name.split(":")[0] == base for name in served)
+    if ":" not in wanted:
+        return f"{wanted}:latest" in served
+    return False
 
 log = logging.getLogger(__name__)
 
