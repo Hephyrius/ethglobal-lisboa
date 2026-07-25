@@ -150,6 +150,24 @@ class ModelReport:
             t.authored_wanted_intent for t in self.trials if t.scenario == scenario_key
         )
 
+    def can_author_intent(self, scenario_key: str, kind: str) -> bool:
+        """Did it ever author THIS intent kind — not merely an acceptable one?
+
+        `can_author()` is not a substitute, and using it for the ship column was a
+        real bug that survived the whole 3B run. `balanced-ship` accepts
+        `("ship", "supply")` because supplying the idle leg is a defensible answer
+        there, so a model that only ever supplies still scores `authored_wanted_intent`.
+        The 3B never exposed it: its output was invalid, so the column read ❌ for the
+        right answer by accident. Grok made it read ✅ while authoring **zero** ships.
+
+        The claim that column feeds — "the model can author an Aqua ship" — is one
+        the submission would have carried. A metric that is only correct when the
+        model fails is not a metric.
+        """
+        return any(
+            kind in t.intents for t in self.trials if t.scenario == scenario_key
+        )
+
 
 def _rate(flags) -> float:
     flags = list(flags)
@@ -166,7 +184,8 @@ def markdown_table(reports: list[ModelReport], ship_scenario: str = "balanced-sh
     for r in reports:
         lines.append(
             f"| `{r.model}` | {_pct(r.valid_rate)} | {_pct(r.compliant_rate)} | "
-            f"{_pct(r.right_shape_rate)} | {'✅' if r.can_author(ship_scenario) else '❌'} | "
+            f"{_pct(r.right_shape_rate)} | "
+            f"{'✅' if r.can_author_intent(ship_scenario, 'ship') else '❌'} | "
             f"{r.invented_facts} | {r.median_latency_s:.0f}s |"
         )
     return "\n".join(lines)
