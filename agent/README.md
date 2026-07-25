@@ -96,14 +96,22 @@ These are enforced by tests, because both are legal JSON Schema and still break 
 ### `GET /health`
 
 ```json
-{ "status": "ok", "mode": "fixture", "data_registry": "fixture",
-  "venue_registry": "fixture", "model_backend": "ollama" }
+{ "status": "ok", "mode": "live", "data_registry": "curator_data:build_registry",
+  "venue_registry": "venues:get_venue", "model_backend": "ollama:qwen2.5:3b-instruct-q4_K_M",
+  "model_reachable": true }
 ```
 
-`status` is `degraded` when **live mode silently fell back to fixtures** — e.g. Lane C's registry
-failed to import. `data_registry` / `venue_registry` show the resolved ref or the fallback reason.
-A live run quietly serving fixture numbers is the failure this endpoint exists to make visible;
-check it before believing a demo.
+`status` is `degraded` whenever **live mode is not actually live** — a registry that failed to
+import, or a model that is not pulled. `data_registry` / `venue_registry` name the resolved ref, or
+the ref that was tried plus why it failed.
+
+`model_reachable` answers the question a plain ping cannot: **`ollama serve` responds happily with
+nothing pulled**, so a server-is-up check reads green right until the first tick dies with
+`model not found`. Only probed in live mode (fixture mode calls no model), and omitted when it could
+not be determined.
+
+A live run quietly serving fixture numbers, or pointed at a model that was never pulled, is exactly
+what this endpoint exists to make visible. **Check it before believing a demo.**
 
 ---
 
@@ -314,8 +322,23 @@ tests/               78 tests — schema conformance, wire format, retries, the 
 ## Tests
 
 ```bash
-uv run pytest agent -q      # 78 tests, no network required
+uv run pytest agent -q      # 109 passed, 3 skipped, ~4s — no network, no model, no chain
 uv run ruff check agent
+```
+
+Three cross-lane tests reach the live Graph gateway and are skipped by default; without a credential
+they cost ~12s of connection timeouts each and make the suite depend on having internet. Run them
+deliberately when a key lands:
+
+```bash
+AGENT_TEST_NETWORK=1 uv run pytest agent/tests/test_integration_lanes.py
+```
+
+Measure what a decision actually costs on the current machine — the number that decides whether the
+demo feels alive, retries included:
+
+```bash
+uv run python -m agent.bench --model qwen2.5:3b-instruct-q4_K_M --runs 3
 ```
 
 Payloads are validated against `packages/schema/*.json` — the JSON Schema source of truth — not
