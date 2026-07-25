@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ethglobal-lisboa/schema/performance.schema.json",
+  "title": "VaultPerformance",
+  "description": "A vault's share-price history and the risk figures derived from it. Points are OBSERVATIONS, never interpolations: on a pinned fork blocks advance only when a transaction is mined, so the series is event-spaced and a flat stretch between two trades is the truth rather than missing data. Every summary figure is nullable and MUST be null rather than zero when the series is too short to support it — a Sharpe ratio computed from four points is a lie with a decimal point on it.",
+  "type": "object",
+  "required": ["vault", "points", "summary"],
+  "additionalProperties": false,
+  "properties": {
+    "vault": { "$ref": "#/$defs/address" },
+    "points": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/point" },
+      "description": "Oldest first. This is the order a chart plots."
+    },
+    "summary": { "$ref": "#/$defs/summary" }
+  },
+  "$defs": {
+    "address": { "type": "string", "pattern": "^0x[a-fA-F0-9]{40}$" },
+    "uint256Str": { "type": "string", "pattern": "^[0-9]+$" },
+    "point": {
+      "type": "object",
+      "required": ["timestamp", "total_assets", "total_supply"],
+      "additionalProperties": false,
+      "properties": {
+        "timestamp": { "type": "string", "format": "date-time" },
+        "block_number": { "type": "integer", "minimum": 0 },
+        "share_price": {
+          "$ref": "#/$defs/uint256Str",
+          "description": "convertToAssets(1e18): assets per whole share, in BASE-ASSET decimals. For a 6-decimal asset a price of 1.0025 is the string '1002506', NOT 1e18. Absent while total_supply is 0."
+        },
+        "total_assets": { "$ref": "#/$defs/uint256Str" },
+        "total_supply": { "$ref": "#/$defs/uint256Str" },
+        "allocation": {
+          "type": "array",
+          "description": "Per-asset value at this point, for the allocation-over-time chart. Values are in base-asset units, computed on-chain by the same Chainlink feeds totalAssets() uses, so the chart cannot disagree with the contract.",
+          "items": {
+            "type": "object",
+            "required": ["symbol", "value_in_asset"],
+            "additionalProperties": false,
+            "properties": {
+              "symbol": { "type": "string" },
+              "value_in_asset": { "$ref": "#/$defs/uint256Str" },
+              "committed_to_venue": {
+                "type": ["string", "null"],
+                "description": "Venue key if this balance backs an open position. Flags encumbrance, not location — under Pattern 1 the vault still custodies it."
+              }
+            }
+          }
+        },
+        "source": {
+          "type": "string",
+          "enum": ["tick", "sampler", "backfill"],
+          "description": "How this point was observed. 'backfill' points were reconstructed from chain history after the fact and are just as real as the others; the distinction exists so a gap in live recording is visible rather than papered over."
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "description": "Derived, never stored. Recomputed from points on every request so a metric can never drift from the series it claims to describe.",
+      "required": ["observations"],
+      "additionalProperties": false,
+      "properties": {
+        "observations": { "type": "integer", "minimum": 0 },
+        "first_at": { "type": ["string", "null"], "format": "date-time" },
+        "last_at": { "type": ["string", "null"], "format": "date-time" },
+        "share_price": {
+          "type": ["string", "null"],
+          "description": "Most recent observation, same units as point.share_price."
+        },
+        "total_assets": { "type": ["string", "null"] },
+        "return_pct": {
+          "type": ["number", "null"],
+          "description": "Since the first observation. 0.0123 is +1.23%, matching the apy_fraction convention used for Fact values."
+        },
+        "return_24h_pct": { "type": ["number", "null"] },
+        "return_7d_pct": { "type": ["number", "null"] },
+        "annualized_return_pct": { "type": ["number", "null"] },
+        "volatility_pct": {
+          "type": ["number", "null"],
+          "description": "Annualized standard deviation of log returns between consecutive observations."
+        },
+        "max_drawdown_pct": {
+          "type": ["number", "null"],
+          "description": "Largest peak-to-trough fall in share price, as a positive fraction. The number a depositor actually feels."
+        },
+        "risk_adjusted_return": {
+          "type": ["number", "null"],
+          "description": "Annualized return over annualized volatility. Called this rather than 'Sharpe' because no risk-free rate is subtracted, and claiming a Sharpe ratio without one would be wrong."
+        }
+      }
+    }
+  }
+}

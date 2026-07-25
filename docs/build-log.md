@@ -8,6 +8,68 @@ the hackathon window.
 
 ---
 
+## 2026-07-25 — Wave 1: the agent was told its data layer was broken on every single tick
+
+**What changed.** `MarketSnapshot` gains a `notes[]` channel alongside `errors[]`; sources gain
+`remark()` next to `note()`; `messari` gains a circuit breaker; every cached `httpx.AsyncClient` in
+`data/` is now rebuilt when the event loop changes. 24 new tests, full suite green.
+
+**Why — the number that made the case.** I counted the `snapshot.errors` across all 36 journalled
+actions rather than reasoning about them. 73 entries, of which **70 were one of two things that are
+not failures**:
+
+| Count | Source | Message |
+|---|---|---|
+| 35 | `token_api` | `USDC is a quote token on this venue; a dex-derived price against itself is meaningless` |
+| 35 | `messari` | `uniswap-v3` timed out at 6s, or the gateway did |
+
+The curator prompt renders `errors[]` under the heading *"Data you could NOT read this tick. Reason
+about this explicitly."* So on 35 of 36 ticks the agent opened by being told that half its data layer
+had failed, when both sources were doing exactly what they were designed to do. You cannot price
+USDC against USDC — that is a category mistake, not an outage — and the 6s per-protocol budget is a
+deliberate, measured choice we made on purpose.
+
+That is worse than noise. The one thing a curator has to calibrate is how much to trust its inputs,
+and we were systematically miscalibrating it against sources that were working.
+
+**Why a second channel rather than just deleting the messages.** A depositor reading the feed should
+still be able to see *why* a number is absent. The distinction that matters is not verbose-vs-quiet,
+it is **"I was denied data" vs "there was never data here to have"**. `errors[]` keeps the first
+meaning and nothing else; `notes[]` carries the second, and the prompt renders it under "Notes on
+your data sources. These are not failures."
+
+**Why a circuit breaker rather than dropping uniswap-v3.** It failed 35 consecutive times and we
+called it 35 times, spending 6 seconds of every tick's budget on it. Deleting the protocol would fix
+today and lose a subgraph that may well be healthy tomorrow. So: three consecutive failures trips the
+breaker, after which the protocol is skipped **without a request**; every 8th snapshot admits one
+probe so a recovered subgraph returns on its own. A breaker with no probe is just an outage you
+inflicted on yourself, which is why the probe has its own test.
+
+**The real bug underneath, and why it was so hard to see.** Two ticks died with
+`RuntimeError: Event loop is closed`. Neither source is wrong. The cause is the interaction of two
+individually correct decisions in different files: `Registry` caches source *instances* for its
+lifetime (so connection pools are reused across ticks), and `curator_data.default:registry` is a
+module-level singleton that therefore outlives any one event loop. An `httpx.AsyncClient` binds its
+transport to the loop that first used it. Anything calling `asyncio.run` more than once in a
+process — the CLI, the MCP server, the test suite — eventually asks a dead loop to do work.
+
+Fixed with `curator_data/http.py`: remember the creating loop, rebuild on change. The stale client is
+**discarded, not closed** — `aclose()` would have to run on the loop that is gone, so awaiting it
+either raises the very error we are avoiding or blocks. Its sockets died with its loop; there is
+nothing left to release.
+
+**Duplicated into `venues/` rather than shared.** `curator_data` and `venues` are separately
+publishable packages with no dependency between them, and `curator-data` is on PyPI as part of the
+Graph Track 1 reusability criterion. Forty lines of duplication costs less than a dependency edge
+that exists only to avoid it.
+
+**Tradeoff accepted in the de-dup check.** `PerformanceStore._already_have` substring-matches the raw
+line instead of parsing every record, because it runs on every tick against a file that grows without
+bound. A false positive would only ever skip a duplicate-looking point, and `"block_number":123456`
+is distinctive enough that a collision needs the number to appear in another field entirely.
+
+---
+
 ## 2026-07-25 — Lane A: rehearsing R0 found the landmine under R8
 
 **What changed.** `script/Deploy.s.sol` no longer reads the mainnet deployer key on a fork, and

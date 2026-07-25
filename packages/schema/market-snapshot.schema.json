@@ -30,6 +30,20 @@
         }
       },
       "description": "Sources that failed. A failing source DEGRADES the snapshot; it must never crash the decision loop. The model is shown these so it knows what it could not see."
+    },
+    "notes": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "object",
+        "required": ["source", "message"],
+        "additionalProperties": false,
+        "properties": {
+          "source": { "type": "string" },
+          "message": { "type": "string" }
+        }
+      },
+      "description": "Context about a source that is NOT a failure — a structural non-applicability (a quote token cannot be priced against itself), or a deliberate skip (a subgraph a circuit breaker is holding open). Separate from errors[] because the prompt renders errors as 'data you could not read' and asks the model to reason about the gap. Reporting a category mistake there teaches the agent to distrust a feed that is working."
     }
   },
   "$defs": {

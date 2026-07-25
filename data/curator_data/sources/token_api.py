@@ -34,6 +34,7 @@ $0.08 swap in the sample above priced 0.4% off the rest.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import statistics
 from typing import Any
@@ -43,6 +44,7 @@ from curator_schema.models import Fact
 
 from ..config import Settings
 from ..facts import FactBuilder
+from ..http import LoopBoundClient
 from ..ports import BaseSource
 from .pools import pool_for
 from .tokens import address_for, known_symbols
@@ -71,6 +73,11 @@ NETWORK_IDS: dict[str, str] = {"base": "base"}
 #: Markers that identify a 403 as a plan/parameter complaint rather than a
 #: rejected credential. Live text: "Parameter 'limit' exceeds ...".
 _QUOTA_MARKERS = ("parameter", "limit", "exceeds", "quota", "plan")
+
+#: Pause before the single retry on a 5xx. Short on purpose — this sits inside
+#: the registry's per-source deadline, and a source that spends its whole budget
+#: sleeping has traded one failure for a slower one.
+_RETRY_BACKOFF_S = 0.4
 
 
 def _is_quota_complaint(body: str) -> bool:
@@ -113,17 +120,18 @@ class TokenApiSource(BaseSource):
     ):
         super().__init__()
         self.settings = settings
-        self._client = client
         self._owns_client = client is None
+        self._http = LoopBoundClient(
+            lambda: httpx.AsyncClient(timeout=settings.request_timeout_s)
+        )
+        self._http.adopt(client)
         #: symbol -> (pool address, quote token address). Discovery is one
         #: request, and the answer does not change within a run.
         self._pools: dict[str, tuple[str, str]] = {}
 
     @property
     def client(self) -> httpx.AsyncClient:
-        if self._client is None:
-            self._client = httpx.AsyncClient(timeout=self.settings.request_timeout_s)
-        return self._client
+        return self._http.get_client()
 
     async def fetch(self, assets: list[str]) -> list[Fact]:
         if not self.settings.token_api_key:
@@ -154,9 +162,14 @@ class TokenApiSource(BaseSource):
                 # The quote leg cannot be priced against itself. Its price is a
                 # peg assumption, and asserting one here would be inventing a
                 # number — the Chainlink source carries a real feed for it.
-                self.note(
-                    f"{symbol} is a quote token on this venue; a dex-derived price against "
-                    f"itself is meaningless - use an oracle source for it"
+                #
+                # `remark`, not `note`: this is a category mistake, not an
+                # outage. It fired on 35 of 36 journalled ticks and the prompt
+                # showed it to the model as data it could not read, which is
+                # how an agent learns to distrust a feed that never broke.
+                self.remark(
+                    f"{symbol} is the quote token here, so a dex-derived price for it would "
+                    f"be a price against itself; the chainlink oracle source carries it instead"
                 )
                 continue
 
@@ -261,12 +274,31 @@ class TokenApiSource(BaseSource):
     # ── transport ─────────────────────────────────────────────────────────
 
     async def _get(self, path: str) -> list[dict] | None:
-        """GET a Token API route, returning its `data` rows or None."""
+        """GET a Token API route, returning its `data` rows or None.
+
+        Retries once on a 5xx or a transport error. Observed live: `/evm/pools`
+        and `/evm/swaps` each returned a one-off HTTP 500, and each cost the
+        snapshot a price it would have got on a second attempt a moment later.
+        Client errors are not retried — a 403 for an over-large page will be a
+        403 again, and retrying a rejected credential is how you get rate
+        limited for being wrong twice as fast.
+        """
         url = self.settings.token_api_url.rstrip("/") + path
-        try:
-            response = await self.client.get(url, headers=self._headers())
-        except httpx.HTTPError as exc:
-            self.note(f"Token API unreachable: {type(exc).__name__}: {exc}")
+        response = None
+        for attempt in (1, 2):
+            try:
+                response = await self.client.get(url, headers=self._headers())
+            except httpx.HTTPError as exc:
+                if attempt == 1:
+                    await asyncio.sleep(_RETRY_BACKOFF_S)
+                    continue
+                self.note(f"Token API unreachable: {type(exc).__name__}: {exc}")
+                return None
+            if response.status_code < 500 or attempt == 2:
+                break
+            await asyncio.sleep(_RETRY_BACKOFF_S)
+
+        if response is None:  # pragma: no cover - defensive; the loop always sets it
             return None
 
         # A 403 is NOT necessarily a credential problem here: the free plan
@@ -302,9 +334,8 @@ class TokenApiSource(BaseSource):
         }
 
     async def close(self) -> None:
-        if self._client is not None and self._owns_client:
-            await self._client.aclose()
-        self._client = None
+        if self._owns_client:
+            await self._http.aclose()
 
 
 def make_token_api_source(settings: Settings) -> TokenApiSource:

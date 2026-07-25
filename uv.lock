@@ -560,7 +560,7 @@ wheels = [
 
 [[package]]
 name = "curator-data"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "data" }
 dependencies = [
     { name = "curator-schema" },
@@ -592,7 +592,7 @@ provides-extras = ["x402", "test"]
 
 [[package]]
 name = "curator-mcp"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "data/curator_mcp" }
 dependencies = [
     { name = "curator-data" },
@@ -607,7 +607,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "curator-data" },
+    { name = "curator-data", editable = "data" },
     { name = "mcp", specifier = ">=1.2" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8" },
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.23" },

@@ -91,6 +91,12 @@ export const Fact = z
 
 export const SourceError = z.object({ source: z.string(), message: z.string() }).strict()
 
+/** Context about a source that is NOT a failure — a structural
+ *  non-applicability, or a deliberate skip. Rendered differently from an
+ *  error, because a category mistake shown as a gap teaches the agent (and the
+ *  reader) to distrust a feed that is working. */
+export const SourceNote = z.object({ source: z.string(), message: z.string() }).strict()
+
 /** Source-agnostic by construction: a flat list of facts, not a provider's
  *  response shape. */
 export const MarketSnapshot = z
@@ -100,6 +106,7 @@ export const MarketSnapshot = z
     /** A failing source degrades the snapshot; it never crashes the loop.
      *  Worth surfacing in the UI — it shows what the agent could not see. */
     errors: z.array(SourceError).default([]),
+    notes: z.array(SourceNote).default([]),
   })
   .strict()
 
@@ -273,6 +280,66 @@ export const VaultState = z
   })
   .strict()
 
+// ── VaultPerformance ──────────────────────────────────────────────────────
+
+export const AllocationSlice = z
+  .object({
+    symbol: z.string(),
+    value_in_asset: Uint256Str,
+    committed_to_venue: z.string().nullable().default(null),
+  })
+  .strict()
+
+/** One observation of a vault's worth. Never an interpolation: on a pinned fork
+ *  blocks advance only when a transaction is mined, so the series is
+ *  event-spaced and a flat stretch between two trades is the truth. Plot it
+ *  against `timestamp`, and do not smooth it. */
+export const PerformancePoint = z
+  .object({
+    timestamp: z.string().datetime(),
+    total_assets: Uint256Str,
+    total_supply: Uint256Str,
+    block_number: z.number().int().min(0).optional(),
+    /** convertToAssets(1e18) in BASE-ASSET decimals — for a 6-decimal asset,
+     *  1.0025 is "1002506", not 1e18. Absent while total_supply is 0. */
+    share_price: z.string().optional(),
+    allocation: z.array(AllocationSlice).default([]),
+    source: z.enum(['tick', 'sampler', 'backfill']).default('tick'),
+  })
+  .strict()
+
+/** Derived from the points on every request, never stored. Every figure is
+ *  nullable and is null — not zero — when the series is too short to support
+ *  it. Render "not enough history" for a null; rendering 0.0% is a claim. */
+export const PerformanceSummary = z
+  .object({
+    observations: z.number().int().min(0),
+    first_at: z.string().datetime().nullable().default(null),
+    last_at: z.string().datetime().nullable().default(null),
+    share_price: z.string().nullable().default(null),
+    total_assets: Uint256Str.nullable().default(null),
+    /** 0.0123 is +1.23%, matching the apy_fraction convention. */
+    return_pct: z.number().nullable().default(null),
+    return_24h_pct: z.number().nullable().default(null),
+    return_7d_pct: z.number().nullable().default(null),
+    annualized_return_pct: z.number().nullable().default(null),
+    volatility_pct: z.number().nullable().default(null),
+    /** Largest peak-to-trough fall, positive. What a depositor actually feels. */
+    max_drawdown_pct: z.number().nullable().default(null),
+    /** Annualized return over annualized volatility. Not a Sharpe ratio — no
+     *  risk-free rate is subtracted — so do not label it one in the UI. */
+    risk_adjusted_return: z.number().nullable().default(null),
+  })
+  .strict()
+
+export const VaultPerformance = z
+  .object({
+    vault: Address,
+    points: z.array(PerformancePoint).default([]),
+    summary: PerformanceSummary,
+  })
+  .strict()
+
 // ── Frozen API contract (agent/api — implemented by Lane B, consumed by E) ──
 
 export const GenesisChatRequest = z
@@ -296,6 +363,7 @@ export const GenesisFinalizeResponse = z
 export type Mandate = z.infer<typeof Mandate>
 export type MarketSnapshot = z.infer<typeof MarketSnapshot>
 export type Fact = z.infer<typeof Fact>
+export type SourceNote = z.infer<typeof SourceNote>
 export type AllocationDecision = z.infer<typeof AllocationDecision>
 export type VenueIntent = z.infer<typeof VenueIntent>
 export type ExecutionPlan = z.infer<typeof ExecutionPlan>

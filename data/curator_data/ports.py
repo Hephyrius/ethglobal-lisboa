@@ -62,6 +62,7 @@ class BaseSource(ABC):
 
     def __init__(self) -> None:
         self._notes: list[str] = []
+        self._remarks: list[str] = []
 
     @abstractmethod
     async def fetch(self, assets: list[str]) -> list[Fact]:
@@ -83,13 +84,41 @@ class BaseSource(ABC):
     # ignores this mechanism behaves exactly as before.
 
     def note(self, message: str) -> None:
-        """Record a partial failure to surface in `MarketSnapshot.errors`."""
+        """Record a partial **failure** to surface in `MarketSnapshot.errors`.
+
+        Only for something that was supposed to work and did not. If you are
+        reaching for this to explain a deliberate skip or a question the source
+        was never able to answer, use `remark` — see below.
+        """
         self._notes.append(message)
 
     def drain_notes(self) -> list[str]:
         """Return and clear notes. Called by the registry after each fetch."""
         notes, self._notes = self._notes, []
         return notes
+
+    # ── context channel ───────────────────────────────────────────────────
+    #
+    # `note` and `remark` were one channel until the journal was counted. Of the
+    # 36 recorded ticks, 35 reported "USDC is a quote token on this venue" and
+    # 35 reported a subgraph skipped by a deliberate timeout budget — as errors.
+    # The curator prompt renders `errors[]` under the heading *Data you could
+    # NOT read this tick. Reason about this explicitly*, so every single tick
+    # opened by telling the agent that half its data layer was broken when it
+    # was working exactly as designed.
+    #
+    # A source that cannot answer a question it was never able to answer has not
+    # failed. Neither has one we chose not to wait for. Both are worth saying;
+    # neither is a gap in the agent's view of the market.
+
+    def remark(self, message: str) -> None:
+        """Record non-failure context, surfaced in `MarketSnapshot.notes`."""
+        self._remarks.append(message)
+
+    def drain_remarks(self) -> list[str]:
+        """Return and clear remarks. Called by the registry after each fetch."""
+        remarks, self._remarks = self._remarks, []
+        return remarks
 
     async def close(self) -> None:
         """Release held resources. Safe to call more than once."""

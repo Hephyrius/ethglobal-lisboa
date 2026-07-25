@@ -257,12 +257,20 @@ async def test_missing_credential_raises_before_any_request():
 
 
 async def test_a_quote_token_is_not_priced_against_itself():
-    """USDC's price here would be a peg assumption, not an observation."""
+    """USDC's price here would be a peg assumption, not an observation.
+
+    And the *channel* is the assertion, not just the message. This fired on 35
+    of 36 journalled ticks, and while it lived in `drain_notes` it reached the
+    curator prompt under "Data you could NOT read this tick. Reason about this
+    explicitly" — telling the agent a working source was broken, every tick.
+    A question the source was never able to answer is context, not a gap.
+    """
     source = _source(_router(swaps=[_swap_weth_to_usdc(0.01, 18.58)]))
     facts = await source.fetch(["USDC"])
 
     assert facts == []
-    assert "quote token" in source.drain_notes()[0]
+    assert source.drain_notes() == [], "a category mistake must not be reported as a failure"
+    assert "quote token" in source.drain_remarks()[0]
 
 
 async def test_unknown_symbol_is_noted_with_the_fix_rather_than_guessed():

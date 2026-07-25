@@ -197,6 +197,10 @@ class MessariSource(BaseSource):
                 for p in enabled_protocols(family=family, chain=settings.chain)
             ]
         )
+        #: protocol key -> consecutive failures. Drives the circuit breaker.
+        self._failures: dict[str, int] = {}
+        #: protocol key -> snapshots skipped since the breaker last probed.
+        self._skipped_since_probe: dict[str, int] = {}
 
     @property
     def protocols(self) -> list[Protocol]:
@@ -224,18 +228,76 @@ class MessariSource(BaseSource):
                 "-> API Keys and put it in .env"
             )
 
+        live = [p for p in self._protocols if self._breaker_allows(p)]
         results = await asyncio.gather(
-            *(self._fetch_with_deadline(p, wanted) for p in self._protocols),
+            *(self._fetch_with_deadline(p, wanted) for p in live),
             return_exceptions=True,
         )
 
         facts: list[Fact] = []
-        for protocol, result in zip(self._protocols, results, strict=True):
+        for protocol, result in zip(live, results, strict=True):
             if isinstance(result, BaseException):
-                self.note(f"{protocol.key}: {type(result).__name__}: {result}")
+                # A deadline miss already reads as a sentence; anything else
+                # needs its type to be diagnosable.
+                detail = (
+                    str(result)
+                    if isinstance(result, TimeoutError)
+                    else f"{type(result).__name__}: {result}"
+                )
+                self._record_failure(protocol, detail)
                 continue
+            self._failures.pop(protocol.key, None)
             facts.extend(result)
         return facts
+
+    # ── circuit breaker ───────────────────────────────────────────────────
+    #
+    # Measured over 36 journalled ticks: uniswap-v3 timed out 27 times and
+    # returned a gateway error 8 more, for 35 failures and zero facts. Every one
+    # of them cost 6 seconds of a tick's budget and produced a line in
+    # `errors[]` telling the agent its data layer was broken.
+    #
+    # Retrying an endpoint that has failed 35 times in a row is not resilience.
+    # After three consecutive failures a protocol is skipped without a request,
+    # and the skip is reported once as a *remark* rather than an error — because
+    # a deliberate skip is a decision we made, not data we were denied.
+    #
+    # It is not permanent. Every PROBE_EVERY-th snapshot the breaker lets one
+    # request through, so a subgraph that recovers comes back on its own. A
+    # breaker with no probe is just a delayed outage.
+
+    #: Consecutive failures before a protocol is skipped without being called.
+    BREAKER_TRIPS_AFTER = 3
+    #: With the breaker open, admit one probe every Nth snapshot.
+    BREAKER_PROBE_EVERY = 8
+
+    def _breaker_allows(self, protocol: Protocol) -> bool:
+        failures = self._failures.get(protocol.key, 0)
+        if failures < self.BREAKER_TRIPS_AFTER:
+            return True
+
+        self._skipped_since_probe[protocol.key] = (
+            self._skipped_since_probe.get(protocol.key, 0) + 1
+        )
+        if self._skipped_since_probe[protocol.key] >= self.BREAKER_PROBE_EVERY:
+            self._skipped_since_probe[protocol.key] = 0
+            return True
+
+        self.remark(
+            f"{protocol.key} skipped without a request after {failures} consecutive "
+            f"failures; it is probed again every {self.BREAKER_PROBE_EVERY} snapshots"
+        )
+        return False
+
+    def _record_failure(self, protocol: Protocol, message: str) -> None:
+        """Count a failure and decide whether it is news."""
+        count = self._failures.get(protocol.key, 0) + 1
+        self._failures[protocol.key] = count
+        if count <= self.BREAKER_TRIPS_AFTER:
+            # Still news: the agent should know it lost a protocol it expected.
+            self.note(f"{protocol.key}: {message}")
+        else:
+            self.remark(f"{protocol.key} still failing on probe ({message})")
 
     async def _fetch_with_deadline(self, protocol: Protocol, wanted: set[str]) -> list[Fact]:
         """One protocol, bounded. A slow subgraph costs only itself."""
@@ -244,11 +306,10 @@ class MessariSource(BaseSource):
                 self._fetch_protocol(protocol, wanted), timeout=PROTOCOL_TIMEOUT_S
             )
         except asyncio.TimeoutError:
-            self.note(
-                f"{protocol.key}: no response within {PROTOCOL_TIMEOUT_S:g}s - skipped so it "
-                f"does not delay the other protocols"
-            )
-            return []
+            raise TimeoutError(
+                f"no response within {PROTOCOL_TIMEOUT_S:g}s - skipped so it does not "
+                f"delay the other protocols"
+            ) from None
 
     async def _fetch_protocol(self, protocol: Protocol, wanted: set[str]) -> list[Fact]:
         builder = FactBuilder(self.key, chain=protocol.chain)

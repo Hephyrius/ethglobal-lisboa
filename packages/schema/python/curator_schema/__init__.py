@@ -12,6 +12,7 @@ honest by the golden fixtures in packages/schema/fixtures/.
 
 from .models import (
     AgentAction,
+    AllocationSlice,
     AllocationDecision,
     AquaDockIntent,
     AquaProgram,
@@ -27,15 +28,20 @@ from .models import (
     MandateConstraints,
     MarketSnapshot,
     ModelProvenance,
+    PerformancePoint,
+    PerformanceSummary,
     SourceError,
+    SourceNote,
     SwapIntent,
     TargetAllocation,
+    VaultPerformance,
     VaultState,
     VenueIntent,
 )
 
 __all__ = [
     "AgentAction",
+    "AllocationSlice",
     "AllocationDecision",
     "AquaDockIntent",
     "AquaProgram",
@@ -51,9 +57,13 @@ __all__ = [
     "MandateConstraints",
     "MarketSnapshot",
     "ModelProvenance",
+    "PerformancePoint",
+    "PerformanceSummary",
     "SourceError",
+    "SourceNote",
     "SwapIntent",
     "TargetAllocation",
+    "VaultPerformance",
     "VaultState",
     "VenueIntent",
 ]

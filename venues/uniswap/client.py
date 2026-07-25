@@ -18,6 +18,8 @@ from typing import Any, Final, Literal
 
 import httpx
 
+from ..http import LoopBoundClient
+
 from ..addresses import CHAIN_ID
 from ..config import VenueConfig
 from ..errors import NoRouteError, VenueAPIError
@@ -83,8 +85,11 @@ class UniswapClient:
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
-        self._client = client
         self._owns_client = client is None
+        # Rebuilt if the event loop changes; adapters are cached in a
+        # module-level registry that outlives any one loop. See venues/http.py.
+        self._bound = LoopBoundClient(lambda: httpx.AsyncClient(timeout=self._timeout))
+        self._bound.adopt(client)
 
     @classmethod
     def from_config(
@@ -102,15 +107,12 @@ class UniswapClient:
         await self.aclose()
 
     async def aclose(self) -> None:
-        if self._owns_client and self._client is not None:
-            await self._client.aclose()
-            self._client = None
+        if self._owns_client:
+            await self._bound.aclose()
 
     @property
     def _http(self) -> httpx.AsyncClient:
-        if self._client is None:
-            self._client = httpx.AsyncClient(timeout=self._timeout)
-        return self._client
+        return self._bound.get_client()
 
     @property
     def _headers(self) -> dict[str, str]:

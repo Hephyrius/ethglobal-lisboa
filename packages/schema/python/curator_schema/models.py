@@ -99,6 +99,20 @@ class SourceError(Frozen):
     message: str
 
 
+class SourceNote(Frozen):
+    """Context about a source that is *not* a failure.
+
+    Split out from `SourceError` because the two are read differently and the
+    conflation was doing real damage: 35 of the 36 journalled ticks reported
+    "USDC is a quote token on this venue" as an error, and the prompt renders
+    errors as *data you could not read* and asks the model to reason about the
+    gap. A category mistake and a deliberate skip are not gaps.
+    """
+
+    source: str
+    message: str
+
+
 class MarketSnapshot(Frozen):
     """Source-agnostic by construction: a flat list of facts, not a provider's
     response shape. The registry merges partial contributions from every
@@ -109,6 +123,8 @@ class MarketSnapshot(Frozen):
     #: A failing source degrades the snapshot; it never crashes the loop. The
     #: model is shown these so it knows what it could not see.
     errors: list[SourceError] = Field(default_factory=list)
+    #: Non-failures worth stating. Shown to the model as context, never as a gap.
+    notes: list[SourceNote] = Field(default_factory=list)
 
 
 # ── AllocationDecision ────────────────────────────────────────────────────
@@ -293,6 +309,70 @@ class VaultState(Frozen):
     block_number: int | None = Field(default=None, ge=0)
 
 
+# ── VaultPerformance ──────────────────────────────────────────────────────
+
+
+class AllocationSlice(Frozen):
+    """One asset's share of the vault at one moment."""
+
+    symbol: str
+    value_in_asset: Uint256Str
+    committed_to_venue: str | None = None
+
+
+class PerformancePoint(Frozen):
+    """One observation of a vault's worth. Never an interpolation.
+
+    On a pinned fork blocks advance only when a transaction is mined, so this
+    series is event-spaced rather than time-spaced. A flat stretch between two
+    trades is the truth, and filling it in would be inventing history.
+    """
+
+    timestamp: datetime
+    total_assets: Uint256Str
+    total_supply: Uint256Str
+    block_number: int | None = Field(default=None, ge=0)
+    #: `convertToAssets(1e18)` in BASE-ASSET decimals — for a 6-decimal asset a
+    #: price of 1.0025 is "1002506", not 1e18 (request #27). None while supply
+    #: is zero, because a share of nothing has no price.
+    share_price: str | None = None
+    allocation: list[AllocationSlice] = Field(default_factory=list)
+    source: Literal["tick", "sampler", "backfill"] = "tick"
+
+
+class PerformanceSummary(Frozen):
+    """Risk figures derived from the series. Never stored.
+
+    Recomputed on every request, so a metric cannot drift from the series it
+    describes. **Every figure is None rather than zero when the series cannot
+    support it** — an annualized volatility from three points is not a small
+    number, it is a meaningless one, and rendering 0.0% would be a claim.
+    """
+
+    observations: int = Field(ge=0)
+    first_at: datetime | None = None
+    last_at: datetime | None = None
+    share_price: str | None = None
+    total_assets: Uint256Str | None = None
+    #: 0.0123 is +1.23% — the same fraction convention as `apy_fraction`.
+    return_pct: float | None = None
+    return_24h_pct: float | None = None
+    return_7d_pct: float | None = None
+    annualized_return_pct: float | None = None
+    volatility_pct: float | None = None
+    #: Largest peak-to-trough fall, positive. The number a depositor feels.
+    max_drawdown_pct: float | None = None
+    #: Annualized return over annualized volatility. Deliberately not called a
+    #: Sharpe ratio: no risk-free rate is subtracted, so it is not one.
+    risk_adjusted_return: float | None = None
+
+
+class VaultPerformance(Frozen):
+    vault: Address
+    points: list[PerformancePoint] = Field(default_factory=list)
+    summary: PerformanceSummary
+
+
 __all__ = [
     "Mandate",
     "MandateConstraints",
@@ -300,6 +380,7 @@ __all__ = [
     "Fact",
     "FactSubject",
     "SourceError",
+    "SourceNote",
     "AllocationDecision",
     "TargetAllocation",
     "SwapIntent",
@@ -315,4 +396,8 @@ __all__ = [
     "VaultState",
     "Holding",
     "AquaStrategy",
+    "AllocationSlice",
+    "PerformancePoint",
+    "PerformanceSummary",
+    "VaultPerformance",
 ]

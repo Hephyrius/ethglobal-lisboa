@@ -18,6 +18,8 @@ import logging
 
 import httpx
 
+from ..http import LoopBoundClient
+
 logger = logging.getLogger(__name__)
 
 WORD = 32
@@ -66,14 +68,14 @@ class RpcClient:
             raise ValueError("an RPC url is required")
         self.url = url
         self._timeout = timeout_s
-        self._client = client
         self._owns_client = client is None
+        # Rebuilt if the event loop changes — see curator_data/http.py.
+        self._http = LoopBoundClient(lambda: httpx.AsyncClient(timeout=timeout_s))
+        self._http.adopt(client)
 
     @property
     def client(self) -> httpx.AsyncClient:
-        if self._client is None:
-            self._client = httpx.AsyncClient(timeout=self._timeout)
-        return self._client
+        return self._http.get_client()
 
     async def call(self, to: str, selector: str) -> bytes:
         """`eth_call` a no-argument view function. Returns raw return data."""
@@ -113,9 +115,8 @@ class RpcClient:
             raise RpcError("eth_call result was not valid hex") from exc
 
     async def aclose(self) -> None:
-        if self._client is not None and self._owns_client:
-            await self._client.aclose()
-        self._client = None
+        if self._owns_client:
+            await self._http.aclose()
 
 
 __all__ = ["RpcClient", "RpcError", "decode_word", "decode_string", "WORD"]

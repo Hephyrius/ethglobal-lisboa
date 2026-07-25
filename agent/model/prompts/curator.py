@@ -147,11 +147,33 @@ def _render_gaps(snapshot: MarketSnapshot) -> str:
     the model has to know the difference between "utilization is fine" and
     "utilization could not be read". Hiding the gap invites a confident decision
     built on absent data.
+
+    Only genuine failures. `snapshot.notes` is rendered separately and much more
+    quietly — see `_render_notes`.
     """
     if not snapshot.errors:
         return ""
     lines = ["", "Data you could NOT read this tick. Reason about this explicitly:"]
     lines += [f"- {error.source}: {error.message}" for error in snapshot.errors]
+    return "\n".join(lines)
+
+
+def _render_notes(snapshot: MarketSnapshot) -> str:
+    """Non-failures: things a source chose not to answer, or could never answer.
+
+    Separate from `_render_gaps` and deliberately unemphatic. These used to
+    arrive in `errors[]`, which meant every tick opened by telling the agent
+    that two of its four sources were broken when both were behaving exactly as
+    designed — 35 of 36 journalled ticks carried "USDC is a quote token on this
+    venue" under a heading that asked the model to reason about the gap.
+
+    Worth showing at all because a curator should know why a number is absent.
+    Not worth alarming it with.
+    """
+    if not snapshot.notes:
+        return ""
+    lines = ["", "Notes on your data sources. These are not failures:"]
+    lines += [f"- {note.source}: {note.message}" for note in snapshot.notes]
     return "\n".join(lines)
 
 
@@ -221,7 +243,7 @@ YOUR MANDATE
 {_render_holdings(vault)}
 
 MARKET DATA. Cite these ids in `facts_used`:
-{_render_facts(snapshot)}{_render_gaps(snapshot)}
+{_render_facts(snapshot)}{_render_gaps(snapshot)}{_render_notes(snapshot)}
 
 Decide what to do with this vault now. Work in this order:
 

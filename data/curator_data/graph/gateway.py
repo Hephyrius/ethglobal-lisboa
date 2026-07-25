@@ -18,6 +18,7 @@ from typing import Any
 import httpx
 
 from ..config import Settings
+from ..http import LoopBoundClient
 from .errors import GatewayAuthError, GatewayError, GatewayQueryError
 
 logger = logging.getLogger(__name__)
@@ -57,14 +58,18 @@ class GatewayClient:
         self.settings = settings
         # An injected client is how tests reach this without a network or a
         # credential — `httpx.MockTransport` needs no new dependency.
-        self._client = client
         self._owns_client = client is None
+        # Rebuilt if the event loop changes: this gateway is reachable from the
+        # module-level registry singleton, which outlives any one loop. See
+        # curator_data/http.py.
+        self._http = LoopBoundClient(
+            lambda: httpx.AsyncClient(timeout=settings.request_timeout_s)
+        )
+        self._http.adopt(client)
 
     @property
     def client(self) -> httpx.AsyncClient:
-        if self._client is None:
-            self._client = httpx.AsyncClient(timeout=self.settings.request_timeout_s)
-        return self._client
+        return self._http.get_client()
 
     @property
     def label(self) -> str:
@@ -164,9 +169,8 @@ class GatewayClient:
         return data
 
     async def aclose(self) -> None:
-        if self._client is not None and self._owns_client:
-            await self._client.aclose()
-        self._client = None
+        if self._owns_client:
+            await self._http.aclose()
 
 
 __all__ = ["GatewayClient"]

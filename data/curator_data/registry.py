@@ -22,7 +22,7 @@ import asyncio
 import logging
 from collections.abc import Callable, Iterable, Mapping
 
-from curator_schema.models import Fact, MarketSnapshot, SourceError
+from curator_schema.models import Fact, MarketSnapshot, SourceError, SourceNote
 
 from .config import Settings
 from .facts import dedupe_ids, utcnow
@@ -149,27 +149,32 @@ class Registry:
         )
 
         facts: list[Fact] = []
-        for key, (source_facts, source_error, notes) in zip(known, results, strict=True):
+        notes: list[SourceNote] = []
+        for key, (source_facts, source_error, source_notes, remarks) in zip(
+            known, results, strict=True
+        ):
             if source_error is not None:
                 errors.append(source_error)
-            errors.extend(SourceError(source=key, message=note) for note in notes)
+            errors.extend(SourceError(source=key, message=note) for note in source_notes)
+            notes.extend(SourceNote(source=key, message=remark) for remark in remarks)
             facts.extend(self._enforce_provenance(key, source_facts, errors))
 
         return MarketSnapshot(
             taken_at=taken_at,
             facts=dedupe_ids(sorted(facts, key=lambda f: f.id)),
             errors=errors,
+            notes=notes,
         )
 
     async def _fetch_one(
         self, key: str, assets: list[str]
-    ) -> tuple[list[Fact], SourceError | None, list[str]]:
+    ) -> tuple[list[Fact], SourceError | None, list[str], list[str]]:
         """Call one source. Never raises — that is the entire contract here."""
         try:
             source = self._resolve(key)
         except Exception as exc:  # noqa: BLE001 - construction failure is a source failure
             logger.warning("data source %s failed to construct: %s", key, exc)
-            return [], SourceError(source=key, message=f"could not initialise: {exc}"), []
+            return [], SourceError(source=key, message=f"could not initialise: {exc}"), [], []
 
         facts: list[Fact] = []
         error: SourceError | None = None
@@ -196,22 +201,28 @@ class Registry:
 
         # Drained even on failure: a source that fetched three protocols and
         # then blew up on the fourth should still report the three notes.
-        return facts, error, self._drain_notes(key, source)
+        return (
+            facts,
+            error,
+            self._drain(key, source, "drain_notes"),
+            self._drain(key, source, "drain_remarks"),
+        )
 
     @staticmethod
-    def _drain_notes(key: str, source: DataSource) -> list[str]:
-        """Collect a source's partial-failure notes, if it records any.
+    def _drain(key: str, source: DataSource, method: str) -> list[str]:
+        """Collect one of a source's side channels, if it keeps that one.
 
-        Optional by design — `drain_notes` is not part of the frozen port, so a
-        source without it is still a valid source.
+        Optional by design — neither `drain_notes` (partial failures) nor
+        `drain_remarks` (non-failure context) is part of the frozen port, so a
+        source implementing neither is still a valid source.
         """
-        drain = getattr(source, "drain_notes", None)
+        drain = getattr(source, method, None)
         if not callable(drain):
             return []
         try:
-            return [str(note) for note in (drain() or [])]
+            return [str(item) for item in (drain() or [])]
         except Exception as exc:  # noqa: BLE001 - reporting must not break reporting
-            logger.warning("draining notes from %s failed: %s", key, exc)
+            logger.warning("draining %s from %s failed: %s", method, key, exc)
             return []
 
     @staticmethod
