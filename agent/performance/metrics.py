@@ -32,6 +32,7 @@ The figures are still fragile over short windows, which is what
 
 from __future__ import annotations
 
+import logging
 import math
 from collections.abc import Sequence
 from datetime import timedelta
@@ -89,11 +90,49 @@ def _price(point: PerformancePoint) -> float | None:
     return value if value > 0 else None
 
 
+#: A step larger than this between consecutive observations is not a return.
+#:
+#: A share price is a slow-moving O(1) quantity. Even a catastrophic vault does
+#: not lose 99% between two blocks, and nothing legitimate gains 100×. What does
+#: produce a jump like that is a **unit mistake** — and one already happened:
+#: live points were recorded as a 1e18-scaled ratio while backfilled points used
+#: base-asset units, and the vault page reported a return of
+#: 99,965,347,459,900% on a vault that was down 3 bps.
+#:
+#: That bug is fixed at the source (`recorder.share_price_in_asset_units`). This
+#: is the backstop, because the failure mode is silent, catastrophic in
+#: presentation, and the series is assembled from three writers — a tick, a
+#: sampler and a chain backfill — any of which could drift again.
+_IMPLAUSIBLE_STEP = 100.0
+
+
 def _priced(points: Sequence[PerformancePoint]) -> list[tuple[PerformancePoint, float]]:
-    """Points that actually have a price, oldest first."""
+    """Points that actually have a price, oldest first, on one consistent scale.
+
+    Where an implausible step is found, the series is **truncated to the most
+    recent consistent run** rather than repaired. Two reasons: the newest points
+    are the ones a reader is asking about, and guessing a rescale factor would
+    turn a visible bug into an invisible one.
+    """
     out = [(p, price) for p in points if (price := _price(p)) is not None]
     out.sort(key=lambda pair: pair[0].timestamp)
-    return out
+    if len(out) < 2:
+        return out
+
+    cut = 0
+    for index in range(1, len(out)):
+        previous, current = out[index - 1][1], out[index][1]
+        ratio = max(current / previous, previous / current)
+        if ratio >= _IMPLAUSIBLE_STEP:
+            logging.getLogger(__name__).warning(
+                "share price jumped %.3gx between %s and %s — a unit mismatch, not a "
+                "return; dropping everything before it",
+                ratio,
+                out[index - 1][0].timestamp,
+                out[index][0].timestamp,
+            )
+            cut = index
+    return out[cut:]
 
 
 def _return_over(

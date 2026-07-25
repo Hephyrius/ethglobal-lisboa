@@ -8,6 +8,82 @@ the hackathon window.
 
 ---
 
+## 2026-07-25 — Wave 1 P6: the charts, and the 1e12 error the operator caught before I did
+
+**What changed.** `PerformancePanel` on the vault page: headline return / 24h / max drawdown /
+risk-adjusted, a share-price curve with executed decisions marked on it, a 100%-stacked allocation
+area, and a window picker. Two hand-rolled SVG chart components, no new dependency. Plus a
+share-price scale bug fixed at the source, a backstop against it recurring, and 3 corrupted points
+repaired.
+
+### The bug
+
+The operator looked at the page and said *"looks like %s for returns are insane, check decimals
+ser"*. They were right, and the number was **99,965,347,459,900%** — on a vault that was down 3 bps.
+
+There are two live conventions for "share price" in this system:
+
+| Source | Value for a price of 0.999653 | Convention |
+|---|---|---|
+| `VaultState.share_price` (`Web3VaultClient`) | `999653474600000000` | dimensionless ratio × 1e18 |
+| `convertToAssets(1e18)` — the contract, and the backfill | `999653` | base-asset units |
+
+`PerformancePoint.share_price` is specified as the second. `recorder.point_from_state` copied the
+first through verbatim — under a comment I wrote confidently asserting it already carried the right
+convention. So backfilled points read `999653` and live points read `999653474600000000` in the same
+series, and the first return that spanned both was 10^18 / 10^6 = **10^12**.
+
+This is not a new trap. `VaultStats.tsx` documents it from the UI side, cross-lane request #12 raised
+it from the schema side, and request #27 pinned the contract's convention. I walked into the known
+one from a third direction, and the docstring asserting otherwise is what made it invisible — I
+wrote down the belief instead of checking it.
+
+### Three responses, not one
+
+**Fix at the source.** `share_price_in_asset_units()` converts explicitly from the named
+`_SHARE_PRICE_SCALE` constant, multiplying before dividing. Not a magnitude heuristic: *"if it looks
+too big, divide"* is how a genuine 1000× move becomes a silent rescale.
+
+**A backstop in `metrics._priced`.** A share price is a slow-moving O(1) quantity; a ≥100× step
+between consecutive observations is a unit mistake every time. The series is now truncated to its
+most recent self-consistent run, with a warning. Kept even though the source bug is fixed, because
+the series has **three independent writers** — tick, sampler, backfill — and the failure mode is
+silent and catastrophic in presentation.
+
+**Repair the data.** Three already-written points rescaled. The store is append-only for a reason,
+but that invariant protects the audit trail of *decisions*; a performance series is a derived cache
+that the chain can rebuild, and leaving known-corrupt numbers on a vault page is worse.
+
+**The test fixture was wrong too, and passing.** `test_a_holding_with_no_valuation_is_dropped`
+constructed a `VaultState` with `share_price="1000000"` — the base-asset value in the 1e18 field —
+and asserted the point matched. It agreed with the bug. Corrected, with the reason in the test.
+
+### Chart decisions worth stating
+
+**No charting library.** The JS dependency policy wants packages ~6 months old and exactly pinned;
+adding recharts the night before submission is the supply-chain risk that policy exists to prevent,
+and it would pull twenty transitive packages to draw one polyline. ~150 lines of SVG instead.
+
+**No smoothing, and no zero baseline.** The series is event-spaced, so a spline would invent prices
+the vault never had. And a share price sits near 1.0 and moves in basis points — anchoring the
+y-axis at zero renders every vault as a flat line, so the domain is the observed range and the
+*starting* value is drawn as a dashed reference rule.
+
+**Executed decisions are marked on the curve and clicking one scrolls to its reasoning.** That link
+is the argument the project is making: data → reasoning → transaction → *outcome*. Markers attach to
+the nearest observation within five minutes, because an `AgentAction` is stamped when the cycle
+started and the observation is recorded after the transaction confirms — they never share an instant.
+Anything further away is left unmarked rather than attributed to a move it did not cause.
+
+**Null renders as "not enough history", never as 0.0%.** The API is careful to return null rather
+than zero; a UI that prints `0.0%` for a null throws that away at the last step.
+
+**Also added `distDir: process.env.NEXT_DIST_DIR` to `next.config.mjs`**, so a production build can
+verify the tree while `next dev` keeps the demo up. Without it `next build` dies `EPERM` on
+`.next/trace` — a file lock that reads as a code error.
+
+---
+
 ## 2026-07-25 — Wave 1 P3: two assets and two protocols was not a universe
 
 **What changed.** cbBTC, DAI and AERO join the tradeable set; `defillama`, `feargreed` and `gas`

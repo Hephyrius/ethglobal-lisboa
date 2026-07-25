@@ -16,10 +16,13 @@ import type { FeedContext } from './feed-context'
 export function DecisionFeed({
   address,
   context,
+  highlightId,
 }: {
   address: string
   /** Vault/mandate facts an AgentAction does not carry. See feed-context.ts. */
   context?: FeedContext
+  /** Action id the track-record chart last pointed at, ringed here. */
+  highlightId?: string | null
 }) {
   const { data, isPending } = useVaultDecisions(address)
   const tick = useVaultTick(address)
@@ -70,6 +73,7 @@ export function DecisionFeed({
               key={action.id}
               action={action}
               isLatest={index === 0}
+              isHighlighted={action.id === highlightId}
               context={context}
             />
           ))}

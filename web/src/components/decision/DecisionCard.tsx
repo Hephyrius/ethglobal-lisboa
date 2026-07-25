@@ -31,13 +31,21 @@ const STATUS: Record<AgentAction['status'], { tone: BadgeTone; label: string }> 
   pending: { tone: 'neutral', label: 'PENDING' },
 }
 
+/** DOM id for one decision's card. One definition, used by both sides. */
+export function decisionAnchor(actionId: string): string {
+  return `decision-${actionId}`
+}
+
 export function DecisionCard({
   action,
   isLatest,
+  isHighlighted,
   context,
 }: {
   action: AgentAction
   isLatest?: boolean
+  /** Highlighted because the chart above was clicked on this decision. */
+  isHighlighted?: boolean
   context?: FeedContext
 }) {
   const status = STATUS[action.status]
@@ -57,9 +65,14 @@ export function DecisionCard({
 
   return (
     <article
+      // Stable anchor so the track-record chart can scroll a marker's decision
+      // into view. The whole point of marking executed decisions on the curve
+      // is that a step in the price leads to the reasoning that caused it.
+      id={decisionAnchor(action.id)}
       className={cn(
-        'card overflow-hidden animate-fade-up',
+        'card overflow-hidden animate-fade-up scroll-mt-24',
         isLatest && 'ring-1 ring-agent/20',
+        isHighlighted && 'ring-2 ring-agent/60',
       )}
     >
       <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-line px-4 py-3">

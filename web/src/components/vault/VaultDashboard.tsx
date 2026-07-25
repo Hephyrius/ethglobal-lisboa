@@ -1,22 +1,41 @@
 'use client'
 
+import { useCallback, useState } from 'react'
 import type { VaultState } from '@curator/schema'
 import { Badge } from '@/components/ui/Badge'
 import { Card, CardBody } from '@/components/ui/Card'
 import { ModeNotice } from '@/components/ui/ModeBadge'
 import { DecisionFeed } from '@/components/decision/DecisionFeed'
+import { decisionAnchor } from '@/components/decision/DecisionCard'
+import { PerformancePanel } from '@/components/performance/PerformancePanel'
 import { MandateView } from '@/components/mandate/MandateView'
 import { DepositWithdraw } from './DepositWithdraw'
 import { Holdings } from './Holdings'
 import { VaultHeader } from './VaultHeader'
 import { VaultStats } from './VaultStats'
-import { useVaultState } from '@/lib/api/vault-queries'
+import { useVaultDecisions, useVaultState } from '@/lib/api/vault-queries'
 import { useVaultMandate } from '@/lib/mandate/use-mandate'
 import { useShareDecimals, useVaultExists } from '@/lib/chain/vault-contract'
 import { networkLabel } from '@/lib/chain/explorer'
 
 export function VaultDashboard({ address }: { address: `0x${string}` }) {
   const { data, isPending } = useVaultState(address)
+  // Fetched here rather than only inside the feed so the track-record chart can
+  // mark executed decisions on the curve. React Query dedupes the two callers
+  // onto one request.
+  const decisions = useVaultDecisions(address)
+  const [highlighted, setHighlighted] = useState<string | null>(null)
+
+  // Clicking a point on the price curve scrolls to the decision that caused
+  // that step. Curve -> reasoning -> transaction is the argument the whole
+  // project is making, and it only lands if the two are actually connected.
+  const focusDecision = useCallback((id: string) => {
+    setHighlighted(id)
+    document.getElementById(decisionAnchor(id))?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'center',
+    })
+  }, [])
   const { mandate, provenance } = useVaultMandate(address)
   // Read rather than assumed — the share scale is what makes share price
   // correct or wrong by 1e12. See VaultStats.
@@ -53,6 +72,13 @@ export function VaultDashboard({ address }: { address: `0x${string}` }) {
         </div>
       </div>
 
+      <PerformancePanel
+        address={address}
+        state={state}
+        decisions={decisions.data?.data ?? []}
+        onSelectDecision={focusDecision}
+      />
+
       <MandateView
         mandate={mandate}
         provenance={
@@ -74,6 +100,7 @@ export function VaultDashboard({ address }: { address: `0x${string}` }) {
 
       <DecisionFeed
         address={address}
+        highlightId={highlighted}
         context={{
           tokenDecimals: tokenDecimals(state),
           maxSlippageBps: mandate.constraints.max_slippage_bps,

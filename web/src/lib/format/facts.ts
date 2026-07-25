@@ -20,6 +20,11 @@ const KIND_LABELS: Record<Fact['kind'], string> = {
   volatility: 'Volatility',
   utilization: 'Utilization',
   volume: 'Volume',
+  // A market-mood index and a gas price are not market observations in the
+  // same sense as the rest, and labelling them as such is how a reader (or a
+  // model) mistakes one for a rate. See the same table in the curator prompt.
+  sentiment: 'Sentiment',
+  gas: 'Gas',
 }
 
 export function kindLabel(kind: Fact['kind']): string {
@@ -34,6 +39,13 @@ export function factValue(fact: Fact): string {
     case 'usd':
       return formatUsd(fact.value)
     case 'ratio':
+      // Kind before unit: `sentiment` also arrives as a ratio and means
+      // something entirely different. A utilization of 0.78 is "78% of
+      // capacity"; a sentiment of 0.78 is extreme greed, and rendering the
+      // second as the first is exactly the misread the kind labels exist for.
+      if (fact.kind === 'sentiment') {
+        return `${fact.value.toFixed(2)} / 1.00`
+      }
       // Utilization and similar ratios read far better as percentages.
       return formatPercent(fact.value, fact.value >= 0.1 ? 1 : 2)
     case 'bps':

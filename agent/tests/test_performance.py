@@ -236,7 +236,10 @@ def test_a_holding_with_no_valuation_is_dropped_rather_than_guessed():
         asset="0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
         total_assets="1000000",
         total_supply="1000000000000000000",
-        share_price="1000000",
+        # 1.0 as a `VaultState.share_price` is 1e18, NOT 1000000. This fixture
+        # originally carried the base-asset value and the test passed, which is
+        # how the two conventions got confused in the first place.
+        share_price="1000000000000000000",
         block_number=42,
         holdings=[
             Holding(
@@ -256,5 +259,70 @@ def test_a_holding_with_no_valuation_is_dropped_rather_than_guessed():
 
     point = point_from_state(state)
     assert point.allocation == [AllocationSlice(symbol="USDC", value_in_asset="1000000")]
-    assert point.share_price == "1000000", "copied verbatim, never recomputed"
+    assert point.share_price == "1000000", "rescaled from the 1e18 ratio to asset units"
     assert point.block_number == 42
+
+
+# ── the 1e12 bug ──────────────────────────────────────────────────────────
+
+
+def test_a_live_state_is_rescaled_to_base_asset_units():
+    """The bug that put a return of 99,965,347,459,900% on the vault page.
+
+    `VaultState.share_price` is a dimensionless ratio × 1e18; a
+    `PerformancePoint.share_price` is assets per share in BASE-ASSET decimals.
+    They differ by exactly 10^12 for a 6-decimal asset, and the recorder used to
+    copy the first through as the second — with a comment asserting it already
+    carried the right convention.
+
+    The result was a series where backfilled points read `999653` and live
+    points read `999653474600000000`, on a vault that was down 3 bps.
+    """
+    state = VaultState(
+        address=VAULT,
+        asset="0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        total_assets="9996534746",
+        total_supply="10000000000000000000000",
+        asset_decimals=6,
+        # What Web3VaultClient actually produces: 0.999653 × 1e18.
+        share_price="999653474600000000",
+        block_number=49_078_011,
+    )
+    assert point_from_state(state).share_price == "999653"
+
+
+def test_no_shares_issued_stays_absent_rather_than_becoming_zero():
+    """Before the first deposit a share of nothing has no price. Zero would be
+    a claim that the share is worthless, and it would put a -100% leg at the
+    front of every curve."""
+    state = VaultState(
+        address=VAULT,
+        asset="0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        total_assets="0",
+        total_supply="0",
+        share_price=None,
+    )
+    assert point_from_state(state).share_price is None
+
+
+def test_a_scale_mismatch_is_refused_rather_than_reported_as_a_return():
+    """The backstop, kept because the series has three independent writers.
+
+    A share price is O(1) and slow. A 10^12 step between two observations is a
+    unit mistake every time, and reporting it as a return is far worse than
+    dropping the points before it.
+    """
+    mixed = [
+        _point(0, 1_000_000, block=1),
+        _point(60, 999_653, block=2),
+        # A live point written with the old, wrong scale.
+        _point(120, 999_653_474_600_000_000, block=3),
+        _point(180, 999_653_474_600_000_000, block=4),
+    ]
+    summary = summarize(VAULT, mixed)
+
+    assert summary.return_pct == pytest.approx(0.0), "the consistent tail, not the jump"
+    assert summary.return_pct is not None
+    assert abs(summary.return_pct) < 1.0, (
+        "a scale mismatch reached the summary as a return"
+    )
