@@ -53,6 +53,11 @@ V3_SWAP_EXACT_OUT = 0x01
 V4_SWAP = 0x10
 SWEEP = 0x04
 
+#: UniversalRouter's "spend whatever this contract holds" sentinel, used as
+#: `amountIn` on chained hops. Summing leg amounts without knowing about it
+#: yields ~5.79e76.
+CONTRACT_BALANCE = 1 << 255
+
 
 @contextlib.contextmanager
 def routable():
@@ -160,13 +165,26 @@ async def test_a_tighter_bound_produces_tighter_calldata(requires_uniswap_key):
     assert tight_min > loose_min
 
 
-async def test_the_whole_requested_amount_is_spent(requires_uniswap_key):
-    """Guards a subtler leak than slippage: a route that quietly spends less
-    than requested leaves the rest sitting in the router."""
+async def test_a_leg_amount_is_either_literal_or_the_contract_balance_sentinel(
+    requires_uniswap_key,
+):
+    """`amountIn` is not always a number — and this is the third route-shape
+    assumption in this file to have been wrong.
+
+    UniversalRouter uses `1 << 255` as `CONTRACT_BALANCE`, meaning "spend
+    whatever this router is currently holding", which chained routes use for
+    downstream hops. Naively summing leg amounts therefore produces a
+    ~5.79e76 total and an assertion that the route spends more than the
+    universe contains.
+
+    The sentinel is *safe* — it consumes the router's balance rather than
+    leaving it behind — so the property worth asserting is that every leg is one
+    or the other, never some third thing nobody has accounted for.
+    """
     with routable():
         _quote, _min, spent = await _protection()
 
-    # Only V3 legs report amountIn in a decodable form; a V4-only route reports
-    # none, in which case there is nothing to check here.
-    if spent:
-        assert spent <= TRADE_USDC, "the route would spend more than requested"
+    assert spent <= TRADE_USDC or spent >= CONTRACT_BALANCE, (
+        f"leg amounts sum to {spent}, which is neither within the requested "
+        f"{TRADE_USDC} nor the CONTRACT_BALANCE sentinel"
+    )

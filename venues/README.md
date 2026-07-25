@@ -1,12 +1,14 @@
 # `venues/` — execution adapters (Lane D)
 
 Turns a `VenueIntent` into an `ExecutionPlan`: concrete calldata the vault
-executes. Two venues, deliberately non-overlapping.
+executes. Four venues, deliberately non-overlapping in what they do.
 
 | Venue | Role | What it does |
 |---|---|---|
 | **`uniswap`** | taker | **Rotates what the vault holds.** "Volatility spiked → move to stables." |
 | **`aqua`** | maker | **Holds a position.** Posts the vault's existing tokens as passive liquidity and earns fees. |
+| **`aave`** | lender | **Earns interest** on what the vault already holds, via Aave v3. |
+| **`morpho`** | lender | **Earns interest** via a curated MetaMorpho vault. Needs `ERC4626PriceFeed` registered. |
 
 An Aqua maker is passive by construction — it cannot decide to change its
 composition. That is why both venues exist and why neither is decorative.
@@ -33,7 +35,7 @@ plan  = await venue.plan(intent, vault_state)   # -> ExecutionPlan
 | Function | Signature | Notes |
 |---|---|---|
 | `get_venue` | `(key: str, *, cached: bool = True) -> Venue` | Raises `UnknownVenueError` for an unregistered key. Cached by default so one connection pool is reused across ticks. |
-| `VENUES` | `tuple[str, ...]` | `("uniswap", "aqua")`. Offer these in the genesis UI; validate mandates against them. |
+| `VENUES` | `tuple[str, ...]` | `("uniswap", "aqua", "aave", "morpho")`. Offer these in the genesis UI; validate mandates against them. |
 | `Venue.plan` | `async (intent: VenueIntent, vault: VaultState) -> ExecutionPlan` | The only method the harness calls. |
 | `Venue.key` | `str` | Registry key. |
 | `Venue.aclose` | `async () -> None` | Closes the HTTP/RPC client. Call at shutdown. |
@@ -54,7 +56,7 @@ for row in manifest():          # plain JSON, safe on every render
 
 | Field | Meaning |
 |---|---|
-| `key` · `role` | `uniswap`/taker · `aqua`/maker · `aave`/lender |
+| `key` · `role` | `uniswap`/taker · `aqua`/maker · `aave`,`morpho`/lender |
 | `summary` | One line for the UI |
 | `intents` | The `VenueIntent` kinds it serves — a mandate naming it cannot produce trades the harness can only reject |
 | `tokens` | Symbols, all resolvable by `resolve_token` |
@@ -105,14 +107,45 @@ venue must hand back either the base asset or a token with a feed.
 | Venue | Receives | Valuable? |
 |---|---|---|
 | Aave | `aBasUSDC` / `aBasWETH` | ✅ a 1:1 **rebasing** claim, so the *underlying's* feed is correct for it |
-| Morpho Blue | **nothing** — not an ERC-20, positions live in `position(bytes32,address)` | ❌ `totalAssets()` would fall by the amount supplied. Not built. |
-| MetaMorpho | ERC-4626 shares | ❌ they **appreciate** rather than rebasing, and no Chainlink feed exists for them |
+| Morpho Blue | **nothing** — not an ERC-20, positions live in `position(bytes32,address)` | ❌ `totalAssets()` would fall by the amount supplied. Not usable. |
+| MetaMorpho | ERC-4626 shares | ✅ **via `ERC4626PriceFeed`** — see below |
 
-Aave's 1:1 rebasing property was doing far more work than it appeared to. A
-venue that fails question 2 needs a **new valuation kind on the vault**, which
-is a Lane A contract change — file a request, do not work around it. Supplying
-into a token the vault cannot value collapses every depositor's share price and
-nothing errors.
+Aave's 1:1 rebasing property was doing far more work than it appeared to.
+
+**A missing feed is not a dead end.** `priceFeed(token)` needs something that
+answers `IAggregatorV3` — not necessarily a Chainlink-operated feed. So
+`aqua/solidity/src/ERC4626PriceFeed.sol` composes
+`convertToAssets(1 share) × underlying USD price` and *is* a feed, with no change
+to `contracts/`. Registered with `VaultFactory.setDefaultValuation`, it makes any
+ERC-4626 yield token valuable.
+
+Two things it gets right that a reimplementation would likely not:
+
+- **Timestamps pass through from the underlying feed.** `convertToAssets` is
+  always current, so reporting `block.timestamp` would make the feed *always
+  look fresh* and silently defeat the vault's staleness check — on the half that
+  can actually go stale, the USD price.
+- **It cannot detect a mismatched asset feed** (ETH/USD and USDC/USD are both
+  8-decimal aggregators). `expand-universe.sh` validating `description()` is the
+  check that catches that, which is why `description()` is implemented properly.
+
+Measured on Base: valuing a MetaMorpho share as plain USDC understates the
+position by **760 bps**, and worsens every block.
+
+### Prediction markets — surveyed, none usable
+
+Recorded so the search is not repeated. Three exist on Base and the blocker
+differs:
+
+| Platform | Model | Why not |
+|---|---|---|
+| **Limitless** | CLOB, EIP-712 orders | Real liquidity (454 markets), but the vault cannot sign. Accepts ERC-1271 — `CuratedVault` does not implement it. |
+| **Azuro** | virtual AMM | Not deployed on Base. |
+| **PredictBase** | LMSR **AMM** | Contract-callable, so it *passes* question 1 — but market volumes run $0–$110. The vault would be the market. |
+
+The venue with liquidity cannot be signed for; the venue that can be called has
+no liquidity. Prediction-market **odds** are still consumed as read-only facts
+by the data layer, which needs none of this.
 
 ### Verifying an Aqua position — `assert_position_fillable`
 
@@ -168,6 +201,8 @@ require `UNISWAP_API_KEY` to be present.
 | `SwapIntent` | `uniswap` | 3 steps: ERC-20 approve → Permit2 approve → router execute |
 | `AquaShipIntent` | `aqua` | 3 steps: approve token A → approve token B → `Aqua.ship()` |
 | `AquaDockIntent` | `aqua` | 1 step: `Aqua.dock()` |
+| `SupplyIntent` | `morpho` | 2 steps: approve vault → `deposit(assets, vault)` into MetaMorpho |
+| `WithdrawIntent` | `morpho` | 1 step: `withdraw(assets,…)`, or `redeem(shares,…)` for a full exit |
 | `SupplyIntent` | `aave` | 2 steps: ERC-20 approve pool → `Pool.supply(asset, amount, vault, 0)` |
 | `WithdrawIntent` | `aave` | 1 step: `Pool.withdraw(asset, amount, vault)` |
 
