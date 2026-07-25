@@ -41,25 +41,43 @@ contract Deploy is Script {
     ///      `decimals()` returns 8.
     address internal constant ETH_USD_FEED = 0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70;
 
-    /// @dev Anvil's first account. Public knowledge and worthless — the default exists so a fork
-    ///      deploy needs no configuration at all. A mainnet run must set DEPLOYER_PRIVATE_KEY.
+    /// @dev Anvil's first two accounts. **Their private keys are published in Foundry's own docs**,
+    ///      so anyone can sign as them. Fine on a throwaway fork, catastrophic anywhere real — which
+    ///      is what `_assertSafeForRealNetwork` exists to prevent.
     uint256 internal constant ANVIL_ACCOUNT_0 = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
+    address internal constant ANVIL_ADDRESS_0 = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;
     address internal constant ANVIL_ADDRESS_1 = 0x70997970C51812dc3A010C7d01b50e0d17dc79C8;
+
+    /// @dev Base's ETH/USD feed has a 1200s heartbeat; 3600s absorbs a missed round without
+    ///      bricking accounting. Applied automatically to every network except a fork.
+    uint256 internal constant LIVE_PRICE_MAX_AGE = 3600;
+
+    /// @dev The only network name that gets fork defaults. Anything unrecognised is treated as real,
+    ///      so a typo fails safe rather than shipping a vault with its safety checks off.
+    string internal constant FORK_NETWORK = "base-fork";
+
+    error UnsafeAnvilKeyOnRealNetwork(string what, address account);
+    error StalenessCheckDisabledOnRealNetwork(string network);
 
     function run() external {
         string memory network = vm.envOr("DEPLOY_NETWORK", string("base-fork"));
+        bool isFork = _isForkNetwork(network);
+
         uint256 deployerKey = vm.envOr("DEPLOYER_PRIVATE_KEY", ANVIL_ACCOUNT_0);
         address deployer = vm.addr(deployerKey);
 
         address agent = vm.envOr("AGENT_ADDRESS", ANVIL_ADDRESS_1);
         address guardian = vm.envOr("GUARDIAN_ADDRESS", deployer);
 
-        // 0 disables the Chainlink staleness check. Correct on a pinned fork, where the forked
-        // feed's `updatedAt` is frozen while block.timestamp advances; wrong on mainnet, so the
-        // mainnet run is expected to pass 3600. See ChainlinkPriceLib.readPrice.
-        uint256 priceMaxAge = vm.envOr("PRICE_MAX_AGE", uint256(0));
+        // 0 disables the Chainlink staleness check — required on a pinned fork, where the forked
+        // feed's `updatedAt` is frozen while block.timestamp keeps advancing. The default is now
+        // network-derived rather than a flat 0, because "remember to set PRICE_MAX_AGE" is exactly
+        // the step that gets forgotten at 3am on the mainnet run. Explicit env always wins.
+        uint256 priceMaxAge = vm.envOr("PRICE_MAX_AGE", _defaultPriceMaxAge(network));
 
         bytes32 mandateHash = vm.envOr("MANDATE_HASH", keccak256("demo-mandate-v1"));
+
+        if (!isFork) _assertSafeForRealNetwork(network, deployer, agent, guardian, priceMaxAge);
 
         vm.startBroadcast(deployerKey);
 
@@ -92,6 +110,60 @@ contract Deploy is Script {
                 priceMaxAge: priceMaxAge
             })
         );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Guards for anything that is not a throwaway fork
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// @notice Whether `network` is the throwaway local fork.
+    /// @dev Exact match, and everything else counts as real. A typo like "base-forks" therefore gets
+    ///      the *strict* configuration and trips the guards, rather than quietly deploying a vault
+    ///      with its staleness checking off.
+    function _isForkNetwork(string memory network) internal pure returns (bool) {
+        return keccak256(bytes(network)) == keccak256(bytes(FORK_NETWORK));
+    }
+
+    /// @notice Staleness bound to use when `PRICE_MAX_AGE` is not set explicitly.
+    function _defaultPriceMaxAge(string memory network) internal pure returns (uint256) {
+        return _isForkNetwork(network) ? 0 : LIVE_PRICE_MAX_AGE;
+    }
+
+    /// @notice Refuse to deploy to a real network with fork-grade configuration.
+    ///
+    /// @dev Two mistakes this makes impossible, both of which are one forgotten env var away and
+    ///      neither of which announces itself:
+    ///
+    ///      **An anvil account as agent, deployer or guardian.** Anvil's keys are published in
+    ///      Foundry's documentation. A mainnet vault whose `AGENT_ROLE` is anvil account #1 can be
+    ///      drained by anyone who has ever read those docs — and because the role graph is frozen at
+    ///      genesis, it could not be revoked. The vault would have to be abandoned. The fork run
+    ///      deliberately uses those keys, so the failure mode is simply forgetting to change them.
+    ///
+    ///      **Staleness checking left off.** `priceMaxAge = 0` is correct on a pinned fork and wrong
+    ///      everywhere else: it makes `totalAssets()` trust a Chainlink answer of any age, so shares
+    ///      would price off a frozen feed during exactly the volatility that makes a feed stall.
+    ///      Also immutable after genesis.
+    ///
+    ///      Deliberately reverts rather than warns. A warning scrolls past in a broadcast log; this
+    ///      is a real-money, one-shot, unfixable-afterwards decision.
+    function _assertSafeForRealNetwork(
+        string memory network,
+        address deployer,
+        address agent,
+        address guardian,
+        uint256 priceMaxAge
+    ) internal pure {
+        if (deployer == ANVIL_ADDRESS_0 || deployer == ANVIL_ADDRESS_1) {
+            revert UnsafeAnvilKeyOnRealNetwork("DEPLOYER_PRIVATE_KEY", deployer);
+        }
+        if (agent == ANVIL_ADDRESS_0 || agent == ANVIL_ADDRESS_1) {
+            revert UnsafeAnvilKeyOnRealNetwork("AGENT_ADDRESS", agent);
+        }
+        if (guardian == ANVIL_ADDRESS_0 || guardian == ANVIL_ADDRESS_1) {
+            revert UnsafeAnvilKeyOnRealNetwork("GUARDIAN_ADDRESS", guardian);
+        }
+        if (priceMaxAge == 0) revert StalenessCheckDisabledOnRealNetwork(network);
     }
 
     // ─────────────────────────────────────────────────────────────────────
