@@ -30,7 +30,7 @@ reading any venue's state.
 cd contracts
 ./script/install-deps.sh          # vendored, pinned — only needed to change a version
 forge build
-forge test                        # 69 tests, no network required
+forge test                        # 79 tests, no network required (+7 fork tests skip)
 ```
 
 Fork deployment (from repo root, two terminals):
@@ -44,9 +44,39 @@ cd contracts && forge script script/Deploy.s.sol \
 The deploy writes [`deployments/base-fork.json`](../deployments/base-fork.json). **Read addresses
 from that file. Never hardcode them.**
 
+> ⚠️ **Redeploying overwrites that file, and Lanes B, D and E read the vault address from it.** Only
+> redeploy if anvil has been restarted, and tell the other lanes when you do.
+
 > **No `BASE_RPC_URL`?** `forge test` is unaffected — the unit suite is entirely mock-based and needs
 > no network. Only `test/fork/` and the fork deploy need one, and the fork tests skip themselves
 > cleanly when the variable is absent.
+
+### Deploying to a real network
+
+```bash
+DEPLOY_NETWORK=base-mainnet \
+DEPLOYER_PRIVATE_KEY=0x…  AGENT_ADDRESS=0x…  GUARDIAN_ADDRESS=0x… \
+forge script script/Deploy.s.sol --rpc-url "$BASE_RPC_URL" --broadcast
+
+./script/verify.sh base-mainnet    # Blockscout — no API key
+```
+
+`priceMaxAge` is derived from the network: `0` on `base-fork`, **3600 everywhere else**. You do not
+need to remember to set it.
+
+The script **refuses** two configurations rather than warning about them, because both are immutable
+after genesis and would mean abandoning the vault:
+
+| Revert | Cause |
+|---|---|
+| `UnsafeAnvilKeyOnRealNetwork(what, account)` | deployer, agent or guardian is an anvil account. Their keys are published in Foundry's docs, and `AGENT_ROLE` can never be revoked |
+| `StalenessCheckDisabledOnRealNetwork(network)` | `priceMaxAge == 0`, so `totalAssets()` would trust a Chainlink answer of any age |
+
+An unrecognised `DEPLOY_NETWORK` counts as real, so a typo gets the strict settings.
+
+> Verification goes through **Blockscout, not Etherscan** — there is no free Etherscan path for Base
+> (V2 rejects the chain, basescan V1 is deprecated). `script/verify.sh` is written and its error paths
+> are tested, but it has **not** been run against a live Blockscout instance yet.
 
 ---
 
@@ -295,22 +325,30 @@ src/
   libraries/ChainlinkPriceLib read + validate + decimal-convert
 test/
   mocks/                      MockERC20, MockAggregatorV3, CallTarget
-  unit/                       69 tests, no network
+  unit/                       79 tests, no network
   fork/                       real Base state; skips when BASE_RPC_URL is unset
 script/
   Deploy.s.sol                deploy + publish deployments/<network>.json
   install-deps.sh             vendor dependencies at pinned tags
   export-abis.sh              publish flat ABIs to abis/
+  verify.sh                   verify on Blockscout (no API key)
 ```
 
 ## Verification
 
 ```bash
-forge test                                    # 69 unit tests, no network
-forge test --match-path "test/fork/*"         # real Base state, needs BASE_RPC_URL
+forge test                                    # 79 unit tests, no network
+forge test --match-path "test/fork/*"         # real Base state, needs an RPC
 ```
 
 Confirmed against a live Base mainnet fork, not mocks: 5,000 real USDC deposited → `5000e18` shares
 and a share price of exactly `1000000`; the agent set a real USDC allowance to real Permit2 through
 the vault; a non-agent `execute` reverted; `holdings()` returned both legs priced; redeeming half
 returned 2,500 USDC.
+
+**Proven by a real agent write, end to end through the harness** — fork tx
+`0x789066d43ed0f54be903312dbc732a5c1b03ffb14dcdac0a5cd1e6f8ffa28a4b`. One atomic `executeBatch`
+emitting three `Executed` events: `USDC.approve` (a *token* as target), `Permit2.approve`, then
+`UniversalRouter.execute`. The vault now holds 1,750 USDC + 0.4034 WETH, and recomputing the WETH leg
+independently from the live Chainlink answer gives `749880448` — exactly what `holdings()` reports, so
+`totalAssets()` is `2499880448`. Agent, contract and UI agree on the portfolio's value.
