@@ -105,7 +105,8 @@ def test_the_late_binding_integration_point_resolves():
     resolved = getattr(importlib.import_module(module), attribute)
 
     assert isinstance(resolved, DataSourceRegistry)
-    assert set(resolved.available()) == {"messari", "token_api"}
+    # Superset, so registering a new source does not break Lane B's binding.
+    assert {"messari", "token_api"} <= set(resolved.available())
 
 
 def test_importing_the_default_registry_survives_missing_credentials():

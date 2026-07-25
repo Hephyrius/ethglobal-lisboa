@@ -32,7 +32,12 @@ def test_sources_lists_both_shipped_sources(capsys):
 def test_sources_json_is_machine_readable(capsys):
     assert main(["sources", "--json"]) == 0
     entries = json.loads(capsys.readouterr().out)
-    assert {e["key"] for e in entries} == {"messari", "token_api"}
+    keys = {e["key"] for e in entries}
+    # A superset assertion, not equality: registering a source must never
+    # require editing a test somewhere else, or "adding a source is one line"
+    # stops being true the first time someone does it.
+    assert {"messari", "token_api", "aave"} <= keys
+    assert all(e.get("provides") for e in entries), "each source declares capabilities"
 
 
 def test_protocols_prints_the_config_table(capsys):

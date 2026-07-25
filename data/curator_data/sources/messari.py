@@ -43,6 +43,22 @@ logger = logging.getLogger(__name__)
 # would consider.
 MARKET_LIMIT = 100
 
+#: The schema families this adapter speaks. Protocols on any other family
+#: belong to a different source — see `sources/aave.py`.
+MESSARI_FAMILIES = ("lending", "dex-amm")
+
+#: Ceiling on any USD figure, in dollars. Permissionless subgraphs index
+#: permissionless pools, and the live Uniswap V3 Base subgraph returns scam
+#: pairs claiming absurd TVL — a real reading on 2026-07-25 was
+#: `WETH/SLUG: $130,563,280,368,069,680,230,825,984` (1.3e29, roughly a
+#: billion times global GDP). Total DeFi TVL is order $1e11, so anything above
+#: this is fabricated by a token that mispriced itself, not an unusually large
+#: market.
+#:
+#: Dropped rather than clamped: clamping would report a made-up number as real,
+#: and this feeds an agent that allocates capital by comparing TVL.
+MAX_PLAUSIBLE_USD = 1e11
+
 LENDING_QUERY = """
 query CuratorLendingMarkets($first: Int!) {
   markets(
@@ -154,8 +170,18 @@ class MessariSource(BaseSource):
         # never learns which it got.
         self._gateway = gateway or make_gateway(settings)
         self._owns_gateway = gateway is None
-        self._protocols = protocols if protocols is not None else enabled_protocols(
-            chain=settings.chain
+        # Only the families this adapter can actually read. Without this
+        # filter it would pick up Aave's row and send the standardized query
+        # to a subgraph that answers Aave's own schema, producing a confusing
+        # error for a request we should never have made.
+        self._protocols = (
+            protocols
+            if protocols is not None
+            else [
+                p
+                for family in MESSARI_FAMILIES
+                for p in enabled_protocols(family=family, chain=settings.chain)
+            ]
         )
 
     @property
@@ -261,7 +287,7 @@ class MessariSource(BaseSource):
                 facts.append(builder.apy_from_percent(subject, apy_percent))
 
             tvl = _to_float(market.get("totalValueLockedUSD"))
-            if tvl is not None:
+            if tvl is not None and 0 < tvl <= MAX_PLAUSIBLE_USD:
                 facts.append(builder.usd("tvl", subject, tvl))
 
             utilization = self._utilization(market)
@@ -300,6 +326,7 @@ class MessariSource(BaseSource):
     ) -> list[Fact]:
         """Both pool shapes normalise to (token list, TVL) before reaching here."""
         facts: list[Fact] = []
+        implausible = 0
         for tokens, raw_tvl in pools:
             symbols = [str((t or {}).get("symbol") or "").upper() for t in tokens]
             # Only pools the vault could actually make a market in: every leg
@@ -308,10 +335,19 @@ class MessariSource(BaseSource):
                 continue
 
             tvl = _to_float(raw_tvl)
-            if tvl is None:
+            if tvl is None or tvl <= 0:
+                continue
+            if tvl > MAX_PLAUSIBLE_USD:
+                implausible += 1
                 continue
             subject = builder.subject(protocol=protocol.key, pair=symbols[:2])
             facts.append(builder.usd("liquidity", subject, tvl))
+
+        if implausible:
+            self.note(
+                f"{protocol.key}: dropped {implausible} pool(s) reporting implausible TVL "
+                f"(> ${MAX_PLAUSIBLE_USD:,.0f}) - permissionless pools with mispriced tokens"
+            )
         return facts
 
     async def close(self) -> None:

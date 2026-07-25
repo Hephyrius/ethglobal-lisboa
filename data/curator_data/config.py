@@ -77,11 +77,17 @@ class Settings:
     token_api_url: str = DEFAULT_TOKEN_API_URL
     token_api_key: str | None = None
     chain: str = DEFAULT_CHAIN
-    request_timeout_s: float = 15.0
+    #: 30s, not 15: the live Uniswap V3 Base subgraph repeatedly answered in
+    #: ~20s during testing (its indexers are slow and intermittently
+    #: unavailable). A timeout below that turns a working source into a
+    #: permanently failing one.
+    request_timeout_s: float = 30.0
 
     #: Per-source ceiling inside `Registry.snapshot`. A source that hangs must
-    #: not hold the decision loop open; it lands in `errors[]` instead.
-    source_timeout_s: float = 20.0
+    #: not hold the decision loop open; it lands in `errors[]` instead. Sits
+    #: above `request_timeout_s` so a slow *request* fails with a useful
+    #: message rather than being cut off by the outer deadline.
+    source_timeout_s: float = 45.0
 
     # ── x402 (feature-flagged, default off) ───────────────────────────────
     x402_enabled: bool = False

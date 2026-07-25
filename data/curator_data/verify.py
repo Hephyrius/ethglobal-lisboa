@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 
 from .config import Settings
 from .facts import utcnow
+from .sources.aave import AaveSource
 from .sources.messari import MessariSource
 from .sources.protocols import ALL, Protocol
 from .sources.token_api import TokenApiSource
@@ -80,7 +81,14 @@ async def check_protocol(protocol: Protocol, settings: Settings) -> CheckResult:
     "does it list USDC".
     """
     name = f"{protocol.key} ({protocol.family})"
-    source = MessariSource(settings, protocols=[protocol])
+    # Dispatch on family: Aave's schema is served by its own source, and
+    # running it through the Messari adapter produces a confusing schema error
+    # about a query we would never actually send it.
+    source = (
+        AaveSource(settings, protocols=[protocol])
+        if protocol.family == "lending-aave"
+        else MessariSource(settings, protocols=[protocol])
+    )
     try:
         facts = await source.fetch([])
         notes = source.drain_notes()

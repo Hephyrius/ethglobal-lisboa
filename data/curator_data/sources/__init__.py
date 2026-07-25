@@ -24,6 +24,7 @@ from collections.abc import Callable, Mapping
 
 from ..config import Settings
 from ..ports import DataSource
+from .aave import make_aave_source
 from .messari import make_messari_source
 from .token_api import make_token_api_source
 
@@ -35,6 +36,11 @@ SourceFactory = Callable[[Settings], DataSource]
 SOURCE_FACTORIES: Mapping[str, SourceFactory] = {
     "messari": make_messari_source,
     "token_api": make_token_api_source,
+    # `aave` was added AFTER the other two shipped, and this line plus
+    # sources/aave.py were the entire change — no edit to the registry, the
+    # schema, the MCP server or the agent. That is the claim above, exercised
+    # on a real provider rather than a test double.
+    "aave": make_aave_source,
     # "chainlink": make_chainlink_source,   ← a future provider is this line
 }
 
