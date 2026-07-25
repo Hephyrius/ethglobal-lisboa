@@ -75,6 +75,11 @@ NEXT_PUBLIC_API_URL=http://localhost:8001 pnpm --filter @curator/web dev
   where Lane B is up but internally in fixture mode, which `GET /health` exposes.
 - The fixture-mode genesis chat is a scripted interviewer, not a model. It only runs when Lane B is
   unreachable.
+- **The Aqua ship rendering is proven against a fixture, not against a real ship.** R5 is blocked on
+  Lanes B + D, so no agent-driven `ship()` has ever reached this UI. The path is exercised and
+  verified — `SwapVM · constant-product (xyc) curve · 30 bps maker fee`, amounts scaled from the
+  vault's holdings, all three plan steps paired to their tx hashes — so when a real one lands it
+  renders rather than surprising us. Run with `NEXT_PUBLIC_FIXTURES=1` to see it.
 
 ### ✅ The write path is verified on-chain — phase 2 §3.5 is closed
 

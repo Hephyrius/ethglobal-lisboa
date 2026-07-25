@@ -144,6 +144,75 @@ function buildFeed(): AgentActionT[] {
 
   const executed: AgentActionT = { ...base, vault }
 
+  /**
+   * An Aqua ship, with SwapVM program parameters.
+   *
+   * The 1inch centrepiece (e2e plan R5) is blocked on Lanes B and D, so no real
+   * ship has ever reached this UI. Carrying one as a fixture means the SwapVM
+   * rendering path is exercised and visually checked *now* rather than
+   * discovered broken the first time a real one lands.
+   *
+   * Both approvals are present deliberately. Cross-lane request #17: `ship()`
+   * succeeds with zero allowance and leaves a position that looks healthy in
+   * every observable way and is silently unfillable — so a plan that shows the
+   * approvals is the plan shape worth teaching a reader to expect.
+   */
+  const shipped: AgentActionT = AgentAction.parse({
+    id: 'act_000043',
+    vault,
+    timestamp: shiftTimestamp(base.timestamp, -18),
+    status: 'executed',
+    snapshot: shiftSnapshot(FIXTURE_SNAPSHOT, -18, 0.01),
+    decision: {
+      action: 'enter',
+      reasoning:
+        'Holding both legs at the 50/50 target with no rotation required, so the idle inventory can earn rather than sit. Shipping the full book into Aqua as a maker: the tokens never leave the vault — Aqua tracks a virtual balance against them — so totalAssets() is unchanged and a redemption is still honoured from the same USDC. A constant-product curve suits a pair I am willing to be filled on in either direction, and 30bp covers the inventory risk at this depth without pricing the quote out of the market.',
+      facts_used: ['f5', 'f6'],
+      venue_intents: [
+        {
+          venue: 'aqua',
+          kind: 'ship',
+          tokens: ['USDC', 'WETH'],
+          amounts: ['1249000000', '672232000000000000'],
+          program: { shape: 'xyc', fee_bps: 30 },
+        },
+      ],
+      confidence: 0.71,
+    },
+    plan: {
+      venue: 'aqua',
+      steps: [
+        {
+          target: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          value: '0',
+          calldata: '0x095ea7b3000000000000000000000000499943e74fb0ce105688beee8ef2abec5d936d31',
+          why: 'approve Aqua to draw 1,249 USDC when a taker fills',
+        },
+        {
+          target: '0x4200000000000000000000000000000000000006',
+          value: '0',
+          calldata: '0x095ea7b3000000000000000000000000499943e74fb0ce105688beee8ef2abec5d936d31',
+          why: 'approve Aqua to draw 0.672232 WETH when a taker fills',
+        },
+        {
+          target: '0x499943E74FB0cE105688beeE8Ef2ABec5D936d31',
+          value: '0',
+          calldata: '0x2f2ff15d00000000000000000000000000000000000000000000000000000000000000c0',
+          why: 'ship the SwapVM program into Aqua as a maker strategy',
+        },
+      ],
+      expected_effect: 'post a two-sided USDC/WETH quote as an Aqua maker; tokens stay in the vault',
+    },
+    tx_hashes: [
+      '0xc3d4e5f60718293a4b5c6d7e8f90112233445566778899aabbccddeeff001122',
+      '0xd4e5f60718293a4b5c6d7e8f90112233445566778899aabbccddeeff00112233',
+      '0xe5f60718293a4b5c6d7e8f90112233445566778899aabbccddeeff0011223344',
+    ],
+    model: { backend: 'ollama', name: 'qwen2.5:14b-instruct', validation_retries: 0 },
+    error: null,
+    duration_ms: 11240,
+  })
+
   const held: AgentActionT = AgentAction.parse({
     id: 'act_000041',
     vault,
@@ -174,7 +243,7 @@ function buildFeed(): AgentActionT[] {
     duration_ms: 21480,
   })
 
-  return [executed, held, rejected]
+  return [shipped, executed, held, rejected]
 }
 
 /** A single fresh action, for the "run agent tick" button in fixture mode. */
