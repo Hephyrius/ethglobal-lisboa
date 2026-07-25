@@ -20,6 +20,7 @@ import asyncio
 
 import httpx
 import pytest
+
 from curator_data.http import LoopBoundClient
 from curator_data.ports import BaseSource
 from curator_data.registry import Registry

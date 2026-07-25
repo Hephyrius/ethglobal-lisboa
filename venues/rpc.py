@@ -18,9 +18,8 @@ from typing import Any, Final
 
 import httpx
 
-from .http import LoopBoundClient
-
 from .errors import VenueError
+from .http import LoopBoundClient
 
 #: Any address works — the override replaces whatever is (not) there. Reads as
 #: "b011de12" so it is recognisable in a trace as the ephemeral builder.

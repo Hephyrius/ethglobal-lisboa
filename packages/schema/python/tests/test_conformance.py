@@ -15,10 +15,6 @@ import json
 from pathlib import Path
 
 import pytest
-from jsonschema import Draft202012Validator
-from referencing import Registry, Resource
-from referencing.jsonschema import DRAFT202012
-
 from curator_schema import (
     AgentAction,
     AllocationDecision,
@@ -27,6 +23,9 @@ from curator_schema import (
     MarketSnapshot,
     VaultState,
 )
+from jsonschema import Draft202012Validator
+from referencing import Registry, Resource
+from referencing.jsonschema import DRAFT202012
 
 SCHEMA_DIR = Path(__file__).resolve().parents[2]
 FIXTURE_DIR = SCHEMA_DIR / "fixtures"

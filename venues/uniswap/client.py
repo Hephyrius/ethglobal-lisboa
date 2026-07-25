@@ -18,11 +18,10 @@ from typing import Any, Final, Literal
 
 import httpx
 
-from ..http import LoopBoundClient
-
 from ..addresses import CHAIN_ID
 from ..config import VenueConfig
 from ..errors import NoRouteError, VenueAPIError
+from ..http import LoopBoundClient
 
 VENUE_KEY: Final[str] = "uniswap"
 

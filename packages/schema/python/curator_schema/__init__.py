@@ -12,8 +12,8 @@ honest by the golden fixtures in packages/schema/fixtures/.
 
 from .models import (
     AgentAction,
-    AllocationSlice,
     AllocationDecision,
+    AllocationSlice,
     AquaDockIntent,
     AquaProgram,
     AquaShipIntent,
