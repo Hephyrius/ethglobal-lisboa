@@ -23,8 +23,25 @@ from __future__ import annotations
 from curator_schema import AllocationDecision, Mandate, MarketSnapshot, VaultState
 
 from ...loop.idle import IDLE_FACT_ID
+from ...security.untrusted import (
+    FLAG,
+    ID_LIMIT,
+    MESSAGE_LIMIT,
+    SYMBOL_LIMIT,
+    UNTRUSTED_PREAMBLE,
+    flagged,
+    sanitize,
+)
 
 __all__ = ["SYSTEM_PROMPT", "decision_messages", "decision_schema"]
+
+#: The source key: a registry name, not a sentence.
+_SOURCE_LIMIT = 24
+
+#: Width of the `about` column, and therefore the cap on what goes in it. The
+#: two must stay equal: a value wider than the column shifts every field to its
+#: right, which is the misalignment a hostile label wants.
+_ABOUT_WIDTH = 32
 
 SYSTEM_PROMPT = """\
 You are the autonomous curator of an ERC-4626 vault. You allocate the vault's \
@@ -184,30 +201,64 @@ def _format_value(fact) -> str:
     return f"{fact.value:g} {fact.unit}"
 
 
-def _render_facts(snapshot: MarketSnapshot) -> str:
+def _render_facts(snapshot: MarketSnapshot, marked: set[str] = frozenset()) -> str:
+    """The fact table, with every third-party string fenced into its own cell.
+
+    `about` and `source` are written by whoever deployed the pool or protocol
+    they name, and `id` comes from Lane C. All three are sanitised **here**,
+    at render time rather than at ingestion, so `AgentAction.snapshot` keeps the
+    payload exactly as it arrived — the evidence the e2e test asserts against
+    and the dApp renders as the attack.
+
+    `marked` carries the raw values the detector objected to; they are shown
+    rather than redacted, for the reason in `agent/security/untrusted.py`.
+    """
     if not snapshot.facts:
         return "No market data could be read this tick."
 
     rows = [
+        UNTRUSTED_PREAMBLE,
+        "",
         "Each row states what it measures. Only rows saying 'per year' are yields.",
         "",
-        f"{'id':<5} | {'measures':<20} | {'about':<28} | {'value':<28} | source",
-        "-" * 100,
+        f"{'id':<5} | {'measures':<20} | {'about':<{_ABOUT_WIDTH}} | {'value':<28} | source",
+        "-" * 104,
     ]
     for fact in snapshot.facts:
         subject = fact.subject
         parts = [p for p in (subject.protocol, subject.market, subject.token) if p]
-        if subject.pair:
-            parts.append("/".join(subject.pair))
-        about = " ".join(parts) or subject.chain
+        legs = list(subject.pair or ())
+        # Matched part by part, not against the joined string. The detector
+        # reports the field it found — `protocol`, one leg of a pair — and a
+        # membership test on the concatenation would silently never fire.
+        hit = any(part in marked for part in (*parts, *legs))
+        if legs:
+            parts.append("/".join(legs))
+        joined = " ".join(parts) or subject.chain
+        # Cut to the *column* rather than to `sanitize`'s general label limit,
+        # so a long name cannot push `value` and `source` rightward and blur one
+        # row into the next. The table's shape is what a small model reads it
+        # by, and the full string is in the journal for anyone who wants it.
+        #
+        # Not exact: the `[+N chars cut]` marker overflows by its own length,
+        # because it has to be visible — silent truncation was the thing being
+        # avoided. What this buys is that the overflow is *bounded and constant*
+        # rather than proportional to the payload, so a 4,000-character name
+        # cannot push the last two columns off the far side of the row.
+        about = (
+            flagged(joined, limit=_ABOUT_WIDTH - len(FLAG) - 1)
+            if hit
+            else sanitize(joined, limit=_ABOUT_WIDTH)
+        )
         measures = _KIND_LABELS.get(fact.kind, fact.kind)
 
         rows.append(
-            f"{fact.id:<5} | {measures:<20} | {about:<28} | "
-            f"{_format_value(fact):<28} | {fact.source}"
+            f"{sanitize(fact.id, limit=ID_LIMIT):<5} | {measures:<20} | "
+            f"{about:<{_ABOUT_WIDTH}} | "
+            f"{_format_value(fact):<28} | {sanitize(fact.source, limit=_SOURCE_LIMIT)}"
         )
 
-    yields = [f.id for f in snapshot.facts if f.kind in _RATE_KINDS]
+    yields = [sanitize(f.id, limit=ID_LIMIT) for f in snapshot.facts if f.kind in _RATE_KINDS]
     rows.append("")
     rows.append(
         f"Yields available this tick: {', '.join(yields) if yields else 'none'}. "
@@ -230,7 +281,11 @@ def _render_gaps(snapshot: MarketSnapshot) -> str:
     if not snapshot.errors:
         return ""
     lines = ["", "Data you could NOT read this tick. Reason about this explicitly:"]
-    lines += [f"- {error.source}: {error.message}" for error in snapshot.errors]
+    lines += [
+        f"- {sanitize(error.source, limit=_SOURCE_LIMIT)}: "
+        f"{sanitize(error.message, limit=MESSAGE_LIMIT)}"
+        for error in snapshot.errors
+    ]
     return "\n".join(lines)
 
 
@@ -249,11 +304,18 @@ def _render_notes(snapshot: MarketSnapshot) -> str:
     if not snapshot.notes:
         return ""
     lines = ["", "Notes on your data sources. These are not failures:"]
-    lines += [f"- {note.source}: {note.message}" for note in snapshot.notes]
+    # Sanitised like everything else, even though this lane writes some of them
+    # (`agent/security/detect.py` emits its findings here): a note that quotes
+    # an attacker's label is carrying attacker text, whoever appended it.
+    lines += [
+        f"- {sanitize(note.source, limit=_SOURCE_LIMIT)}: "
+        f"{sanitize(note.message, limit=MESSAGE_LIMIT)}"
+        for note in snapshot.notes
+    ]
     return "\n".join(lines)
 
 
-def _render_holdings(vault: VaultState | None) -> str:
+def _render_holdings(vault: VaultState | None, marked: set[str] = frozenset()) -> str:
     """Current holdings **with their weights already computed.**
 
     Observed failure, and the reason this does the arithmetic rather than the
@@ -291,22 +353,27 @@ def _render_holdings(vault: VaultState | None) -> str:
         else:
             valued = "value unknown this tick"
 
+        # Every one of these is `symbol()` on an arbitrary ERC-20, read by this
+        # lane's own chain client — the injection channel the wave plan's §0.3
+        # does not name, and the one that renders closest to the decision.
+        raw = (holding.symbol, holding.represents, holding.committed_to_venue)
+        mark = flagged if any(v and v in marked for v in raw) else sanitize
+        symbol = mark(holding.symbol, limit=SYMBOL_LIMIT)
+        represents = mark(holding.represents, limit=SYMBOL_LIMIT)
+        venue = mark(holding.committed_to_venue, limit=SYMBOL_LIMIT)
+
         # A receipt token has to read as its underlying, or the model sees an
         # asset its mandate never permitted and tries to "correct" a position
         # that is exactly what the mandate asked for.
-        if holding.represents:
+        if represents:
             name = (
-                f"{holding.represents} supplied to {holding.committed_to_venue or 'a venue'} "
-                f"(held as {holding.symbol}, still counts as your {holding.represents})"
+                f"{represents} supplied to {venue or 'a venue'} "
+                f"(held as {symbol}, still counts as your {represents})"
             )
             committed = ""
         else:
-            name = holding.symbol
-            committed = (
-                f" [committed to {holding.committed_to_venue}]"
-                if holding.committed_to_venue
-                else ""
-            )
+            name = symbol
+            committed = f" [committed to {venue}]" if venue else ""
         # The raw balance is here because an Aqua ship is denominated in base
         # units. Without it the model has to compute 0.672 WETH -> 18 decimals
         # itself, which is exactly the kind of arithmetic it gets wrong.
@@ -327,6 +394,7 @@ def decision_messages(
     snapshot: MarketSnapshot,
     vault: VaultState | None = None,
     reflection: str = "",
+    marked: set[str] = frozenset(),
 ) -> list[dict[str, str]]:
     """The conversation that asks for one allocation decision.
 
@@ -335,15 +403,21 @@ def decision_messages(
     is the normal state for a vault's first few ticks. An empty string renders
     as nothing at all rather than as a heading with no content beneath it, which
     reads as a system that lost the data.
+
+    `marked` is the set of raw values `agent/security/detect.py` objected to.
+    **Sanitisation does not depend on it** — every third-party string is fenced
+    whether or not a detector ran, so a caller that forgets to pass this loses
+    the annotation and keeps the protection. That asymmetry is the point: the
+    load-bearing half cannot be switched off by omission.
     """
     user = f"""\
 YOUR MANDATE
 {_render_mandate(mandate)}
-{_render_holdings(vault)}
+{_render_holdings(vault, marked)}
 {reflection}
 
 MARKET DATA. Cite these ids in `facts_used`:
-{_render_facts(snapshot)}{_render_gaps(snapshot)}{_render_notes(snapshot)}
+{_render_facts(snapshot, marked)}{_render_gaps(snapshot)}{_render_notes(snapshot)}
 
 Decide what to do with this vault now. Work in this order:
 

@@ -45,6 +45,7 @@ from ..mandate.constraints import banded_warnings
 from ..mandate.store import MandateNotFound, MandateStore
 from ..model.openai_compat import ModelUnavailable
 from ..model.validation import DecisionRejected
+from ..security.detect import InjectionDetector, InjectionReport
 from .engine import LlmDecisionEngine
 from .idle import idle_drag_for, with_idle_fact
 from .planning import PlanRejected, build_execution_plan
@@ -87,6 +88,13 @@ class DecisionCycle:
         # memory of how its past decisions worked out. That is the pre-Wave-1
         # behaviour, and it is the correct degraded state rather than a failure.
         self._performance = performance
+        # The detector's model pass gets the same backend the decision does, so
+        # it is available exactly when the agent is. Its verdict cache lives on
+        # the detector, which lives on the cycle, which lives for the process —
+        # so a peer vault name is classified once and not on every tick.
+        self._injection = InjectionDetector(
+            engine.backend if settings.injection_classifier else None
+        )
 
     # ── entry point ───────────────────────────────────────────────────────
 
@@ -112,6 +120,18 @@ class DecisionCycle:
         # prompt: `facts_used` is validated against the snapshot, so this is
         # what lets the model cite the number instead of asserting it.
         snapshot = with_idle_fact(await self._snapshot(mandate), mandate, state)
+
+        # Untrusted text is inspected before anything renders it, and the
+        # findings are appended to the snapshot as notes — so they ride to the
+        # journal, the feed and the prompt on the object that already carries
+        # provenance, with no schema change and nothing for Lane E to poll.
+        # The facts themselves are left exactly as they arrived: the payload in
+        # the record is the evidence an attack happened.
+        report = await self._inspect(snapshot, state)
+        if report.findings or report.classifier_error:
+            snapshot = snapshot.model_copy(
+                update={"notes": [*snapshot.notes, *report.notes()]}
+            )
         record.snapshot = snapshot
 
         if reason := self._cooldown_reason(vault, mandate):
@@ -120,7 +140,11 @@ class DecisionCycle:
         # ── the model ─────────────────────────────────────────────────────
         try:
             result = await self._engine.decide_in_full(
-                mandate, snapshot, state, self._reflect(vault, mandate, snapshot, state)
+                mandate,
+                snapshot,
+                state,
+                self._reflect(vault, mandate, snapshot, state),
+                report.flagged_values,
             )
         except DecisionRejected as exc:
             return record.rejected(
@@ -185,6 +209,23 @@ class DecisionCycle:
                 facts=[],
                 errors=[SourceError(source="registry", message=str(exc))],
             )
+
+    async def _inspect(self, snapshot: MarketSnapshot, state) -> InjectionReport:
+        """Look for text addressed to the agent. Never allowed to fail a tick.
+
+        The deterministic scan cannot realistically raise, and the classifier
+        already swallows its own errors — this is the outer guard for the case
+        neither anticipated. **Failing closed here would be the wrong choice
+        and it is worth being explicit about why:** the detector is advisory,
+        the validation layers are the boundary, and a security check that can
+        stop the vault trading hands a denial of service to anyone who can name
+        a pool. So a broken detector degrades to no annotation, loudly.
+        """
+        try:
+            return await self._injection.inspect(snapshot, state)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("injection inspection failed; continuing unannotated (%s)", exc)
+            return InjectionReport(classifier_error=str(exc)[:120])
 
     @staticmethod
     def _hours_since_deploy(history: list[AgentAction]) -> float | None:

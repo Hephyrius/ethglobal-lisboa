@@ -46,6 +46,7 @@ class LlmDecisionEngine:
         snapshot: MarketSnapshot,
         vault: VaultState | None = None,
         reflection: str = "",
+        marked: set[str] = frozenset(),
     ) -> ValidatedDecision:
         """As `decide`, but keeping how many attempts it took.
 
@@ -62,10 +63,14 @@ class LlmDecisionEngine:
         cost and what the book did afterwards. Passed as pre-rendered text rather
         than as objects so this engine stays ignorant of the journal and the
         performance store, exactly as it is ignorant of the chain.
+
+        `marked` is the injection detector's findings, passed the same way and
+        for the same reason: this engine does not know what a detector is, only
+        that some values are to be rendered with a mark on them.
         """
         return await generate_validated_decision(
             self._backend,
-            decision_messages(mandate, snapshot, vault, reflection),
+            decision_messages(mandate, snapshot, vault, reflection, marked),
             mandate=mandate,
             snapshot=snapshot,
             vault=vault,

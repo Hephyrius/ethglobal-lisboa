@@ -55,6 +55,19 @@ def _env_list(name: str, default: list[str]) -> list[str]:
     return [part.strip() for part in raw.split(",") if part.strip()] if raw else default
 
 
+#: Anything that is plainly a no. Everything else — including a typo — reads as
+#: the default, which for a security feature means "still on". `AGENT_X=flase`
+#: must not quietly disable a defence.
+_FALSEY = {"0", "false", "no", "off"}
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = _env(name).strip().lower()
+    if not raw:
+        return default
+    return raw not in _FALSEY
+
+
 @dataclass(frozen=True)
 class Settings:
     """Resolved configuration. Built once per process via `settings()`."""
@@ -119,6 +132,17 @@ class Settings:
     #: output small open models produce, and few enough that a model which
     #: cannot follow the schema fails fast instead of burning the tick.
     max_validation_retries: int = 3
+    #: The *advisory* second pass of the prompt-injection defence
+    #: (`agent/security/detect.py`). Pattern scanning and prompt fencing are
+    #: unconditional and are not affected by this — only the model call is.
+    #:
+    #: On by default, which is affordable because the classifier memoizes by
+    #: value: peer vault and pool names repeat every tick, so a watched vault
+    #: pays for one classification, not one per tick. Turn it off with
+    #: `AGENT_INJECTION_CLASSIFIER=0` if a demo cannot spare the first-tick
+    #: latency; the deterministic half, which is the trustworthy half, still
+    #: runs.
+    injection_classifier: bool = True
 
     # ── other lanes, resolved late (never imported at module scope) ───────
     #: "module:attribute" pointing at Lane C's DataSourceRegistry, e.g.
@@ -208,6 +232,7 @@ def _build() -> Settings:
         xai_api_key=xai_api_key,
         model_timeout_s=_env_float("AGENT_MODEL_TIMEOUT_S", d.model_timeout_s),
         max_validation_retries=_env_int("AGENT_MAX_VALIDATION_RETRIES", d.max_validation_retries),
+        injection_classifier=_env_bool("AGENT_INJECTION_CLASSIFIER", d.injection_classifier),
         data_registry_ref=_env_or_none("AGENT_DATA_REGISTRY"),
         venue_registry_ref=_env_or_none("AGENT_VENUE_REGISTRY"),
         venue_manifest_ref=_env("AGENT_VENUE_MANIFEST", d.venue_manifest_ref),
