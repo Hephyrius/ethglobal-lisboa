@@ -194,3 +194,43 @@ be tested without deploying one.
 - No ENS subname minting, no pause, no richer accounting.
 - `aqua_strategies[]` in `VaultState` is not tracked on-chain — the harness records it at ship time.
 - The vault holds no native ETH (no `receive()`); native-ETH swap legs are unsupported, use WETH.
+
+---
+
+## 7. Wave 2 — the adversarial pass (2026-07-25, ~10:20Z)
+
+Per [wave 2 §4](2026-07-25-wave-2-six-lanes.md). **No new features and no contract source changed** —
+the question this wave asks is whether what exists survives someone trying.
+
+### Delivered
+
+- **`contracts/SECURITY.md`** — nine attack vectors, each ending with the test that proves the claim.
+  All 33 cited test names verified to exist, because a security document whose references do not
+  resolve is worse than none.
+- **`test/invariant/`** — nine properties driven by a handler that attacks the vault rather than only
+  using it. Green at the deep profile: **589,824 calls, zero failures.**
+- **The donation/inflation attack executed end to end** rather than asserted: both attacker and victim
+  actually redeem. Victim whole; attacker down ~5,000 USDC on a ~10,000 USDC attempt.
+- **`test/invariant/HandlerSanity.t.sol`** — proves each handler action does something, because every
+  invariant holds trivially on a vault nothing happened to.
+- 85 → **101 tests**, zero-warning cold build.
+
+### The finding worth carrying forward
+
+**Four bugs surfaced, and all four were in the tests, not the vault** — each one me asserting
+something stronger than the property I cared about. Share-price drift is about *direction* (entry may
+round the price up, never down), not magnitude; `0` cannot mean both "undefined" and "collapsed"; a
+per-sequence coverage hook fails on sequence composition rather than on the code; and a `redeem`
+action that only fires when the fuzzer draws the same actor twice is a silent no-op that makes the
+whole exit path untested. That last fix is what surfaced the first two at all.
+
+An invariant suite's most dangerous failure mode is **passing**, and nothing inside the properties can
+detect it. That is the entire reason `HandlerSanity.t.sol` exists.
+
+### Deliberately not mitigated, and written down
+
+- **Sandwiching the agent's swap** — cannot be verified from this lane. The vault executes opaque
+  calldata by design, so it cannot inspect a `minOut` it never parses. Owned by Lane D, tracked as
+  **#60**; SECURITY.md §6 will be replaced with their answer verbatim.
+- **Deposit/withdraw sandwiching around a rebalance** — the fixes each change depositor experience
+  materially and need their own testing. Disclosed in SECURITY.md §7 rather than half-fixed.

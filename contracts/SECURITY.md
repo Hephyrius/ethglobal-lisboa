@@ -10,6 +10,10 @@ cd contracts && forge test                      # 101 tests, no network
 FOUNDRY_PROFILE=deep forge test --match-path "test/invariant/*"
 ```
 
+**Deep run, as of this document:** all nine invariants green at 512 runs × 128 depth — **65,536 calls
+each, 589,824 in total, zero failures**, in 189s on a CPU-only i5-8265U. The default profile runs the
+same properties at 2,048 calls each so the normal suite stays under five seconds.
+
 ---
 
 ## The threat model in one paragraph
