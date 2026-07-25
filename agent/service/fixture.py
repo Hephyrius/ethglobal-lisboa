@@ -31,6 +31,7 @@ from curator_schema import (
     AllocationDecision,
     Mandate,
     ModelProvenance,
+    VaultPerformance,
     VaultState,
 )
 
@@ -44,6 +45,9 @@ from ..api.schemas import (
 from ..clock import utcnow
 from ..config import Settings
 from ..mandate.hashing import mandate_hash
+from ..performance import summarize
+from ..performance.fixture_curve import fixture_curve
+from ..performance.window import window_points
 
 __all__ = ["FixtureVaultService", "FixtureGenesisService"]
 
@@ -70,6 +74,22 @@ class FixtureVaultService:
     async def tick(self, vault: str) -> AgentAction:
         """A fresh successful cycle, timestamped now."""
         return self._executed(vault, age=timedelta(0), index=0)
+
+    async def performance(self, vault: str, window: str = "all") -> VaultPerformance:
+        """A synthetic curve, so Lane E can build the chart before real history
+        exists.
+
+        Deliberately a *gentle* curve with one real drawdown rather than a
+        straight line up: a chart component developed against a monotonic series
+        never gets its axis, its negative-return colour or its drawdown marker
+        exercised, and all three appear for the first time in front of a judge.
+
+        Deterministic — no clock beyond `utcnow()`, no randomness — so a
+        screenshot taken twice looks the same.
+        """
+        points = fixture_curve(vault)
+        points = window_points(points, window)
+        return VaultPerformance(vault=vault, points=points, summary=summarize(vault, points))
 
     async def decisions(self, vault: str, limit: int) -> list[AgentAction]:
         feed = [

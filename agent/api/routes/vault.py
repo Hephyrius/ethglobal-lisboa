@@ -3,7 +3,8 @@
     GET  /vault/{addr}/state              -> VaultState
     GET  /vault/{addr}/decisions?limit=   -> AgentAction[]
     POST /vault/{addr}/tick               -> AgentAction
-    GET  /vault/{addr}/mandate            -> Mandate      (cross-lane request #5)
+    GET  /vault/{addr}/mandate            -> Mandate           (cross-lane request #5)
+    GET  /vault/{addr}/performance?window= -> VaultPerformance (Wave 1 P2)
 
 `response_model_exclude_none=True` on every route is load-bearing, not tidiness:
 zod's `.optional()` accepts a missing key but **rejects** an explicit `null`, so
@@ -16,9 +17,10 @@ from __future__ import annotations
 import re
 from typing import Annotated
 
-from curator_schema import AgentAction, Mandate, VaultState
+from curator_schema import AgentAction, Mandate, VaultPerformance, VaultState
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 
+from ...performance.window import WINDOWS
 from ...service.ports import VaultService
 from ..deps import get_vault_service
 
@@ -75,6 +77,34 @@ async def vault_tick(addr: VaultAddress, service: Service) -> AgentAction:
     returns an error status if the harness itself could not run.
     """
     return await service.tick(_checked(addr))
+
+
+@router.get(
+    "/{addr}/performance",
+    response_model=VaultPerformance,
+    response_model_exclude_none=True,
+)
+async def vault_performance(
+    addr: VaultAddress,
+    service: Service,
+    window: Annotated[str, Query(description=f"One of: {', '.join(WINDOWS)}")] = "all",
+) -> VaultPerformance:
+    """Share-price history and the risk figures derived from it.
+
+    Points are observations, never interpolations — on a pinned fork blocks are
+    mined only when a transaction lands, so a flat stretch between two trades is
+    the truth and the chart should not smooth it.
+
+    Every figure in `summary` is nullable and is **null, not zero**, when the
+    series is too short to support it. Render "not enough history" for a null;
+    rendering 0.0% would be a claim we cannot make.
+    """
+    if window.lower() not in WINDOWS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"unknown window {window!r}; expected one of {sorted(WINDOWS)}",
+        )
+    return await service.performance(_checked(addr), window.lower())
 
 
 @router.get("/{addr}/mandate", response_model=Mandate, response_model_exclude_none=True)

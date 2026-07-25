@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from curator_schema import AgentAction, Mandate, VaultState
+from curator_schema import AgentAction, Mandate, VaultPerformance, VaultState
 
 from ..api.schemas import ChatMessage, GenesisChatResponse, GenesisFinalizeResponse
 
@@ -83,4 +83,13 @@ class VaultService(Protocol):
 
     async def mandate(self, vault: str) -> Mandate:
         """The mandate this vault is curated under."""
+        ...
+
+    async def performance(self, vault: str, window: str = "all") -> VaultPerformance:
+        """Share-price history plus the risk figures derived from it.
+
+        Points are observations, never interpolations. Every summary figure is
+        None rather than zero when the series cannot support it — the caller is
+        expected to render "not enough history" rather than a number.
+        """
         ...

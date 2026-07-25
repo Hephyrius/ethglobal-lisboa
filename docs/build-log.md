@@ -8,6 +8,68 @@ the hackathon window.
 
 ---
 
+## 2026-07-25 — Wave 1 P2: a curve that starts before we shipped the curve
+
+**What changed.** `VaultPerformance` / `PerformancePoint` / `PerformanceSummary` in the schema;
+`agent/performance/` with a store, metrics, a recorder and a chain backfill;
+`GET /vault/{addr}/performance?window=`. 17 new tests. **296 real historical points reconstructed
+across 20 vaults on the running fork**, and the demo vault's true curve is now visible: 1.000000 at
+inception, 0.999402 now, a −5.98 bps drawdown that is exactly the cost of the swaps it actually did.
+
+**Why the backfill was worth the effort.** Nothing recorded what a share was worth an hour ago, and
+`AgentAction` carries no `VaultState`, so the 36-action journal could not be mined for it either. The
+easy version — start recording now — produces a chart whose x-axis begins the moment we shipped the
+chart, which reads as a mock. Anvil retains every block it has produced, so the history is genuinely
+*recoverable*: `eth_call` at an old block returns what the vault really reported then. Those points
+are marked `source="backfill"` and are as real as the live ones.
+
+**The trap that made the first backfill return one point.** `eth_getLogs` with `fromBlock: 0x0` does
+not stay local. Anvil forwards any range predating the fork block to the upstream Base RPC, which
+answered:
+
+    -32614  eth_getLogs is limited to a 10,000 range
+
+and the whole reconstruction silently degraded to the head block alone. Nothing before the fork block
+can contain a vault deployed *on* the fork, so the query had no business reaching mainnet. Fixed by
+reading the fork block from `anvil_nodeInfo` (manifest, then head−10k, as fallbacks) and chunking
+inside the upstream limit. Worth writing down because the symptom — "1 point reconstructed" — looks
+like an empty vault rather than a rejected request.
+
+**And the vault list has to come from the factory, not the manifest.** `deployments/base-fork.json`
+lists only what `Deploy.s.sol` created. Every vault made through the genesis flow — 19 of the 20 on
+this fork — appears nowhere on disk, so a manifest-only backfill would have covered the demo vault
+and none of the interesting ones. `VaultFactory.vaults()` is the authority.
+
+**Why every summary figure is nullable, and null rather than zero.** A volatility of `0.0%` and "we
+have three data points" render identically and mean opposite things. The reader is someone deciding
+whether to trust an autonomous agent with money, so the type is `float | None` and the UI prints
+"not enough history".
+
+**Annualization is refused below a 24-hour span, and this is the judgement call I'd defend hardest.**
+Compounding is arithmetically valid over any span and honest over almost none. A two-hour demo that
+earns +0.1% annualizes to +54% — not a projection anyone made, just a rounding artifact wearing a
+percentage sign, and it would have been the largest number on the vault page. Volatility fails the
+same way in the other direction and the return-over-volatility ratio inherits both. Below a day, all
+three are `None`.
+
+Related: the ratio is called `risk_adjusted_return`, **not** a Sharpe ratio, because no risk-free
+rate is subtracted. Labelling it Sharpe would be wrong in a way a finance judge notices immediately.
+
+**Recording rides on `GET /state` rather than a background sampler.** The read has already happened
+so the point is free, and the dApp polls `/state` while anyone is watching — which is exactly when
+the series is worth having. Gaps while nobody watches are not a problem because the backfill
+reconstructs them. A separate sampler process would have been one more thing to start, and one more
+thing to have silently died before a demo.
+
+**The fixture curve is deliberately not a straight line up.** A chart component developed against a
+monotonic series never exercises its negative-return colour, its drawdown marker, or an axis that has
+to cross the starting value — all three would appear for the first time in front of a judge. So
+fixture mode serves a week that climbs, falls ~2.4%, and recovers. It also carries an 8 bps
+tick-to-tick wobble: without it the series is piecewise linear, measured volatility is ~0%, and the
+risk-adjusted figure explodes to a nonsense 54.
+
+---
+
 ## 2026-07-25 — Wave 1: the agent was told its data layer was broken on every single tick
 
 **What changed.** `MarketSnapshot` gains a `notes[]` channel alongside `errors[]`; sources gain

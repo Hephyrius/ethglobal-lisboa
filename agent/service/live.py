@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 
-from curator_schema import AgentAction, Mandate, VaultState
+from curator_schema import AgentAction, Mandate, VaultPerformance, VaultState
 
 from ..api.schemas import (
     ChatMessage,
@@ -30,6 +30,8 @@ from ..model.backends import build_backend
 from ..model.extraction import ExtractionError, extract_json_object
 from ..model.openai_compat import ModelUnavailable
 from ..model.prompts.genesis import genesis_messages, genesis_schema
+from ..performance import PerformanceStore, point_from_state, summarize
+from ..performance.window import window_points
 
 __all__ = ["LiveVaultService", "LiveGenesisService"]
 
@@ -63,6 +65,7 @@ class LiveVaultService:
         self._settings = settings
         self._mandates = MandateStore(settings.state_dir)
         self._journal = ActionJournal(settings.state_dir)
+        self._performance = PerformanceStore(settings.state_dir)
         self._chain = _build_chain_client(settings)
         self._cycle = DecisionCycle(
             engine=LlmDecisionEngine(
@@ -77,7 +80,9 @@ class LiveVaultService:
         )
 
     async def state(self, vault: str) -> VaultState:
-        return await self._chain.state(vault)
+        state = await self._chain.state(vault)
+        self._record(state, source="sampler")
+        return state
 
     async def mandate(self, vault: str) -> Mandate:
         return self._mandates.load(vault)
@@ -86,7 +91,37 @@ class LiveVaultService:
         return self._journal.recent(vault, limit)
 
     async def tick(self, vault: str) -> AgentAction:
-        return await self._cycle.run(vault)
+        action = await self._cycle.run(vault)
+        # After the cycle, not before: a tick that executed has moved the book,
+        # and the point worth recording is where it ended up. The pre-trade
+        # state was already recorded by whatever read it last.
+        try:
+            self._record(await self._chain.state(vault), source="tick")
+        except Exception as exc:  # noqa: BLE001 - never turn a good tick into a failure
+            log.warning("could not record performance after tick on %s: %s", vault, exc)
+        return action
+
+    async def performance(self, vault: str, window: str = "all") -> VaultPerformance:
+        points = window_points(self._performance.read(vault), window)
+        return VaultPerformance(
+            vault=vault, points=points, summary=summarize(vault, points)
+        )
+
+    def _record(self, state: VaultState, *, source: str) -> None:
+        """Append one observation. Never allowed to break the request.
+
+        Recording rides on `state()` rather than running as its own background
+        loop for two reasons: the read has already happened, so the point is
+        free; and the dApp polls `state()` while anyone is watching, which is
+        exactly when the series is worth having. Gaps while nobody is watching
+        are recoverable — `backfill.py` reconstructs them from chain history.
+        """
+        try:
+            self._performance.append(
+                state.address, point_from_state(state, source=source)  # type: ignore[arg-type]
+            )
+        except Exception as exc:  # noqa: BLE001 - a chart is never worth a 500
+            log.warning("could not record performance for %s: %s", state.address, exc)
 
 
 class LiveGenesisService:
