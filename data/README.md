@@ -122,13 +122,25 @@ avoid, and it holds a key.
 
 ## Sources that ship
 
-| Key | Provides | Data |
-|---|---|---|
-| `messari` | `yield`, `tvl`, `utilization`, `liquidity` | Messari standardized subgraphs — lending markets and DEX pools on Base |
-| `token_api` | `price` | The Graph Token API — USD spot prices |
+| Key | Provides | Data | Live status |
+|---|---|---|---|
+| `messari` | `yield`, `tvl`, `utilization`, `liquidity` | Messari standardized subgraphs — lending markets and DEX pools on Base | ✅ Moonwell verified live (~15% USDC APY on $14.5M). Uniswap V3 works but its indexers are slow/intermittent |
+| `aave` | `yield`, `tvl`, `utilization` | Aave V3 on Base, via **Aave's own** subgraph schema | ✅ verified live (3.41% USDC APY on $174.9M, 0.84 utilization) |
+| `token_api` | `price` | The Graph Token API — USD spot prices | ⚠️ needs a **separate** Graph Market JWT; `GRAPH_API_KEY` is rejected with 401 |
 
-Protocols behind `messari` live in [`curator_data/sources/protocols.py`](curator_data/sources/protocols.py):
-Aave V3, Moonwell (lending) and Uniswap V3 (DEX), all on Base.
+All subgraph IDs live in [`curator_data/sources/protocols.py`](curator_data/sources/protocols.py),
+including a list of candidates **rejected after live testing**, so nobody re-adds them.
+
+### Why Aave is a separate source rather than a branch in `messari`
+
+Live introspection showed the published *Aave V3 Base* subgraph exposes `reserves`, not the
+standardized `markets` — so one query shape genuinely cannot read it. It could have been a second
+query inside the Messari adapter, but **`Fact.source` is provenance**: labelling data pulled from
+Aave's own subgraph as `messari` would be false to anyone reading the dApp.
+
+Adding it was `sources/aave.py` plus one line in `sources/__init__.py`. Nothing else changed — not
+the registry, the schema, the MCP server or the agent. That is the extension-point claim exercised
+on a real provider rather than a test double.
 
 ---
 
@@ -266,13 +278,18 @@ Callers may rely on all of these:
 ## Tests
 
 ```bash
-uv run pytest data/tests -q          # 129 tests, no network, no credentials
+uv run pytest data/tests -q          # 141 tests, no network, no credentials
 uv run curator-data verify-live      # the live path — needs GRAPH_API_KEY
 ```
 
 The unit suite never touches the network (`httpx.MockTransport`); `verify-live` only touches the
 network. Live gateway data on the demo path is a Graph submission gate, so it is a command rather
 than an assumption.
+
+`tests/conftest.py` strips credentials and disables `.env` discovery for every test. That is
+deliberate: when a real `GRAPH_API_KEY` first landed in `.env`, three tests changed behaviour and
+several others silently began making live calls. The suite now asserts the same thing on a laptop
+with a full `.env` and on a fresh clone with none — which is what the macOS handoff needs.
 
 > ⚠️ **Shared-venv trap.** `uv sync --extra data` *prunes* every package not in the named extras,
 > which silently uninstalls other lanes' dependencies. Always sync all of them:

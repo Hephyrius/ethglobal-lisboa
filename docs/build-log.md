@@ -114,6 +114,72 @@ localhost. Point `forge test` and `forge script` at the anvil endpoint, not at t
 
 ---
 
+## 2026-07-25 — Lane E: trad-fi visual language, and three integration corrections
+
+**What changed.** The dApp was restyled from dark-with-accent to an institutional light theme, and
+three integration problems found by running it against the real fork and the real agent API were
+fixed. `pnpm build` green; every page verified in a real browser (headless Edge) rather than
+inferred from the build passing.
+
+**Why the restyle.** The default DeFi convention — near-black ground, neon accent, pill chips,
+monospace everywhere — signals "crypto-native tool". This product's claim is that an agent can do a
+job real allocators do, so it should look like it belongs in that world: warm paper ground, serif
+headings, hairline rules, tabular figures, tight corners, and colour only where it carries meaning.
+Semantic colour names (`agent` / `data` / `ok` / `bad`) meant the whole change was mostly re-pointing
+token values rather than editing components. No webfont — the serif and sans stacks resolve natively
+on macOS and Windows, so a fresh clone at handoff still needs no network.
+
+**Three things a browser found that a passing build did not.**
+
+1. **The provenance badge was claiming LIVE with nothing loaded.** The landing page issues no API
+   queries at all, and the aggregate defaulted to `live` when it had no reports. That is an
+   assertion about data that was never fetched. It now reports `unknown` and renders nothing.
+
+2. **The badge could sit on green over fixture data — the deep version of the trap it exists to
+   prevent.** Lane B's `GET /health` (their cross-lane note #9) reports `mode` and `status`
+   independently of whether requests succeed, and with the API up in fixture mode *every* request
+   succeeds and validates. The badge would have been confidently green over
+   `packages/schema/fixtures` served from the other side of the wire. `/health` is now folded into
+   the same aggregate: `mode: "fixture"` or `status: "degraded"` turns it amber regardless of how
+   well the requests went. Verified by running the agent API in fixture mode and confirming amber.
+
+3. **`VaultState.share_price` has no declared scale, and the two conventions differ by 1e12.** The
+   Wave 0 fixture reports it 1e18-scaled; the deployed vault's `convertToAssets(1 whole share)`
+   returns a 6-decimal asset amount, and Lane A flagged the same discrepancy from the contract side.
+   Guessing would print the headline share price wrong by a factor of a million. So the dApp
+   **derives** it from `total_assets` and `total_supply` — whose scales *are* specified — with share
+   decimals read from the contract, and treats the reported field as advisory. It now renders
+   correctly whichever convention Lane B emits, and needs no change to the frozen schema. Confirmed
+   against the live fork: `decimals()` = 18 over a 6-decimal asset, exactly as Lane A documented.
+
+**A third rung on the fallback ladder: agent API → chain → fixtures.** Previously an unreachable
+agent API dropped the whole vault page to fixtures. But Lane B's `/vault/{addr}/state` is itself only
+reading the ERC-4626 contract, so when that service is down there is no reason to fall all the way to
+invented numbers — total assets, share price and balances are one `eth_call` away and they are real.
+Only what the contract cannot know (decision history, the mandate behind `mandate_hash`) still needs
+a fixture. `chain` is a genuine third `SourceMode`, not a shade of the other two: folding it into
+`fixture` would understate the truth, and folding it into `live` would hide that the agent is down.
+The aggregate takes the worst source on the page, so a page with real balances and a fixture decision
+feed still reads amber — correctly.
+
+**Fixture timestamps are re-anchored at read time.** The golden fixtures are stamped 14:05Z, so at
+any earlier hour the feed rendered "in 11 hours", which reads as a clock bug rather than sample data.
+The whole feed now shifts by one constant so the intervals between cycles — which the reasoning
+refers to ("the last rebalance was 41 minutes ago") — stay exactly as authored. Safe to use the wall
+clock because it happens inside a React Query `queryFn`, which is client-only and cannot
+desynchronise a server render.
+
+**Smaller corrections worth recording.** The vault header said `LIVE` for "not paused" while the
+header also carried a `LIVE`/`FIXTURES` data badge — two differently-scoped "LIVE"s on one screen is
+ambiguity a judge resolves the wrong way, so the vault one is now `ACTIVE`. The genesis panel listed
+`version` among the fields still needed, which is a schema field the harness sets and not something a
+user can answer.
+
+**Process.** Lane A's request #14 is partly about `f1ab780`, which is this lane's commit — `git add
+-A` swept `contracts/` into it. Acknowledged in #17; staging here is explicit paths from now on.
+
+---
+
 ## 2026-07-25 — Lane E: the dApp — three routes, and the decision feed as the product
 
 **What changed.** `web/` MVP complete: `/` (thesis + vault list), `/create` (genesis chat → live
@@ -263,6 +329,75 @@ the macOS handoff depend on network access.
 **Residual risk, stated honestly.** 180 days is a heuristic, not a guarantee: a long-dormant
 compromise or a package that was malicious from publication would pass. The lockfile is committed,
 so what is installed is what was audited here.
+
+---
+
+## 2026-07-25 — Lane C: live data is flowing, and what the key revealed
+
+`GRAPH_API_KEY` arrived. `verify-live` immediately drove out things no fixture could have.
+
+**The schema question is settled, by introspection rather than inference.** Querying
+`__schema` on each subgraph:
+
+| Subgraph | Reality |
+|---|---|
+| Moonwell Base | Messari standardized (`markets`) — **18 markets, USDC ~15% APY on $14.5M** |
+| Uniswap V3 Base | Messari standardized (`liquidityPools`) — the DEX fallback was not needed here after all |
+| **Aave V3 Base** | **Not standardized.** Exposes `reserves` — the standardized query could never have read it |
+
+**Searching for a standardized Aave on Base, and failing.** I queried The Graph's own network
+subgraph for every active Base subgraph (381 of them) and tested each lending candidate against our
+real query. None work: `morpho-blue-base` answers the right shape but indexes spam (top market by
+TVL is **$447**, with symbols like `MINITIMEBOTALPHAXXX` and 0% rates); `aave-v3_base` and both
+Compound V3 Base subgraphs expose `markets` *without* `inputToken`, so they are a third schema, not
+an older Messari version; Seamless and ExtraFi have no `markets` at all. Every rejection is recorded
+in `protocols.py` so the next person does not repeat the search.
+
+**So Aave got its own source — and that is the extensibility claim being exercised, not described.**
+`sources/aave.py` plus one line in the registration table was the entire change. `registry.py`,
+`facts.py`, `queries.py`, the frozen schema, the MCP server and the agent were all untouched.
+*Alternative rejected:* a second query shape inside `messari.py`. It would have been slightly less
+code, but `Fact.source` is **provenance** — the string the dApp shows under "where did this number
+come from" — and labelling data pulled from Aave's own subgraph as `messari` is simply false.
+
+**Three unit traps in Aave's schema, each derived from live values and pinned by a test.** None are
+documented anywhere obvious:
+- `liquidityRate` is an **APR in RAY** (1e27), not a fraction.
+- `price.priceInEth` **actually holds USD with 8 decimals** despite the name — USDC read `99990000`
+  → $0.9999, cbBTC read `6675885000000` → $66,758.85.
+- `utilizationRate` is already a ratio but comes back **negative** for some reserves (USDbC read
+  `-3.4406`). Dropped rather than clamped: clamping −3.44 to 0 asserts "this market has no
+  borrowing", which is a claim about the market, not a repair of the data.
+
+**Hardening that only real data could have prompted.** The live Uniswap V3 Base subgraph returns
+scam pairs with fabricated TVL — an actual reading was `WETH/SLUG: $130,563,280,368,069,680,230,825,984`
+(1.3e29, roughly a billion times global GDP). Permissionless chain, permissionless pools. Anything
+above `MAX_PLAUSIBLE_USD` (1e11, when total DeFi TVL is order 1e11) is now dropped and counted in a
+note. Dropped, again, rather than clamped: this feeds an agent that allocates capital by comparing
+TVL. Timeouts also went 15s→30s and 20s→45s, because uniswap-v3's indexers answer in ~20s and the
+old ceiling turned a working source into a permanently failing one.
+
+**The tests stopped being hermetic the moment a real key existed.** Three changed behaviour and
+several others quietly started making live network calls — slow, rate-limited, and green or red
+depending on whose machine they ran on. `tests/conftest.py` now strips credentials and disables
+`.env` discovery for every test, so the suite asserts the same thing on a laptop with a full `.env`
+and on a fresh macOS clone with none. Live behaviour stays where it belongs: in `verify-live`.
+
+**What the demo now shows.** `compare_protocols("USDC")` against live gateway data:
+
+```
+moonwell   APY 12.74%  TVL $ 14,543,736  util 0.91   (source: messari)
+aave-v3    APY  3.41%  TVL $174,873,960  util 0.84   (source: aave)
+best_apy -> moonwell        deepest_tvl -> aave-v3        errors -> []
+```
+
+Two protocols, two independent sources, merged into one source-agnostic snapshot with per-fact
+provenance — and the highest yield is *not* the deepest market, which is exactly the tradeoff
+`SKILL.md` teaches an agent to reason about.
+
+**Still outstanding:** the Token API rejects `GRAPH_API_KEY` with HTTP 401 — it needs its own JWT
+from The Graph Market. Prices are therefore the one capability still unavailable; everything else is
+live. Lending yield, TVL and utilization do not depend on it.
 
 ---
 
