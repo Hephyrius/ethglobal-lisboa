@@ -46,7 +46,86 @@ both Lane B's. **A bake-off that built its own prompt would be measuring the bak
 | `drifted` | 80/20 against a 60% cap | `swap` | Direction is unambiguous; a wrong-way trade has reached chain before (#27) |
 | `already-deployed` | floor met, rest committed | `hold` | **The control.** Without it the harness rewards action, and a model that always trades scores well while churning |
 
-## Results — 2026-07-25, i5-8265U, CPU only, 4 scenarios × 3 trials
+## Results — 2026-07-25, Wave 3, both backends
+
+```bash
+uv run python -m scripts.bakeoff --backend grok --trials 3      # hosted; reads XAI_API_KEY
+uv run python -m scripts.bakeoff --models qwen2.5:3b-instruct-q4_K_M --trials 3
+```
+
+| Model | Valid 1st attempt | Mandate-compliant | Right shape | **Authored a ship** | Invented facts | Median latency |
+|---|---|---|---|---|---|---|
+| `qwen2.5:3b-instruct-q4_K_M` | 67% | 100% | 42% | ❌ | 0 | 56s |
+| `grok-4.20-0309-non-reasoning` | 58% | 100% | 58% | ❌ | 0 | **2s** |
+
+> ⚠️ **The two rows are not a fair A/B and must not be quoted as one.** Lane B rewrote the decision
+> prompt between them (Wave 3 added the `enter` action and the untrusted-text fencing), so the 3B's
+> numbers were measured against a different prompt. **Latency and the ship column are comparable;
+> the validity rate is not.** Re-run the 3B if a like-for-like number is ever needed — the harness
+> is one command, which is why it is a harness.
+
+### The finding that changes what we may claim
+
+**Neither model authored an Aqua ship. Nought for six, on a scenario built to invite one, with the
+intent shape in the prompt.**
+
+Wave 2 recorded this as a small-model limitation and the honest sentence was *"the 3B authors
+lending and rebalancing decisions but cannot author a market-making one."* That sentence was
+measuring the wrong thing. **A frontier hosted model, given the same scenario, does not author one
+either** — Grok returned `supply` on the idle leg three times out of three. It is a *defensible*
+answer, which is exactly why `balanced-ship` accepts it; it is not a ship.
+
+So the gap is not about model size. It is about the ship intent being harder to author than the
+alternatives from the prompt as written — and the submission should say that, rather than implying a
+bigger model would close it. **The claim that stands is unchanged and was always the true one: the
+vault ships and docks real Aqua positions in SwapVM/Aqua mode, verified on-chain. The vault does not
+market-make on the model's initiative.**
+
+### ⚠️ This column was wrong until Wave 3, and the way it was wrong is worth knowing
+
+`balanced-ship` declares `wanted_intents = ("ship", "supply")`. The column is labelled **"Authored a
+ship"** and was computed with `can_author()`, which asks *did it author **any** wanted intent* — so a
+model that only ever supplies scored ✅.
+
+**The 3B never exposed it.** Its output on that scenario was invalid with empty intents, so the
+column read ❌ for the right answer entirely by accident. Grok made it read ✅ while authoring zero
+ships, and that tick was one line from going into the submission audit as evidence.
+
+A metric that is only correct when the model fails is not a metric. `can_author_intent(scenario,
+kind)` now asks for the kind by name. Re-scoring the stored 3B trials under the corrected metric
+leaves its ❌ unchanged, which is the check that the fix did not simply invert the answer.
+
+### Per scenario
+
+| Scenario | `qwen2.5:3b` | `grok-4.20` |
+|---|---|---|
+| `idle-cash` | 2/3 supplied | 1/3 — two trials emitted `target_allocations` summing to 0.25 |
+| `balanced-ship` | **0/3**, empty intents, rejected as *"nothing would happen"* | **3/3 `supply`, 0 ships** |
+| `drifted` | 3/3 correctly-directed `swap` | 3/3, one pairing the swap with a `supply` |
+| `already-deployed` *(control — `hold`)* | **0/3 held**, traded every time | **0/3 held**, and 2 of 3 were *blocked by the gate* |
+
+**Neither model ever holds.** That was the strongest Wave 2 argument for the reflection scoreboard
+and it survives contact with a much better model.
+
+But the control scenario now says something sharper than it did. The 3B churned while remaining
+100% mandate-compliant — churn breaks no numeric limit. **Grok did not: two of its three attempts
+proposed taking WETH to 80% against a 60% single-position ceiling, and layer 5 rejected both** with
+*"this trade would take WETH to 80.0%, above the 60% single-position ceiling. Buy less."* On a book
+that needed no trade at all. That is the validation stack catching a frontier model proposing an
+over-limit trade, on a scenario whose correct answer was to do nothing — and it is a better piece of
+evidence for the gate than anything in the Wave 2 run.
+
+**Zero invented facts across all 24 trials, both models.** The `facts_used` → snapshot chain the
+dApp renders holds up even where the decisions do not.
+
+### Cost and speed
+
+Grok is **~28× faster** — 2s against 56s median — which is what makes §B1's generate-check-regenerate
+loop practical at all. Under the 3B, one archetype click would have been three retries and a minute.
+
+---
+
+## Wave 2 results — 3B only, superseded by the table above
 
 | Model | Valid 1st attempt | Mandate-compliant | Right shape | Authored a ship | Invented facts | Median latency |
 |---|---|---|---|---|---|---|

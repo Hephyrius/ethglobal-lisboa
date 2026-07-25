@@ -1,0 +1,189 @@
+{
+  "trials": [
+    {
+      "model": "grok-4.20-0309-non-reasoning",
+      "scenario": "idle-cash",
+      "valid_first_attempt": false,
+      "violations": [],
+      "authored_wanted_intent": false,
+      "intents": [],
+      "action": null,
+      "facts_cited": 0,
+      "facts_invented": [],
+      "latency_s": 1.55,
+      "error": "ValueError: your decision breaches the mandate \u2014 target_allocations: weights sum to 0.2500, but must sum to 1.0. Return a corrected decision that respects these limits.",
+      "reasoning": null
+    },
+    {
+      "model": "grok-4.20-0309-non-reasoning",
+      "scenario": "idle-cash",
+      "valid_first_attempt": false,
+      "violations": [],
+      "authored_wanted_intent": false,
+      "intents": [],
+      "action": null,
+      "facts_cited": 0,
+      "facts_invented": [],
+      "latency_s": 1.39,
+      "error": "ValueError: your decision breaches the mandate \u2014 target_allocations: weights sum to 0.2500, but must sum to 1.0. Return a corrected decision that respects these limits.",
+      "reasoning": null
+    },
+    {
+      "model": "grok-4.20-0309-non-reasoning",
+      "scenario": "idle-cash",
+      "valid_first_attempt": true,
+      "violations": [],
+      "authored_wanted_intent": true,
+      "intents": [
+        "supply"
+      ],
+      "action": "enter",
+      "facts_cited": 1,
+      "facts_invented": [],
+      "latency_s": 1.33,
+      "error": null,
+      "reasoning": "Saw 4.32% lending yield on aave-v3 USDC (f1). Current holdings are 100% USDC, all idle above the 25% cash floor. Mandate requires deploying idle USDC to the permitted lending market with best depth; only aave is allowed. Prefer this over the higher 5.87% on morpho-blue (f2) due to deeper market and permitted venues limit. No data missing that changes this. Supplying all but the 25% floor."
+    },
+    {
+      "model": "grok-4.20-0309-non-reasoning",
+      "scenario": "balanced-ship",
+      "valid_first_attempt": true,
+      "violations": [],
+      "authored_wanted_intent": true,
+      "intents": [
+        "supply"
+      ],
+      "action": "enter",
+      "facts_cited": 2,
+      "facts_invented": [],
+      "latency_s": 1.59,
+      "error": null,
+      "reasoning": "Current holdings are exactly 50% USDC / 50% WETH, matching the 50/50 target. No rebalance needed. USDC is fully idle (above the 20% cash floor), and the best available yield is 5.87% on Morpho (f2) vs 4.32% on Aave (f1); however, only Aave is a permitted venue. Supplying the entire USDC balance to Aave earns yield on idle capital without changing allocation or breaching limits. No volatility data was available, but with perfect balance and positive permitted yield, deploying is preferred to holding idle. Only one venue action used. Unsure about exact net yield after any gas but data supports d"
+    },
+    {
+      "model": "grok-4.20-0309-non-reasoning",
+      "scenario": "balanced-ship",
+      "valid_first_attempt": true,
+      "violations": [],
+      "authored_wanted_intent": true,
+      "intents": [
+        "supply"
+      ],
+      "action": "enter",
+      "facts_cited": 1,
+      "facts_invented": [],
+      "latency_s": 1.62,
+      "error": null,
+      "reasoning": "Current holdings are exactly 50% USDC / 50% WETH, matching the 50/50 target so no rebalance needed. USDC is fully idle (above the 20% cash floor) and the best available yield is 5.87% on Morpho (f2) but that venue is not permitted; the only permitted lending market is Aave at 4.32% (f1). This yield exceeds any plausible gas cost over a reasonable horizon and can be unwound immediately, so we supply all idle USDC to Aave. No volatility data was available, but none was needed for this decision. We remain unsure whether 4.32% will persist beyond this tick."
+    },
+    {
+      "model": "grok-4.20-0309-non-reasoning",
+      "scenario": "balanced-ship",
+      "valid_first_attempt": true,
+      "violations": [],
+      "authored_wanted_intent": true,
+      "intents": [
+        "supply"
+      ],
+      "action": "enter",
+      "facts_cited": 2,
+      "facts_invented": [],
+      "latency_s": 1.86,
+      "error": null,
+      "reasoning": "Current holdings are exactly 50% USDC / 50% WETH, matching the 50/50 target. No rebalance needed. USDC is fully idle (above the 20% cash floor) and earns nothing. f2 shows Morpho pays 5.87% while f1 shows Aave pays 4.32%; both are permitted but the instruction is to supply to the best-paying permitted lending market. Supplying all idle USDC (the entire 50% holding) to Aave is chosen because it can be unwound in one block with no slippage or oracle risk, unlike Morpho. This earns yield on idle capital without changing allocation or breaching any hard limit. No volatility data was available, but"
+    },
+    {
+      "model": "grok-4.20-0309-non-reasoning",
+      "scenario": "drifted",
+      "valid_first_attempt": true,
+      "violations": [],
+      "authored_wanted_intent": true,
+      "intents": [
+        "swap"
+      ],
+      "action": "enter",
+      "facts_cited": 2,
+      "facts_invented": [],
+      "latency_s": 1.61,
+      "error": null,
+      "reasoning": "Current holdings are 20% USDC / 80% WETH, breaching the 60% single non-cash limit and the 50/50 objective. Mandate requires rotating back toward 50/50 (target_allocations set to that). No idle USDC above the 20% cash floor, so no lending or Aqua deployment possible this tick. Data missing on WETH volatility, but rebalance is required by hard limits regardless. Only one venue action (Uniswap swap) used. No Aqua or Aave facts used as they do not apply to the required correction."
+    },
+    {
+      "model": "grok-4.20-0309-non-reasoning",
+      "scenario": "drifted",
+      "valid_first_attempt": true,
+      "violations": [],
+      "authored_wanted_intent": true,
+      "intents": [
+        "swap"
+      ],
+      "action": "rebalance",
+      "facts_cited": 2,
+      "facts_invented": [],
+      "latency_s": 1.86,
+      "error": null,
+      "reasoning": "Current holdings are 20% USDC / 80% WETH, which breaches the hard limit of no single non-cash position above 60% and the 50/50 objective. Mandate requires rotating back toward 50/50. No volatility data available to judge if the drift is worth correcting now, but the breach of the 60% limit forces action. Will rebalance to exactly 50/50 targets. No idle USDC above the 20% cash floor, so no lending or Aqua deployment this tick. Only one venue action (the swap) is used, which is within the limit of at most 2. Slippage assumed under 50bps given the $12.4M pool depth."
+    },
+    {
+      "model": "grok-4.20-0309-non-reasoning",
+      "scenario": "drifted",
+      "valid_first_attempt": true,
+      "violations": [],
+      "authored_wanted_intent": true,
+      "intents": [
+        "swap",
+        "supply"
+      ],
+      "action": "rebalance",
+      "facts_cited": 2,
+      "facts_invented": [],
+      "latency_s": 2.09,
+      "error": null,
+      "reasoning": "Current holdings are 20% USDC / 80% WETH, which breaches the hard limit of no single non-cash position above 60% and the 20% USDC minimum cash floor. Mandate requires roughly 50/50 split. Rebalancing to 50% USDC / 50% WETH by selling ~37.5% of WETH holdings for USDC on Uniswap (within 50bps slippage given $12.4M pool depth). After rebalance, all idle USDC above the 20% floor will be supplied to Aave (4.32% yield) rather than Morpho (not permitted by allowed venues). No Aqua ship this tick to respect at-most-2 venue actions limit. Data missing on WETH volatility, so sized conservatively to exac"
+    },
+    {
+      "model": "grok-4.20-0309-non-reasoning",
+      "scenario": "already-deployed",
+      "valid_first_attempt": false,
+      "violations": [],
+      "authored_wanted_intent": false,
+      "intents": [],
+      "action": null,
+      "facts_cited": 0,
+      "facts_invented": [],
+      "latency_s": 1.75,
+      "error": "ValueError: your trade would land the vault in a state the mandate forbids \u2014 venue_intents: this trade would take WETH to 80.0%, above the 60% single-position ceiling. Buy less. Resize the swap and return a corrected decision.",
+      "reasoning": null
+    },
+    {
+      "model": "grok-4.20-0309-non-reasoning",
+      "scenario": "already-deployed",
+      "valid_first_attempt": false,
+      "violations": [],
+      "authored_wanted_intent": false,
+      "intents": [],
+      "action": null,
+      "facts_cited": 0,
+      "facts_invented": [],
+      "latency_s": 1.89,
+      "error": "ValueError: your decision breaches the mandate \u2014 action: action is 'enter' but no venue_intents were supplied, so nothing would happen; supply intents or use 'hold'. Return a corrected decision that respects these limits.",
+      "reasoning": null
+    },
+    {
+      "model": "grok-4.20-0309-non-reasoning",
+      "scenario": "already-deployed",
+      "valid_first_attempt": false,
+      "violations": [],
+      "authored_wanted_intent": false,
+      "intents": [],
+      "action": null,
+      "facts_cited": 0,
+      "facts_invented": [],
+      "latency_s": 2.03,
+      "error": "ValueError: your trade would land the vault in a state the mandate forbids \u2014 venue_intents: this trade would take WETH to 80.0%, above the 60% single-position ceiling. Buy less. Resize the swap and return a corrected decision.",
+      "reasoning": null
+    }
+  ],
+  "available_ram_gb": 0.6729583740234375,
+  "temperature": 0.0
+}
