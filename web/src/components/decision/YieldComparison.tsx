@@ -1,32 +1,33 @@
 import type { Fact } from '@curator/schema'
 import { Badge } from '@/components/ui/Badge'
 import { formatPercent, formatUsd } from '@/lib/format/units'
+import { cn } from '@/lib/cn'
 
 /**
  * The comparison the agent was actually making, in one glance.
  *
  * Individual fact cards show each observation faithfully but scatter the
- * comparison across six of them: a judge has to hold "moonwell 12.74%" in their
- * head while scrolling to "moonwell $14.5M TVL" and then to the Aave pair. The
- * interesting fact — **the highest headline yield is not the deepest market** —
- * is the relationship *between* those numbers, and a list of cards does not
- * render a relationship.
+ * comparison across many of them: a reader has to hold "moonwell 4.18%" in
+ * their head while scrolling to "moonwell $15.1M TVL" and then to the Aave
+ * pair. The interesting fact — **the highest headline yield is not the deepest
+ * market** — is the relationship *between* those numbers, and a list of cards
+ * does not render a relationship.
  *
- * So yields are pulled together into one table, sorted, with TVL and
- * utilization beside each and the spread stated. That is exactly the reasoning
- * the mandate asks for ("prefer lending markets with deep liquidity … over the
- * highest headline APY"), and this is where a reader can check the agent
- * actually did it.
+ * **Grouped by market asset, and that grouping is load-bearing.** Live
+ * snapshots carry lending markets for several assets at once: Aave's Base
+ * deployment reports USDC at 3.48% and WETH at 1.46%. Ranking those together
+ * would compare yields on different assets and, worse, would name Aave's
+ * $174.8M *WETH* market as "deeper" than a USDC market it has nothing to do
+ * with. Only protocols lending the same asset are compared, and a market with
+ * one protocol in it is not a comparison, so it is skipped.
  *
- * Built entirely from facts already in the snapshot — it invents nothing and
- * adds no data dependency. Renders only when there are at least two yields to
- * compare, because one row is not a comparison.
+ * Built entirely from facts already in the snapshot — invents nothing and adds
+ * no data dependency.
  */
 
 type Row = {
   key: string
   protocol: string
-  market?: string
   apy: number
   source: string
   tvl?: number
@@ -35,24 +36,35 @@ type Row = {
 }
 
 export function YieldComparison({ facts, citedIds }: { facts: Fact[]; citedIds: string[] }) {
-  const rows = buildRows(facts, citedIds)
-  if (rows.length < 2) return null
-
-  const spreadBps = Math.round((rows[0].apy - rows[rows.length - 1].apy) * 10_000)
-  const deepest = rows.reduce((best, row) => ((row.tvl ?? 0) > (best.tvl ?? 0) ? row : best), rows[0])
-  const highestYieldIsDeepest = deepest.key === rows[0].key
+  const groups = buildGroups(facts, citedIds)
+  if (groups.length === 0) return null
 
   return (
-    <div className="mb-3 rounded border border-line bg-raised/40 p-3">
+    <div className="mb-3 space-y-2">
+      {groups.map((group) => (
+        <MarketComparison key={group.market} market={group.market} rows={group.rows} />
+      ))}
+    </div>
+  )
+}
+
+function MarketComparison({ market, rows }: { market: string; rows: Row[] }) {
+  const spreadBps = Math.round((rows[0].apy - rows[rows.length - 1].apy) * 10_000)
+  const withTvl = rows.filter((row) => row.tvl !== undefined)
+  const deepest = withTvl.length > 0 ? withTvl.reduce((a, b) => ((b.tvl ?? 0) > (a.tvl ?? 0) ? b : a)) : null
+  const deepestIsNotBest = deepest !== null && deepest.key !== rows[0].key
+
+  return (
+    <div className="rounded border border-line bg-raised/40 p-3">
       <div className="flex items-baseline justify-between gap-2">
-        <span className="label">Yield comparison</span>
-        <span className="text-2xs text-faint">{rows.length} markets</span>
+        <span className="label">Yield comparison · {market}</span>
+        <span className="text-2xs text-faint">{rows.length} protocols</span>
       </div>
 
       <table className="tabular mt-2 w-full text-2xs">
         <thead>
           <tr className="text-faint">
-            <th className="pb-1 text-left font-medium">Market</th>
+            <th className="pb-1 text-left font-medium">Protocol</th>
             <th className="pb-1 text-right font-medium">APY</th>
             <th className="pb-1 text-right font-medium">TVL</th>
             <th className="pb-1 text-right font-medium">Util</th>
@@ -60,17 +72,12 @@ export function YieldComparison({ facts, citedIds }: { facts: Fact[]; citedIds: 
         </thead>
         <tbody>
           {rows.map((row, index) => (
-            <tr key={row.key} className={index === 0 ? 'text-ink' : 'text-muted'}>
-              <td className="py-0.5 pr-2">
-                <span className={index === 0 ? 'font-medium' : undefined}>{row.protocol}</span>
-                {row.market ? <span className="text-faint"> · {row.market}</span> : null}
-                {!row.cited ? (
-                  <span className="text-faint" title="Read, but not cited by the decision">
-                    {' '}
-                    ·
-                  </span>
-                ) : null}
-              </td>
+            <tr
+              key={row.key}
+              className={cn(index === 0 ? 'text-ink' : 'text-muted', !row.cited && 'opacity-60')}
+              title={row.cited ? undefined : 'Read, but not cited by the decision'}
+            >
+              <td className={cn('py-0.5 pr-2', index === 0 && 'font-medium')}>{row.protocol}</td>
               <td className="py-0.5 text-right font-medium">{formatPercent(row.apy)}</td>
               <td className="py-0.5 text-right">{row.tvl ? formatUsd(row.tvl) : '—'}</td>
               <td className="py-0.5 text-right">
@@ -83,9 +90,9 @@ export function YieldComparison({ facts, citedIds }: { facts: Fact[]; citedIds: 
 
       <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-line pt-2">
         <Badge tone="neutral">{spreadBps} bp spread</Badge>
-        {!highestYieldIsDeepest && deepest.tvl ? (
+        {deepestIsNotBest && deepest?.tvl ? (
           <span className="text-2xs text-muted">
-            Deepest market is <span className="text-ink">{deepest.protocol}</span> at{' '}
+            Deepest is <span className="text-ink">{deepest.protocol}</span> at{' '}
             {formatUsd(deepest.tvl)} — not the highest yield.
           </span>
         ) : null}
@@ -94,24 +101,24 @@ export function YieldComparison({ facts, citedIds }: { facts: Fact[]; citedIds: 
   )
 }
 
-/** One row per protocol+market that reported a yield, enriched from its siblings. */
-function buildRows(facts: Fact[], citedIds: string[]): Row[] {
+/** One group per market asset; only groups with something to compare survive. */
+function buildGroups(facts: Fact[], citedIds: string[]): Array<{ market: string; rows: Row[] }> {
   const keyOf = (fact: Fact) => `${fact.subject.protocol ?? '?'}|${fact.subject.market ?? ''}`
 
-  const rows = new Map<string, Row>()
+  const rows = new Map<string, Row & { market: string }>()
   for (const fact of facts) {
     if (fact.kind !== 'yield' || !fact.subject.protocol) continue
     rows.set(keyOf(fact), {
       key: keyOf(fact),
+      market: fact.subject.market ?? '—',
       protocol: fact.subject.protocol,
-      market: fact.subject.market,
       apy: fact.value,
       source: fact.source,
       cited: citedIds.includes(fact.id),
     })
   }
 
-  // Attach TVL and utilization reported for the same market by any source.
+  // Attach TVL and utilization reported for the same protocol+market by any source.
   for (const fact of facts) {
     const row = rows.get(keyOf(fact))
     if (!row) continue
@@ -119,5 +126,15 @@ function buildRows(facts: Fact[], citedIds: string[]): Row[] {
     if (fact.kind === 'utilization') row.utilization = fact.value
   }
 
-  return [...rows.values()].sort((a, b) => b.apy - a.apy)
+  const byMarket = new Map<string, Row[]>()
+  for (const row of rows.values()) {
+    const existing = byMarket.get(row.market)
+    if (existing) existing.push(row)
+    else byMarket.set(row.market, [row])
+  }
+
+  return [...byMarket.entries()]
+    .filter(([, group]) => group.length >= 2)
+    .map(([market, group]) => ({ market, rows: group.sort((a, b) => b.apy - a.apy) }))
+    .sort((a, b) => b.rows.length - a.rows.length)
 }

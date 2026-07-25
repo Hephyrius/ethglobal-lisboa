@@ -48,6 +48,25 @@ time.
 - Dependency supply-chain policy: every package pinned exactly and ≥180 days old, install scripts
   disabled, enforced by `pnpm --filter @curator/web audit:deps` (exits non-zero on violation).
 
+### Verified against the fully live stack
+
+Run with Lane B in live mode and the badge goes green `LIVE`. Confirmed end to end at 07:38:
+
+- **Share price renders `1.00`** — derived from `total_assets`/`total_supply` with share decimals
+  read from the contract, matching the chain exactly (`convertToAssets(1 share)` = `1000000`).
+- **Holdings show Lane B's real rotation**: 1,750.00 USDC and 0.403383 WETH (≈749.88 in asset).
+- **The yield comparison renders live Graph data**: moonwell 4.18% on $15.1M at 88% utilization vs
+  aave-v3 3.48% on $173.2M at 85% — *"Deepest is aave-v3 at $173.2M — not the highest yield"*. That
+  is the composability argument made visible, from two different Graph sources (`messari`, `aave`).
+- Reasoning is real `qwen2.5:3b-instruct-q4_K_M` output, 132.3s for the cycle.
+
+```sh
+# live agent on its own port, so a fixture-mode instance is left undisturbed
+AGENT_MODE=live AGENT_DATA_REGISTRY=curator_data:build_registry \
+AGENT_VENUE_REGISTRY=venues:get_venue uv run uvicorn agent.api.app:app --port 8001
+NEXT_PUBLIC_API_URL=http://localhost:8001 pnpm --filter @curator/web dev
+```
+
 ### What is stubbed
 
 - **Fixture fallback on every read**, by design — and it is *loud*, never silent. The header badge
