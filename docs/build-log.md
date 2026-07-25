@@ -1232,6 +1232,89 @@ so what is installed is what was audited here.
 
 ---
 
+## 2026-07-25 — Lane C, Wave 2: diagnoses, Morpho, LSTs, and forward-looking odds
+
+Three deliverables from §6. Each one was reshaped by live data rather than by the plan, which is
+the pattern worth recording.
+
+**C1 — every message now reads as a diagnosis.** Wave 1 fixed *which channel* a message goes to;
+this fixes *what it says*. The reader is a model deciding whether to move capital, and
+`messari: ConnectionError: [Errno 11001] getaddrinfo failed` does not let it tell a dead data layer
+from one unreachable protocol. Every message is now **who** (subject), **what** (the observation
+*with the number* — "slow" is an opinion, "no response within 6s" is a fact), and **so what** (the
+consequence already taken, or the one to draw). `diagnose()` enforces the shape so it is not left to
+each call site.
+
+*Two channel corrections found while doing it.* The stale-price message was filed under `errors[]`,
+which the prompt renders as *"data you could NOT read"* — but the price **was** read and returned;
+it is just old. And the DEX schema fallback had the word "harmless" in its own message and was filed
+as an error anyway. Both are context now. Wave 1's circuit breaker on timeouts was deliberately left
+alone: first three failures are news, then they become remarks, which solves the repetition problem
+more precisely than reclassifying would.
+
+*The shape test earned its place immediately.* `test_diagnostics.py` drives every registered source
+into failure and asserts the three-part ASCII shape — and caught `defillama` emitting an **em dash**,
+which renders as a mojibake box on a cp1252 console mid-demo.
+
+**C3a — Morpho, and why it is not a subgraph.** Morpho is Base's largest lending market. The Graph
+route does not work for it, and that was checked rather than assumed: querying The Graph's own
+network subgraph for every active subgraph found **exactly one** Morpho Base subgraph, and it
+indexes a dead deployment whose largest market holds **$448**, with names like
+`MINITIMEBOTALPHAXXXXXXXXXXXXXX`, while Morpho on Base holds ~$1.4bn. Verified twice, a wave apart.
+So it ships on Morpho's own free API. *Saying plainly that The Graph does not usefully cover this
+protocol on this chain beats shipping $448 of fake markets to keep a story tidy* — The Graph remains
+the source of record for Aave and Moonwell.
+
+Live data then forced three guards I would not have written from documentation:
+
+1. **`USDC/HERMES` reports a 297,892% supply APY on $54,552,553 supplied at 100% utilization.** A
+   real market with real money in it — a runaway rate curve pinned at full utilization. An agent
+   told "USDC yields 297,892%" moves the whole book into a position it **cannot exit**, because at
+   utilization 1.00 every supplied dollar is already lent out. The **whole market** is dropped, not
+   merely its rate: a $54M size would still present it as a real venue, and size is exactly what an
+   agent uses to judge whether a market is safe to enter.
+2. **Morpho Blue permits many markets per pair.** `USDC/HERMES` appeared **24 times** in one
+   response and flooded the snapshot. Only the deepest market per pair is reported.
+3. **`netSupplyApy` is the headline, `supplyApy` the base** — the same trap DefiLlama taught this
+   lane. Base reported, difference remarked.
+
+`MAX_PLAUSIBLE_APY` and `MAX_PLAUSIBLE_USD` moved to a shared `plausibility` module: three sources
+need identical bounds, and a threshold that differs by source is worse than none — it makes the same
+market credible or not depending on who reported it.
+
+**C3b — the 10^10 trap, worse than the plan described.** The plan warned wstETH's Base Chainlink
+feed reports `WSTETH / ETH`. Checking found it is not one feed but **all** of them — `WSTETH/ETH`,
+`CBETH/ETH`, `RETH/ETH`, every one 18 decimals rather than the USD feeds' 8. Read as an 8-decimal
+USD price, wstETH prices at **$12,399,811,032**. The existing `description()` guard would *not* have
+caught it: the feed is exactly what it claims to be, and the quote currency was simply an axis
+`PriceFeed` had no concept of. It now carries `quote`, and an ETH-quoted feed is **composed** with
+ETH/USD (live: 1.2399811 × $1,858.98 = $2,305.10). If ETH/USD is unavailable the asset is left
+unpriced rather than reported in the wrong unit. The exchange rate is also surfaced, because *the
+rate drifting upward over time is the staking yield accruing* — which a point-in-time USD price
+hides completely.
+
+**C2 — prediction markets, and an inversion caught before shipping.** The only forward-looking
+source here. First cut reported the **leading** outcome, which looks reasonable and is catastrophic:
+*"Will the Fed decrease rates by 50+ bps?"* prices `Yes 0.0015 / No 0.9985`, so the leading outcome
+is `No` at 99.85%. That published **99.9%** against a subject reading `will-the-fed-decrease-…` —
+the near-certain opposite of what the market believes. The fact now carries the probability of the
+question **as asked**. Structurally identical to the Token API's direction-flipped `price` field,
+and the fix is the same: bind the number to the question rather than to whichever side is winning.
+
+Also: the API's `search` parameter is **ignored** (`search=ethereum` and `search=fed` return
+byte-identical results, both led by an esports match), so relevance is filtered client-side; and a
+minimum 24h volume, because an implied probability with $200 behind it is one person's opinion
+wearing a number.
+
+The emitted kind is an interim. There is no `probability` in the frozen `FactKind`, and the schema
+says plainly *"Extend this list rather than overloading an existing kind"* — `sentiment` genuinely
+is an overload, since `feargreed` emits a market-mood index and this emits P(a specific event).
+Requested from Lane F; held behind one constant so the switch is a one-line change.
+
+Nine sources now, six of which need no credential. 274 tests.
+
+---
+
 ## 2026-07-25 — Lane C: published to PyPI — Track 1's reusability gate is closed
 
 `curator-schema` 0.1.0 · `curator-data` 0.2.0 · `curator-mcp` 0.2.0 are live on PyPI, and
@@ -1572,6 +1655,69 @@ schema instead, in which case it degrades into `errors[]` and `verify-live` name
 one-line config edit, which is exactly why the table is data. The Token API's exact path layout is
 also unconfirmed — its docs now redirect to Pinax — so that source tries a short ordered list of known
 path shapes and remembers the first that answers.
+
+---
+
+## 2026-07-25 — Lane D (Wave 2): Morpho solved with a price feed, and the minOut answer corrected
+
+**What changed.** `ERC4626PriceFeed.sol` (10 fork tests against real MetaMorpho and real Chainlink),
+`venues/morpho/` (a fourth venue, 20 tests), and a correction to the `minOut` answer given to Lane A.
+**156 Lane D tests.**
+
+### Morpho: the blocker was real, and it was solvable from this lane
+
+The earlier entry concluded Morpho could not be built because the vault values tokens only through
+`priceFeed(address)` — one Chainlink aggregator per token — and a MetaMorpho share has no feed. That
+was correct as far as it went and **stopped one step too early**.
+
+`priceFeed` does not require a *Chainlink-operated* feed. It requires something that answers
+`IAggregatorV3`, and Lane A's own test suite proves that by using a `MockAggregatorV3`. So the
+missing feed can simply be **written**, in this lane's Foundry project, with no change to
+`contracts/` at all.
+
+`ERC4626PriceFeed` composes the two halves of the answer: `convertToAssets(1 share)` from the vault,
+multiplied by the underlying's real Chainlink price. Measured against Moonwell Flagship USDC on a
+Base fork, valuing the share as plain USDC understates the position by **760 bps** — which is the
+number that makes the case better than any argument.
+
+**The subtle decision, and the one most likely to be got wrong by someone reimplementing this:
+timestamps are passed through from the underlying feed, never invented.** `convertToAssets` is read
+live and is always current, so returning `block.timestamp` as `updatedAt` would make the feed
+*always look fresh* and silently defeat the vault's staleness check — on precisely the half that can
+go stale, the USD price. A test asserts the four round fields match the underlying's exactly.
+
+Also deliberate: the adapter cannot tell that ETH/USD is the wrong feed for a USDC vault, since both
+are 8-decimal aggregators. A test documents that rather than hiding it, and the mitigation is that
+`expand-universe.sh` validates a feed by reading `description()` — which is why `description()` is
+implemented properly instead of stubbed.
+
+Morpho Blue itself remains unusable and the reason is recorded in `venues/morpho/markets.py`: no
+receipt token at all, so nothing for the vault to hold. MetaMorpho is the ERC-4626 layer above it,
+and a full exit there must be expressed in **shares** via `redeem`, not assets — there is no
+`uint256.max` sentinel as Aave has, and an asset figure computed off-chain is stale by the time it
+mines. Shares do not accrue; their value does.
+
+The venue reuses `SupplyIntent`/`WithdrawIntent` **unchanged**, which is the first real test of the
+claim that those shapes were venue-agnostic. They were.
+
+### The minOut answer was right, for one of two possible reasons
+
+Request 60 was answered with "every V3 leg carries a non-zero `amountOutMin`", verified by decoding
+the router calldata. Minutes later, the same pair returned a route where **every leg's minimum is
+zero** — and the swap is still fully protected. The router had chosen a mixed V3+V4 split, which
+accumulates output and enforces a single minimum in a trailing **`SWEEP` (`0x04`)** command.
+Verified: `SWEEP.amountMin` equals `quote.output.minimumAmount` exactly, at the same 0.5000% haircut.
+
+So the property holds, but **the earlier wording was route-shape-dependent** and would have gone into
+`SECURITY.md` as a claim that is false half the time. Corrected in request 64 with wording about the
+*aggregate* guarantee, and the tests now compute the effective minimum wherever the router put it.
+
+**This property has now produced an error in both directions**, which is what makes it worth a log
+entry rather than a commit message. Grepping the calldata for the minimum finds nothing and suggests
+there is no protection — a false negative. Decoding the legs and finding zeros suggests a free lunch
+— a false alarm, and the more dangerous of the two because it looks like diligence. Only the
+aggregate means anything, and a check written against one route shape will confidently mislead on the
+other.
 
 ---
 

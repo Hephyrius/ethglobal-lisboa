@@ -186,6 +186,47 @@ def _aave(config: VenueConfig) -> VenueCapability:
     )
 
 
+def _morpho(config: VenueConfig) -> VenueCapability:
+    from . import addresses
+    from .morpho.markets import VAULTS
+
+    del config  # availability is on-chain registration, not credentials
+
+    allowed = addresses.allowlist()
+    # A MetaMorpho share needs ERC4626PriceFeed registered, not merely an
+    # allowlist entry — an unvalued share collapses the vault's share price.
+    usable = [v for v in VAULTS.values() if v.address.lower() in allowed]
+    return VenueCapability(
+        key="morpho",
+        role="lender",
+        summary=(
+            "Earns interest on what the vault already holds, by depositing into a "
+            "curated MetaMorpho vault."
+        ),
+        intents=("supply", "withdraw"),
+        tokens=tuple(sorted({"USDC"} if usable else set())),
+        custody="claim",
+        custody_note=(
+            "The underlying moves to a MetaMorpho vault and the curated vault holds "
+            "ERC-4626 shares, with receiver = the vault. Unlike an Aave aToken those "
+            "shares appreciate rather than rebasing, so they need ERC4626PriceFeed "
+            "to be valued correctly."
+        ),
+        available=bool(usable),
+        unavailable_reason=(
+            None
+            if usable
+            else (
+                "no MetaMorpho share token is registered in this deployment's "
+                "allowlist. Deploy ERC4626PriceFeed from venues/aqua/solidity, register "
+                "it with VaultFactory.setDefaultValuation, then create a new vault — "
+                "per-vault valuations are immutable"
+            )
+        ),
+        contracts={v.key: v.address for v in VAULTS.values()},
+    )
+
+
 #: One entry per registered venue. A new venue adds a builder here and a factory
 #: line in `registry.py` — deliberately the same two-line shape as adding a data
 #: source, so "extensible" stays a property rather than a claim.
@@ -193,6 +234,7 @@ _BUILDERS = {
     "uniswap": _uniswap,
     "aqua": _aqua,
     "aave": _aave,
+    "morpho": _morpho,
 }
 
 

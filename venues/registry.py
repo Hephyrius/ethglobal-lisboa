@@ -44,6 +44,12 @@ def _aave() -> Venue:
     return AaveVenue()
 
 
+def _morpho() -> Venue:
+    from .morpho.venue import MorphoVenue
+
+    return MorphoVenue()
+
+
 _FACTORIES: Final[dict[str, Callable[[], Venue]]] = {
     "uniswap": _uniswap,
     "aqua": _aqua,
@@ -52,6 +58,10 @@ _FACTORIES: Final[dict[str, Callable[[], Venue]]] = {
     # are deliberately different in kind: Uniswap rotates what the vault holds,
     # Aqua earns fees on what it already holds, Aave earns interest on it.
     "aave": _aave,
+    # Added in Wave 2. Supplies into curated MetaMorpho vaults — the second
+    # home for idle capital, and the one that proved SupplyIntent/WithdrawIntent
+    # were genuinely venue-agnostic: neither shape changed.
+    "morpho": _morpho,
 }
 
 #: Registered keys, for the genesis UI and for validating a mandate.

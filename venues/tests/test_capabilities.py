@@ -77,9 +77,32 @@ class TestCustodyIsDescribedCorrectly:
         cap = capability("uniswap", config)
         assert cap.custody == "rotational"
 
-    def test_the_three_venues_do_genuinely_different_jobs(self, config):
+    def test_the_venues_do_genuinely_different_jobs(self, config):
+        """Asserts the *invariant*, not the census.
+
+        The first version of this pinned the exact three-venue dict and broke
+        the moment Morpho was added — a test that fails on correct growth is a
+        speed bump, not a guard. What matters is that all three kinds of job are
+        represented and every venue declares one.
+        """
         roles = {c.key: c.role for c in capabilities(config)}
-        assert roles == {"uniswap": "taker", "aqua": "maker", "aave": "lender"}
+        assert set(roles) == set(VENUES)
+        assert all(roles.values()), "every venue must declare a role"
+        assert {"taker", "maker", "lender"} <= set(roles.values()), (
+            "the venue set should cover rotating, market-making and lending — "
+            f"got {sorted(set(roles.values()))}"
+        )
+
+    def test_each_lender_declares_how_the_receipt_is_held(self, config):
+        """Aave and Morpho are both `claim`, but for different receipts: a
+        1:1 rebasing aToken versus an appreciating ERC-4626 share. The note has
+        to distinguish them, because the second needs a price feed the first
+        does not."""
+        lenders = [c for c in capabilities(config) if c.role == "lender"]
+        assert len(lenders) >= 2
+        for cap in lenders:
+            assert cap.custody == "claim"
+            assert cap.custody_note
 
 
 class TestIntentsMatchWhatTheAdaptersServe:
