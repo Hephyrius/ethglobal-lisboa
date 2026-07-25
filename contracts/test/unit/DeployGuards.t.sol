@@ -29,6 +29,18 @@ contract DeployHarness is Deploy {
     function allowlist() external pure returns (address[] memory) {
         return _allowlist();
     }
+
+    function canPayGas(address deployer, uint256 balance) external pure {
+        _assertCanPayGas(deployer, balance);
+    }
+
+    function chooseDeployerKey(bool forkTarget, uint256 forkKeyOrZero, uint256 mainnetKeyOrZero)
+        external
+        pure
+        returns (uint256)
+    {
+        return _chooseDeployerKey(forkTarget, forkKeyOrZero, mainnetKeyOrZero);
+    }
 }
 
 /// @notice Tests for the deploy script's mainnet safety guards.
@@ -42,6 +54,7 @@ contract DeployGuardsTest is Test {
 
     address internal constant ANVIL_0 = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;
     address internal constant ANVIL_1 = 0x70997970C51812dc3A010C7d01b50e0d17dc79C8;
+    uint256 internal constant ANVIL_KEY_0 = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
     address internal realDeployer = makeAddr("fundedDeployer");
     address internal realAgent = makeAddr("fundedAgent");
     address internal realGuardian = makeAddr("platformGuardian");
@@ -124,6 +137,58 @@ contract DeployGuardsTest is Test {
     function test_guardsRevertRatherThanWarn() public {
         vm.expectRevert();
         deploy.assertSafe("base-mainnet", ANVIL_0, ANVIL_1, ANVIL_1, 0);
+    }
+
+    // ── the signer, and whether it can pay ───────────────────────────────
+
+    /// @dev The trap this closes, found by running R0 in an isolated clone rather than reasoning
+    ///      about it: `.env` defines `DEPLOYER_PRIVATE_KEY` as the funded *mainnet* wallet, which has
+    ///      zero balance on a fresh fork. Reading it on a fork meant that merely sourcing `.env` —
+    ///      which `scripts/*.sh` do, and which any runbook tells a human to do — turned a working
+    ///      fork deploy into a failing one.
+    function test_forkDeployIgnoresTheMainnetDeployerKey() public view {
+        uint256 mainnetKey = 0xA11CE00000000000000000000000000000000000000000000000000000000001;
+
+        assertEq(deploy.chooseDeployerKey(true, 0, mainnetKey), ANVIL_KEY_0, "fork falls back to anvil #0");
+        assertEq(deploy.chooseDeployerKey(false, 0, mainnetKey), mainnetKey, "a real network uses it");
+    }
+
+    function test_forkDeployerCanStillBeOverridden() public view {
+        uint256 forkKey = 0xB0B0000000000000000000000000000000000000000000000000000000000002;
+        uint256 mainnetKey = 0xA11CE00000000000000000000000000000000000000000000000000000000001;
+
+        assertEq(deploy.chooseDeployerKey(true, forkKey, mainnetKey), forkKey, "FORK_DEPLOYER wins on a fork");
+        // And it must not leak the other way: a fork-only key must never sign a real deployment.
+        assertEq(deploy.chooseDeployerKey(false, forkKey, mainnetKey), mainnetKey, "real network unaffected");
+    }
+
+    function test_bothUnsetFallsBackToAnvil() public view {
+        assertEq(deploy.chooseDeployerKey(true, 0, 0), ANVIL_KEY_0, "fork");
+        // On a real network this then trips UnsafeAnvilKeyOnRealNetwork, which is the intended path.
+        assertEq(deploy.chooseDeployerKey(false, 0, 0), ANVIL_KEY_0, "real network, caught by the guard");
+    }
+
+    /// @dev `forge script` simulates the whole script before broadcasting, so an unfunded deployer
+    ///      previously reached `_publish` and wrote deployments/<network>.json before dying in the
+    ///      broadcast phase — leaving every other lane reading a factory address with no bytecode.
+    ///      Confirmed by observation: `cast code` on the published factory returned `0x`.
+    function test_rejectsADeployerThatCannotPayGas() public {
+        vm.expectRevert(
+            abi.encodeWithSelector(Deploy.DeployerCannotPayGas.selector, realDeployer, uint256(0), 0.001 ether)
+        );
+        deploy.canPayGas(realDeployer, 0);
+    }
+
+    function test_acceptsAFundedDeployer() public view {
+        deploy.canPayGas(realDeployer, 1 ether);
+        deploy.canPayGas(realDeployer, 0.001 ether); // exactly at the floor
+    }
+
+    function test_dustIsNotFunding() public {
+        vm.expectRevert(
+            abi.encodeWithSelector(Deploy.DeployerCannotPayGas.selector, realDeployer, uint256(1), 0.001 ether)
+        );
+        deploy.canPayGas(realDeployer, 1 wei);
     }
 
     // ── the published allowlist ──────────────────────────────────────────

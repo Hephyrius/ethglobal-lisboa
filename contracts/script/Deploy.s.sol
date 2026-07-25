@@ -56,14 +56,20 @@ contract Deploy is Script {
     ///      so a typo fails safe rather than shipping a vault with its safety checks off.
     string internal constant FORK_NETWORK = "base-fork";
 
+    /// @dev A sanity floor, not a precise estimate. The deploy costs ~6.9M gas, which on Base is
+    ///      well under 0.0001 ETH — this is set far above that so it only ever catches an
+    ///      unfunded account, never a merely frugal one.
+    uint256 internal constant MIN_DEPLOYER_BALANCE = 0.001 ether;
+
     error UnsafeAnvilKeyOnRealNetwork(string what, address account);
     error StalenessCheckDisabledOnRealNetwork(string network);
+    error DeployerCannotPayGas(address deployer, uint256 balance, uint256 minimum);
 
     function run() external {
         string memory network = vm.envOr("DEPLOY_NETWORK", string("base-fork"));
         bool isFork = _isForkNetwork(network);
 
-        uint256 deployerKey = vm.envOr("DEPLOYER_PRIVATE_KEY", ANVIL_ACCOUNT_0);
+        uint256 deployerKey = _resolveDeployerKey(isFork);
         address deployer = vm.addr(deployerKey);
 
         address agent = vm.envOr("AGENT_ADDRESS", ANVIL_ADDRESS_1);
@@ -78,6 +84,12 @@ contract Deploy is Script {
         bytes32 mandateHash = vm.envOr("MANDATE_HASH", keccak256("demo-mandate-v1"));
 
         if (!isFork) _assertSafeForRealNetwork(network, deployer, agent, guardian, priceMaxAge);
+
+        // Before anything is broadcast *or published*. `forge script` runs the whole script in
+        // simulation first, so without this an unfunded deployer gets as far as writing
+        // deployments/<network>.json and only then dies in the broadcast phase — leaving four lanes
+        // reading addresses that have no bytecode. Observed, not hypothesised.
+        _assertCanPayGas(deployer, deployer.balance);
 
         vm.startBroadcast(deployerKey);
 
@@ -127,6 +139,48 @@ contract Deploy is Script {
     /// @notice Staleness bound to use when `PRICE_MAX_AGE` is not set explicitly.
     function _defaultPriceMaxAge(string memory network) internal pure returns (uint256) {
         return _isForkNetwork(network) ? 0 : LIVE_PRICE_MAX_AGE;
+    }
+
+    /// @notice Which key signs the deploy.
+    ///
+    /// @dev **A fork deploy deliberately ignores `DEPLOYER_PRIVATE_KEY`.** `.env.example` defines
+    ///      that variable as the funded *mainnet* wallet — "Fresh wallet, funded ~$20 + gas on Base"
+    ///      — so it has no balance on a fresh fork by definition. Reading it here meant that merely
+    ///      sourcing `.env`, which `scripts/*.sh` do and which any runbook would tell a human to do,
+    ///      turned a working fork deploy into a failing one. That is a nasty trap: the deploy works
+    ///      in a bare shell and fails in the documented one.
+    ///
+    ///      Set `FORK_DEPLOYER_PRIVATE_KEY` to override the anvil account on a fork; the mainnet key
+    ///      stays reserved for real networks, which is what it was always documented to be.
+    function _resolveDeployerKey(bool isFork) internal view returns (uint256) {
+        return _chooseDeployerKey(
+            isFork, vm.envOr("FORK_DEPLOYER_PRIVATE_KEY", uint256(0)), vm.envOr("DEPLOYER_PRIVATE_KEY", uint256(0))
+        );
+    }
+
+    /// @notice The precedence rule on its own, with the environment factored out.
+    /// @dev Pure so it can be tested exhaustively. Reading the variables inside made the tests
+    ///      order-dependent, because `vm.setEnv` persists for the whole `forge test` process — one
+    ///      test setting `FORK_DEPLOYER_PRIVATE_KEY` changed what a later test observed. Separating
+    ///      the policy from the I/O fixes that at the root instead of sequencing around it.
+    /// @param forkKeyOrZero    `FORK_DEPLOYER_PRIVATE_KEY`, or 0 if unset.
+    /// @param mainnetKeyOrZero `DEPLOYER_PRIVATE_KEY`, or 0 if unset.
+    function _chooseDeployerKey(bool isFork, uint256 forkKeyOrZero, uint256 mainnetKeyOrZero)
+        internal
+        pure
+        returns (uint256)
+    {
+        if (isFork) return forkKeyOrZero != 0 ? forkKeyOrZero : ANVIL_ACCOUNT_0;
+        return mainnetKeyOrZero != 0 ? mainnetKeyOrZero : ANVIL_ACCOUNT_0;
+    }
+
+    /// @notice Refuse to start a deploy the signer cannot pay for.
+    /// @dev Turns "Internal EVM error during simulation" — which says nothing about the cause — into
+    ///      a named error carrying the account and its balance.
+    function _assertCanPayGas(address deployer, uint256 balance) internal pure {
+        if (balance < MIN_DEPLOYER_BALANCE) {
+            revert DeployerCannotPayGas(deployer, balance, MIN_DEPLOYER_BALANCE);
+        }
     }
 
     /// @notice Refuse to deploy to a real network with fork-grade configuration.
