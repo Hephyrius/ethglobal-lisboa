@@ -8,6 +8,97 @@ the hackathon window.
 
 ---
 
+## 2026-07-25 — Lane F: the Wave 2 schema delta, and the field the plan did not name
+
+**What changed.** `packages/schema/` gained, in all three mirrors at once:
+`MandateConstraints.tolerance_band_pct: float = 0.05`, `Mandate.persona: Persona | None`,
+`AgentAction.warnings: list[ConstraintWarning]`, `"probability"` on `FactKind` and `FactUnit`, and
+`presets/` — three archetype mandates plus an index governed by a new
+`preset-index.schema.json`. Schema tests went 22 → 57. Announced in
+[active-work.md](active-work.md) #69–#70 with exact names and defaults, because four lanes were
+building against a shape they could not see.
+
+**Why the band is relative, not absolute.** *"±5%"* has two readings and they are far apart: at a
+60% position cap, relative admits 63% and absolute-percentage-points admits 65%. The schema now
+states the relative reading explicitly — ceiling `C*(1+band)`, floor `F*(1-band)`, target
+`|actual-T| <= T*band` — and names the constraints the band must never touch, each with its reason,
+so a lane consuming it does not have to reconstruct §3.1 of the plan from memory. An ambiguous band
+is precisely how *"make the rules less rigid"* turns into *"there are no rules"*.
+
+**Why `AgentAction.warnings` exists, when the plan listed no field for it.** §3.1 requires every
+banded acceptance to be visible in three places and says that requirement is *the whole reason this
+is a schema change rather than a constant in Lane B's code*. There was nowhere for a warning to
+live. `error: str | None` is why a cycle **stopped**, so overloading it would have made an accepted
+decision indistinguishable from a rejected one in the feed — the exact failure the band is supposed
+to avoid. It is structured (`constraint`, `limit`, `actual`, `band_pct`) rather than a formatted
+sentence so Lane E can render *which* constraint bent and by how much and Lane B's reflection can
+price the drift without parsing prose. `band_pct` is stamped on the action because the agent may
+amend its own mandate later, and a warning has to stay readable against the rules that applied at
+the time. `kind` is a closed enum with one member on purpose: a second class of exception is then a
+schema change, not something that can accumulate quietly in a shared array.
+
+**Why presets get their own directory and their own test file.** `fixtures/` has a test asserting
+its contents exactly match a case table, so presets could not live there without weakening that
+check. More importantly presets need invariants a `Mandate` schema cannot express, because they are
+*offered* to a user and then deployed: `test_presets.py` asserts the index and the directory agree
+**in both directions**, that every venue named has an adapter, that a multi-asset mandate grants a
+swap venue (or it can never reach its own target allocation), and that every preset grants a venue
+which can earn on idle capital — §B1's headline is impossible by construction otherwise. The
+`tradeoff` field in the index is required rather than optional: a menu where every option only has
+upsides does not help anyone choose.
+
+**A test caught a contradiction in my own preset, and the fix was in the test.**
+`conservative-income` pairs `max_position_pct: 1.0` with a 25% cash floor, which the new
+"cap + floor must leave room" check rejected. `max_position_pct` is a ceiling on any single
+**non-base** asset, and that preset permits only its base asset — so the rule is *inapplicable*,
+not unsatisfiable. Recording it because the distinction decides which of the two files is wrong,
+and the reflex is to edit the data until the test passes.
+
+**Alternatives rejected.** (1) *Widening `permitted_venues` for Morpho and a prediction market*, as
+§3.4 anticipated — Lane D's gate returned NO-GO (#62) and Morpho needs a price-feed registration
+rather than a mandate key (#66), and a venue key with no adapter yields an agent proposing trades
+the harness can only reject. (2) *Making `tolerance_band_pct` nullable* to keep existing mandate
+hashes stable — see the next entry; the plan specifies a real default, and a `None` here would push
+the policy back into Lane B's code, which is what the field exists to avoid. (3) *Naming a third
+asset in the opportunistic preset* to satisfy "wider asset set" — the verified universe is
+USDC/WETH plus registered aTokens, and the vault's `execute` allowlist only carries those two
+tokens, so a preset naming cbBTC would have been un-deployable, which is the one thing a preset may
+never be.
+
+**Also.** `packages/schema/ts/tsconfig.json` — the package has declared a `typecheck` script since
+Wave 0 and it has never once worked (TS5057, no tsconfig), so the only thing type-checking these
+shapes was `web/`'s build. A lane that does not own `web/` had no way to verify a schema change it
+had just made.
+
+## 2026-07-25 — Lane F: a defaulted field in `Mandate` is a hash-visible change
+
+**What changed.** Nothing in code — this is the finding, recorded because it will otherwise be
+re-learned. Details and evidence in [active-work.md](active-work.md) #71.
+
+**What happened.** The moment `tolerance_band_pct` landed, the R6 e2e check
+(*"the hash is reproducible from the mandate alone"*) failed: the running API, on pre-delta code,
+returned `0x48ea2a32…` while a local recompute returned `0x29f9925e…` **for the same input
+mandate**. Restarting `:8000` on the new schema turned all 8 genesis tests green again, which
+isolates the cause to the schema version rather than the mandate. Confirmed against a real
+pre-delta vault still on mandate version 1: on-chain `0x48ea2a32…`, recompute `0x29f9925e…`.
+
+**Why.** The hash is taken over a re-serialization of the *parsed* model, so a field with a
+non-`None` default materializes into the canonical form and moves the hash. `Mandate.persona`
+defaults to `None` and drops out, so it has no such effect — which is what makes this a property of
+defaults, not of adding fields.
+
+**Why it is stated rather than fixed.** The demo is unaffected: genesis mints a fresh vault per run
+and hashes it under the current schema, so the depositor-verification story holds for everything
+deployed from now on. Hashing the stored bytes instead would make the hash immune to schema
+evolution at the cost of whitespace sensitivity — a defensible design, but it lives in `agent/`, and
+Lane F files diagnoses into another lane rather than patches. **The standing rule for this lane: a
+defaulted field in a hashed shape is announced as hash-visible in the request that ships it.**
+
+**One near-miss worth recording.** I first checked the *shared demo vault* and found a mismatch
+there too — but its mandate is **version 2**, amended by the agent, so its on-chain hash is bound to
+version 1 and would mismatch regardless. Attributing that to the delta would have been wrong, and
+the second, cleaner vault is what turned a plausible story into a measurement.
+
 ## 2026-07-25 — Wave 2 plan: a sixth lane, because the frozen schema has no owner
 
 **What changed.** [plans/2026-07-25-wave-2-six-lanes.md](../plans/2026-07-25-wave-2-six-lanes.md) —
@@ -1655,6 +1746,55 @@ schema instead, in which case it degrades into `errors[]` and `verify-live` name
 one-line config edit, which is exactly why the table is data. The Token API's exact path layout is
 also unconfirmed — its docs now redirect to Pinax — so that source tries a short ordered list of known
 path shapes and remembers the first that answers.
+
+---
+
+## 2026-07-25 — Lane D: the error that blocked R5 was ours, from the protocol nobody suspected
+
+**What changed.** `venues/reverts.py` — a decoder for the revert selectors an `ExecutionPlan` can
+produce, with the cause and the fix for each. 168 Lane D tests.
+
+**The diagnosis.** R5 had been failing on `ContractCustomError 0x39d35496`, unidentified after a
+genuinely thorough search: 426 error signatures hashed across the deployed vault ABIs, all of
+OpenZeppelin, and every one of the 307 errors in the vendored `@1inch` packages. Nothing matched,
+which pointed at deployed 1inch bytecode whose source we lack — the exact risk request 29 had
+flagged. Reasonable, and wrong.
+
+It is **`V3TooLittleReceived()`**, from Uniswap's UniversalRouter. Aqua was never in the picture.
+
+**Why the search missed it, which is the transferable part.** Every hypothesis was about *which
+version* of the 1inch contracts we had, because the failing rung was "the Aqua ship". But **a plan
+touches four protocols** — Uniswap, Permit2, Aqua and the vault — and the ship test swaps USDC for
+WETH first, because you cannot ship a two-token position holding one token. The revert came from the
+setup, not the subject. Naming the rung after its goal quietly narrowed the search to the last step.
+
+Method that closed it, in order of cost: extract `PUSH4` selectors from `eth_getCode` on Aqua and
+SwapVM — **absent from both**, which alone falsifies the 1inch hypothesis; then every other contract
+in the call path, also absent; then 4byte.directory, one result.
+
+**Root cause, with numbers.** The Trading API quotes against **live** Base. The fork executes
+**27,927 blocks (~15.5 h)** behind. ETH/USD reads **$1,858.98 on the fork against $1,872.43 live — a
+72 bps gap**. The plan's `minOut` is computed for a market the fork cannot deliver, so a **50 bps**
+band reverts deterministically; anything under ~87 bps would.
+
+**And that band is mine.** Before request 32 the API's own 250 bps default absorbed the drift.
+Tightening to the mandate's 50 bps is correct for mainnet, where quote-to-execution is one block, and
+exactly wrong against a 15-hour-stale fork. The distinction worth keeping: **a slippage band protects
+against market movement; on a pinned fork it is being asked to absorb time travel.** Widening it for
+fork runs is therefore honest rather than a fudge — it is not granting the agent looser real-world
+slippage.
+
+**Why the fix shipped is a decoder rather than a number.** Setting `UNISWAP_SLIPPAGE_BPS=150` on the
+fork unblocks R5 in one line and belongs to whoever owns the stack. What this lane could contribute
+durably is that **nobody should ever spend hours on a selector again**: `venues/reverts.py` covers
+nine, each with what it means *and* what to do, spanning all four protocols a plan touches. Entries
+derive their selector from the signature — a test asserts that, so a typo cannot produce a confident
+wrong answer. An unknown selector returns the search procedure that worked here rather than nothing,
+because "not one of ours" narrows the search instead of ending it.
+
+Two of my own entries said "As above." and a test I had written rejected them for being shorter than
+a real fix. Worth noting rather than quietly patching: the test was right, and the entries now say
+what to do.
 
 ---
 
