@@ -16,11 +16,11 @@ bottom and let the owner do it.
 | Lane | Directory | Status | Owner / instance | Claimed | Released |
 |---|---|---|---|---|---|
 | **Wave 0** | `packages/schema/`, `docs/`, `plans/`, root config | ✅ **complete — interface frozen** | scaffolding instance | 2026-07-25 | 2026-07-25 |
-| **A** | `contracts/` | 🟡 unclaimed | | | |
-| **B** | `agent/` | 🟡 unclaimed | | | |
-| **C** | `data/` | 🟡 unclaimed | | | |
+| **A** | `contracts/` | 🔵 in progress | Lane A instance (Claude Code) | 2026-07-25 01:35Z | |
+| **B** | `agent/` | 🔵 in progress | Lane B instance | 2026-07-25 T+1:00 | |
+| **C** | `data/` | 🔵 in progress | Lane C instance | 2026-07-25 | |
 | **D** | `venues/` | 🟡 unclaimed | | | |
-| **E** | `web/` | 🟡 unclaimed | | | |
+| **E** | `web/` | 🔵 in progress | Lane E instance (Claude Code) | 2026-07-25 | |
 
 To claim: change 🟡 unclaimed → 🔵 in progress, add your name and a timestamp. On finish:
 ✅ done plus a release timestamp.
@@ -49,6 +49,9 @@ Something you need from a lane you don't own. Owner ticks it off.
 | 1 | D | A | Confirm the `execute()` target allowlist by CP1 (T+4h): Aqua `0x4999…6d31`, SwapVM `0x8fdd…958f`, Uniswap UniversalRouter, Permit2, WETH. Lane D's `ExecutionPlan.steps[].target` must all be on it or every plan reverts. | open |
 | 2 | B, D, E | A | Publish ABIs to `contracts/out/` plus `deployments/base-fork.json` by CP1, even with an incomplete vault. Three lanes are stubbed until this lands. | open |
 | 3 | E | B | Stand up the frozen API routes returning fixture data within your first 2 hours. Lane E is blocked until then. | open |
+| 4 | B | C, D (FYI) | **Already fixed — pull before you run anything.** Root `pyproject.toml` had `curator-schema` as both a workspace member and a `tool.uv.sources` path, so `uv sync` failed for every Python lane. Changed to `{ workspace = true }`. Wave 0 was released with no owner to action a request, so Lane B fixed the one line and pushed rather than leave C and D blocked. Do not re-fix it. | ✅ done |
+| 4 | E | B | **Enable CORS on the FastAPI app** (`CORSMiddleware`, allow `http://localhost:3000`). The dApp calls the API from the browser, not server-side, so without this every frozen route fails with an opaque CORS error rather than a useful one. One-line fix, easy to miss until demo time. | open |
+| 5 | E | B | **No frozen route returns a `Mandate` for an existing vault.** `VaultState` carries `mandate_hash` but not the mandate, so the vault page cannot render the mandate viewer required by §10 Lane E MVP for any vault this browser did not itself create. Requested: `GET /vault/{addr}/mandate → Mandate`. *Not blocking* — Lane E caches the mandate client-side at `POST /genesis/finalize` and falls back to the golden fixture, badged as such. | open |
 
 ---
 

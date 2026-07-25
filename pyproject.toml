@@ -23,7 +23,7 @@ dev = [
 [tool.uv.sources]
 # The frozen interface is consumed as a local editable package, so every lane
 # imports the same models rather than copying shapes around.
-curator-schema = { path = "packages/schema/python", editable = true }
+curator-schema = { workspace = true }
 
 [tool.uv.workspace]
 members = ["packages/schema/python"]

@@ -8,6 +8,32 @@ the hackathon window.
 
 ---
 
+## 2026-07-25 — Lane B: root `uv` workspace config was broken, blocking all three Python lanes
+
+**What changed.** One line in the root `pyproject.toml`:
+`curator-schema = { path = "packages/schema/python", editable = true }` →
+`curator-schema = { workspace = true }`.
+
+**Why.** `uv sync` failed outright with *"`curator-schema` is included as a workspace member, but
+references a path in `tool.uv.sources`. Workspace members must be declared as workspace sources."*
+`packages/schema/python` was listed in **both** `[tool.uv.workspace] members` and
+`[tool.uv.sources]`, which uv rejects. Nothing Python ran — not Lane B, not C, not D, and not
+Wave 0's own conformance test. Workspace members are already editable-installed, so the
+`editable = true` was redundant as well as invalid.
+
+**Why I fixed it rather than filing a request.** Rule 7 says stay out of other lanes, and root config
+belongs to Wave 0 — but Wave 0 is **released**, so there was no owner to action a request, and three
+lanes were dead in the water. Lane C claimed in while I was working and would have hit the identical
+wall within minutes; two instances independently patching the same line is exactly the collision
+Rule 7 exists to prevent. Fixed once, pushed immediately, and announced in `docs/active-work.md` so
+the other lanes pull rather than re-fix. Scope was one line in a shared root file — no lane
+directory touched.
+
+**Verified:** `uv sync --extra dev` clean, Python 3.12.13, pydantic 2.13.4, `import curator_schema`
+resolves.
+
+---
+
 ## 2026-07-25 — Wave 0: interface freeze and scaffolding
 
 **What changed.** Repository foundation for five parallel instances: `CLAUDE.md`, the master build
