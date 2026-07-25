@@ -122,10 +122,32 @@ async def test_the_fact_carries_provenance_and_the_right_unit():
     assert fact.subject.token == "WETH"
 
 
-# ── pool discovery ────────────────────────────────────────────────────────
+# ── pinned pools ──────────────────────────────────────────────────────────
 
 
-async def test_the_busiest_usd_paired_pool_is_chosen():
+async def test_a_pinned_pool_skips_discovery_entirely():
+    """Discovery costs a round trip against an 8-10s API that also 500s."""
+    paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        return httpx.Response(200, json={"data": [_swap_weth_to_usdc(0.01, 18.58)]})
+
+    facts = await _source(handler).fetch(["WETH"])  # WETH is pinned
+    assert len(facts) == 1
+    assert "/evm/pools" not in paths, "pinned pool should not trigger discovery"
+
+
+@pytest.fixture
+def _unpinned(monkeypatch: pytest.MonkeyPatch):
+    """Force the discovery path, which pinning otherwise short-circuits."""
+    monkeypatch.setattr("curator_data.sources.token_api.pool_for", lambda *a, **k: None)
+
+
+# ── pool discovery (the fallback for anything not pinned) ─────────────────
+
+
+async def test_the_busiest_usd_paired_pool_is_chosen(_unpinned):
     """`transactions` is the closest thing to depth the API exposes."""
     requested: list[str] = []
 
@@ -147,7 +169,7 @@ async def test_the_busiest_usd_paired_pool_is_chosen():
     assert any("pool=0xbusy" in url for url in requested)
 
 
-async def test_pool_discovery_is_cached_across_calls():
+async def test_pool_discovery_is_cached_across_calls(_unpinned):
     calls: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -162,7 +184,7 @@ async def test_pool_discovery_is_cached_across_calls():
     assert calls.count("/evm/pools") == 1
 
 
-async def test_a_pool_with_no_usd_leg_is_rejected():
+async def test_a_pool_with_no_usd_leg_is_rejected(_unpinned):
     """Pricing WETH against a random token is not a USD price."""
     degen = "0x4ed4e862860bed51a9570b96d89af5e1b0efefed"
     source = _source(_router(pools=[_pool(other=degen)]))

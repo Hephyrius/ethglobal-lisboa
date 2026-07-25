@@ -47,6 +47,20 @@ MARKET_LIMIT = 100
 #: belong to a different source — see `sources/aave.py`.
 MESSARI_FAMILIES = ("lending", "dex-amm")
 
+#: Per-protocol deadline. Protocols are queried concurrently, but `gather`
+#: waits for the slowest, so without this ONE degraded subgraph sets the
+#: latency of the whole source.
+#:
+#: Measured on the live stack: a full snapshot took **17s**, of which ~15s was
+#: uniswap-v3's indexers timing out while returning nothing. Moonwell answers
+#: in well under a second. On a demo where an agent tick already runs ~55s,
+#: that was a third of the budget spent on a subgraph contributing nothing.
+#:
+#: 6s is comfortably above every healthy observed response and far below the
+#: transport timeout, so a struggling protocol is skipped rather than allowed
+#: to hold the decision loop open.
+PROTOCOL_TIMEOUT_S = 6.0
+
 #: Ceiling on any USD figure, in dollars. Permissionless subgraphs index
 #: permissionless pools, and the live Uniswap V3 Base subgraph returns scam
 #: pairs claiming absurd TVL — a real reading on 2026-07-25 was
@@ -211,7 +225,7 @@ class MessariSource(BaseSource):
             )
 
         results = await asyncio.gather(
-            *(self._fetch_protocol(p, wanted) for p in self._protocols),
+            *(self._fetch_with_deadline(p, wanted) for p in self._protocols),
             return_exceptions=True,
         )
 
@@ -222,6 +236,19 @@ class MessariSource(BaseSource):
                 continue
             facts.extend(result)
         return facts
+
+    async def _fetch_with_deadline(self, protocol: Protocol, wanted: set[str]) -> list[Fact]:
+        """One protocol, bounded. A slow subgraph costs only itself."""
+        try:
+            return await asyncio.wait_for(
+                self._fetch_protocol(protocol, wanted), timeout=PROTOCOL_TIMEOUT_S
+            )
+        except asyncio.TimeoutError:
+            self.note(
+                f"{protocol.key}: no response within {PROTOCOL_TIMEOUT_S:g}s - skipped so it "
+                f"does not delay the other protocols"
+            )
+            return []
 
     async def _fetch_protocol(self, protocol: Protocol, wanted: set[str]) -> list[Fact]:
         builder = FactBuilder(self.key, chain=protocol.chain)

@@ -44,6 +44,7 @@ from curator_schema.models import Fact
 from ..config import Settings
 from ..facts import FactBuilder
 from ..ports import BaseSource
+from .pools import pool_for
 from .tokens import address_for, known_symbols
 
 logger = logging.getLogger(__name__)
@@ -213,6 +214,15 @@ class TokenApiSource(BaseSource):
         cached = self._pools.get(symbol)
         if cached is not None:
             return cached
+
+        # A pinned pool skips discovery entirely. That matters twice over:
+        # every call against this API costs 8-10s, and `/evm/pools` was
+        # observed returning HTTP 500, which would make the source fail for a
+        # token we already know the answer for.
+        pinned = pool_for(symbol, self.settings.chain)
+        if pinned is not None:
+            self._pools[symbol] = (pinned[0], _norm(pinned[1]))
+            return self._pools[symbol]
 
         pools = await self._get(
             f"/evm/pools?network={network}&token={address}&limit={POOL_SAMPLE}"

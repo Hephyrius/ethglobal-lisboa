@@ -194,6 +194,44 @@ async def test_one_failing_protocol_does_not_lose_the_others():
     assert "502" in notes[0]
 
 
+async def test_one_slow_protocol_does_not_delay_the_others():
+    """Measured on the live stack: a snapshot took 17s, ~15s of it one
+    subgraph timing out while returning nothing. `gather` waits for the
+    slowest, so without a per-protocol deadline one degraded indexer sets the
+    latency of the whole source — and of every agent tick."""
+    import asyncio
+
+    from curator_data.sources import messari as messari_module
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if str(request.url).endswith("sub-moon"):
+            await asyncio.sleep(5)  # far beyond the patched deadline
+        return httpx.Response(
+            200, json={"data": {"markets": [_market("USDC", 4.0, "1", "1", "0")]}}
+        )
+
+    source = MessariSource(
+        SETTINGS,
+        gateway=GatewayClient(
+            SETTINGS, client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        ),
+        protocols=[AAVE, MOONWELL],
+    )
+    original = messari_module.PROTOCOL_TIMEOUT_S
+    messari_module.PROTOCOL_TIMEOUT_S = 0.2
+    try:
+        start = asyncio.get_running_loop().time()
+        facts = await source.fetch(["USDC"])
+        elapsed = asyncio.get_running_loop().time() - start
+    finally:
+        messari_module.PROTOCOL_TIMEOUT_S = original
+
+    # The healthy protocol still returned, and we did not wait for the sick one.
+    assert {f.subject.protocol for f in facts} == {"aave-v3"}
+    assert elapsed < 2.0, f"slow protocol gated the fast one ({elapsed:.2f}s)"
+    assert any("within" in n for n in source.drain_notes())
+
+
 async def test_graphql_errors_become_a_note_naming_the_protocol():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
