@@ -61,6 +61,53 @@ def decision_schema() -> dict:
     return AllocationDecision.model_json_schema()
 
 
+def _render_persona(mandate: Mandate) -> str:
+    """The persona block, or "" when the mandate has none.
+
+    **Persona is taste; constraints are law.** The block says so in as many
+    words, and that sentence is load-bearing rather than decorative: an
+    "aggressive" persona that the model believes licenses a bigger position is
+    an exploit wearing a style's clothing. The harness enforces the same limits
+    either way — `check_decision` never sees the persona — but a model that
+    thinks it has permission wastes the tick producing decisions that are
+    rejected, and its `reasoning` tells a depositor it was allowed to do
+    something it was not.
+
+    Conviction steers sizing *within* `max_position_pct` and how readily the
+    agent acts on a thesis. It moves no bound.
+    """
+    persona = mandate.persona
+    if persona is None:
+        return ""
+
+    lines = [
+        "",
+        f"YOU ARE CURATING AS: {persona.name}.",
+        f"Voice: {persona.voice}",
+    ]
+    if persona.biases:
+        lines.append("Your leanings, which apply only when choosing between options the")
+        lines.append("mandate already permits:")
+        lines += [f"- {bias}" for bias in persona.biases]
+    lines.append(
+        {
+            "low": "Conviction: low. Prefer smaller sizes and hold more readily.",
+            "medium": "Conviction: medium. Size normally.",
+            "high": "Conviction: high. Act on a clear thesis and size toward the upper "
+            "end of what the mandate allows.",
+        }[persona.conviction]
+    )
+    lines.append(
+        "This is who you are, not what you may do. It changes which permitted "
+        "option you prefer and how you write. It does not widen a single limit: "
+        "you cannot reach an asset the mandate omits, exceed a cap, go under the "
+        "cash floor, or accept more slippage because of who you are. The HARD "
+        "LIMITS below are identical for every persona and are enforced whatever "
+        "you argue."
+    )
+    return chr(10).join(lines)
+
+
 def _render_mandate(mandate: Mandate) -> str:
     limits = mandate.constraints
     return "\n".join(
@@ -364,6 +411,6 @@ action, you must supply the venue intents that carry it out. An action with no \
 intents changes nothing."""
 
     return [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": SYSTEM_PROMPT + _render_persona(mandate)},
         {"role": "user", "content": user},
     ]
