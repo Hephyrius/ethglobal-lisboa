@@ -1753,6 +1753,58 @@ resolves.
 
 ---
 
+## 2026-07-25 — Wave 0: the integration seam nobody owned (R0–R3)
+
+**What changed.** `scripts/seed-fork.sh`, `scripts/preflight.sh`, and a new top-level `tests/e2e/`
+with 10 tests, per [the e2e plan](../plans/2026-07-25-e2e-local-deployment.md).
+
+**Why it did not already exist.** Rule 7 gave every lane a directory and forbade crossing
+boundaries, which is exactly why five parallel agents converged instead of colliding. But the seam
+*between* all five belongs to no lane, so nobody built it. Every lane was green and the whole was
+never run. Claimed under Wave 0 because `scripts/` and root config are already its territory and no
+lane directory is touched.
+
+**Why a new top-level `tests/` (Rule 4).** Component-scoped tests live with their component and
+should stay there. These are different: they assert the *narrative* across all five and belong to
+none of them. Putting them in any lane's directory would make that lane's owner responsible for
+other lanes' failures.
+
+**Why pytest here rather than a shell script**, when `contracts/script/check-deployment.sh` set a
+good precedent. The frozen schemas exist precisely so responses can be validated structurally; bash
+can only check for HTTP 200. Python asserts against `VaultState` and `AgentAction` directly, reusing
+`curator_schema`. The shell convention still holds for `seed-fork.sh` and `preflight.sh`, which
+orchestrate rather than assert.
+
+**Impersonation over `anvil_setStorageAt` for seeding.** Writing the balance slot is shorter and
+wrong: USDC on Base is a proxy, a hardcoded slot breaks silently on upgrade, and the failure
+presents as "the transfer didn't happen". Impersonating a holder survives that. Morpho Blue
+`0xBBBB…FFCb` was chosen by inspection — ~179M USDC at the fork block — not by reputation.
+
+**`preflight.sh` checks rather than starts.** The obvious artifact is a one-command `up.sh`, and it
+would be a trap: anvil runs in WSL while Python and Node run on the Windows host, so a single script
+must shell across that boundary — fragile exactly when you would depend on it. Checking is
+cross-platform, read-only, and re-runnable. It found the running agent API still in fixture mode on
+its first run, which is the failure it exists for.
+
+**e2e creates its own vault per run.** The shared demo vault is asserted against by three lanes; an
+integration test that quietly mutates it would be worse than no test. The one exception is the tick
+in R3, which needs holdings worth reasoning about — so nothing there asserts on balances.
+
+**Skips, never fails, when the stack is down**, following `test_integration_lanes.py`. Notably it
+treats *fixture mode as absent*: a green e2e run against fixture data would prove nothing, so that
+is a skip with an explicit message rather than a pass.
+
+**Two bugs found by writing this**, both in my own code and both the kind only a real run catches:
+`process_receipt(errors=0)` needs the `DISCARD` enum, and `preflight.sh` tripped `set -u` on an
+unset `SEED_ACCOUNTS`. Also confirmed the ollama eviction window empirically — the model was gone
+again within the hour, twice.
+
+**Verified:** seed-fork idempotent (second run a no-op, demo vault untouched); preflight correctly
+names fixture mode as blocking; R2 4/4 and R3 5/5 green against an isolated live API on port 8001
+with its own `AGENT_STATE_DIR`, so Lane B's running process and journal were never touched.
+
+---
+
 ## 2026-07-25 — Wave 0 (phase 2): submission README, golden mandate, line endings
 
 **What changed.** Three items the lanes could not action themselves, plus an audit written up as

@@ -16,6 +16,7 @@ bottom and let the owner do it.
 | Lane | Directory | Status | Owner / instance | Claimed | Released |
 |---|---|---|---|---|---|
 | **Wave 0** | `packages/schema/`, `docs/`, `plans/`, root config | ✅ **complete — interface frozen** | scaffolding instance | 2026-07-25 | 2026-07-25 |
+| **Wave 0 (integration)** | `scripts/`, `tests/e2e/`, root config | 🔵 **in progress** — R0–R3 of [the e2e plan](../plans/2026-07-25-e2e-local-deployment.md) done: `seed-fork.sh`, `preflight.sh`, and 10 e2e tests green against a live stack. R4–R6 are blocked on lane fixes. **Claiming the cross-lane seam, which Rule 7 leaves ownerless** — no lane directory is touched. | Wave 0 instance | 2026-07-25 08:40Z | |
 | **A** | `contracts/` | ✅ **phase 2 done** — mainnet deploy now *refuses* to be misconfigured (anvil keys / staleness off ⇒ revert; `priceMaxAge` derived from `DEPLOY_NETWORK`); Blockscout verification per #23; `check-deployment.sh` confirms the deployed bytecode **is** the committed source; fresh-clone exec-bit bug fixed (#29). 86 tests green. **Shared fork vault `0x0E2c…B5d1` never touched** — `deployments/base-fork.json` byte-identical throughout. | Lane A instance (Claude Code) | 2026-07-25 01:35Z · re-claimed 05:05Z | 2026-07-25 04:05Z (MVP) · 08:10Z (phase 2) |
 | **B** | `agent/` | 🔵 in progress | Lane B instance | 2026-07-25 T+1:00 | |
 | **C** | `data/` | ✅ **MVP done** — registry, 2 Graph sources, standalone MCP server, x402; live path blocked only on `GRAPH_API_KEY` | Lane C instance | 2026-07-25 | 2026-07-25 02:13Z |

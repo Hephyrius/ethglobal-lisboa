@@ -1,0 +1,128 @@
+"""Shared fixtures for the end-to-end suite.
+
+Every lane tests its own component. This suite tests the thing no lane owns: the narrative running
+through all of them at once. It talks only to public surfaces — JSON-RPC and the frozen HTTP API —
+so it stays honest about what actually works rather than reaching into any lane's internals.
+
+**Skips, never fails, when the stack is down.** A fresh clone running the full suite must stay
+green; these tests are meaningful only against a running fork plus a live agent API. Follows the
+same convention as `agent/tests/test_integration_lanes.py`.
+
+Bring the stack up with `scripts/preflight.sh` — it will tell you exactly what is missing.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import pathlib
+from typing import Any
+
+import httpx
+import pytest
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+DEPLOYMENTS = REPO_ROOT / "deployments" / "base-fork.json"
+
+RPC_URL = os.getenv("ANVIL_RPC_URL", "http://127.0.0.1:8540")
+API_URL = os.getenv("NEXT_PUBLIC_API_URL", "http://localhost:8000")
+
+#: anvil account #0 — the demo depositor. `scripts/seed-fork.sh` funds it.
+DEPOSITOR = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+DEPOSITOR_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+#: anvil account #1 — holds AGENT_ROLE. Account #0 reads fine and reverts every write.
+AGENT = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+
+
+def _rpc(method: str, params: list[Any]) -> Any:
+    with httpx.Client(timeout=15.0) as client:
+        r = client.post(
+            RPC_URL, json={"jsonrpc": "2.0", "method": method, "params": params, "id": 1}
+        )
+        r.raise_for_status()
+        body = r.json()
+    if "error" in body:
+        raise RuntimeError(f"{method}: {body['error']}")
+    return body["result"]
+
+
+@pytest.fixture(scope="session")
+def deployments() -> dict[str, Any]:
+    if not DEPLOYMENTS.exists():
+        pytest.skip(f"{DEPLOYMENTS.name} missing — deploy first (scripts/preflight.sh)")
+    return json.loads(DEPLOYMENTS.read_text(encoding="utf-8"))
+
+
+@pytest.fixture(scope="session")
+def fork(deployments: dict[str, Any]) -> str:
+    """A reachable fork whose deployment actually exists on it.
+
+    Checks bytecode rather than just liveness: after an anvil restart the RPC answers happily while
+    every address in `base-fork.json` is empty, and the resulting failures look like contract bugs.
+    """
+    try:
+        _rpc("eth_chainId", [])
+    except Exception as exc:  # noqa: BLE001 - any failure means "no usable fork"
+        pytest.skip(f"no fork at {RPC_URL} ({type(exc).__name__}) — run scripts/anvil-fork.sh")
+
+    factory = deployments["contracts"]["VaultFactory"]
+    if _rpc("eth_getCode", [factory, "latest"]) in ("0x", "0x0"):
+        pytest.skip("factory has no bytecode — anvil restarted since the deploy; redeploy")
+    return RPC_URL
+
+
+@pytest.fixture(scope="session")
+def api(fork: str) -> str:
+    """The agent API, and only if it is genuinely live.
+
+    Fixture mode is treated as absent rather than as a failure: every request would succeed and
+    validate against golden data, so a green run would prove nothing. This is the single most
+    valuable assertion in the file.
+    """
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            health = client.get(f"{API_URL}/health").json()
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"agent API unreachable at {API_URL} ({type(exc).__name__})")
+
+    seams = (health.get("mode"), health.get("data_registry"), health.get("venue_registry"))
+    if "fixture" in seams:
+        pytest.skip(
+            f"agent API is serving fixtures {seams} — restart with AGENT_MODE=live. "
+            "Running e2e against fixtures would pass while proving nothing."
+        )
+    return API_URL
+
+
+@pytest.fixture(scope="session")
+def usdc(deployments: dict[str, Any]) -> str:
+    return deployments["external"]["USDC"]
+
+
+@pytest.fixture(scope="session")
+def funded_depositor(fork: str, usdc: str) -> str:
+    balance = int(
+        _rpc(
+            "eth_call",
+            [{"to": usdc, "data": "0x70a08231" + "0" * 24 + DEPOSITOR[2:]}, "latest"],
+        ),
+        16,
+    )
+    if balance < 1_000_000_000:  # 1,000 USDC
+        pytest.skip(f"depositor holds {balance / 1e6:.0f} USDC — run scripts/seed-fork.sh")
+    return DEPOSITOR
+
+
+@pytest.fixture(scope="session")
+def w3(fork: str):
+    """web3 client. Imported lazily so collection does not require the agent extra."""
+    web3 = pytest.importorskip("web3", reason="web3 not installed — uv sync --all-extras")
+    client = web3.Web3(web3.Web3.HTTPProvider(fork, request_kwargs={"timeout": 30}))
+    if not client.is_connected():
+        pytest.skip(f"web3 could not connect to {fork}")
+    return client
+
+
+def rpc(method: str, params: list[Any]) -> Any:
+    """Raw JSON-RPC, for tests that want it without a web3 dependency."""
+    return _rpc(method, params)

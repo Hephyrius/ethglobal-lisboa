@@ -62,7 +62,7 @@ curator-mcp = { workspace = true }
 members = ["packages/schema/python", "data", "data/curator_mcp"]
 
 [tool.pytest.ini_options]
-testpaths = ["packages/schema/python", "agent", "data", "venues"]
+testpaths = ["packages/schema/python", "agent", "data", "venues", "tests/e2e"]
 asyncio_mode = "auto"
 # A broken global web3 registers a pytest_ethereum plugin that breaks
 # collection outside the venv. Harmless inside it; this keeps the escape hatch

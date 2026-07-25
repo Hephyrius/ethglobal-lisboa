@@ -34,6 +34,9 @@ broadcast/
 scratch/
 # Lane B: persisted mandates and AgentAction journals (agent/config.py state_dir)
 .agent-state/
+# Wave 0: e2e runs against an isolated AGENT_STATE_DIR so they never share a
+# journal with a running agent — two writers corrupt line-count-derived ids.
+.agent-state-*/
 
 # ── OS / editor ───────────────────────────────────────────────────────────
 .DS_Store
