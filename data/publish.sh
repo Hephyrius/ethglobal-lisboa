@@ -57,7 +57,31 @@ echo
 echo "==> Verifying the wheels resolve with no repo present"
 VERIFY_VENV=$(mktemp -d)/venv
 uv venv --python 3.10 "$VERIFY_VENV" >/dev/null 2>&1
+# `--find-links` alone is NOT enough, and this is the flaw that shipped a
+# broken 0.3.0. It resolves every dependency from the freshly built dist,
+# including packages this release is NOT publishing - so a sibling whose
+# CONTENT changed without a VERSION bump looks fine here and is wrong on PyPI,
+# where the old bytes still sit under that version number. Resolving against
+# the real index as well surfaces the mismatch before the upload.
 uv pip install --quiet --python "$VERIFY_VENV" --find-links "$DIST" --no-cache curator-mcp
+
+echo "==> Cross-checking against what PyPI actually serves"
+CROSS_VENV=$(mktemp -d)/venv
+uv venv --python 3.10 "$CROSS_VENV" >/dev/null 2>&1
+if uv pip install --quiet --python "$CROSS_VENV" --no-cache curator-mcp >/dev/null 2>&1; then
+  if [ -x "$CROSS_VENV/bin/python" ]; then CROSS_PY="$CROSS_VENV/bin/python"
+  else CROSS_PY="$CROSS_VENV/Scripts/python.exe"; fi
+  if "$CROSS_PY" -c "import curator_data, curator_mcp.server" >/dev/null 2>&1; then
+    echo "    OK - the currently published stack still imports"
+  else
+    echo "    WARNING: the PUBLISHED stack does not import." >&2
+    echo "    A sibling package's content changed without its version being bumped," >&2
+    echo "    so PyPI serves stale bytes under a version number we reuse locally." >&2
+    echo "    Bump and publish the changed dependency FIRST." >&2
+  fi
+else
+  echo "    (nothing published yet, or PyPI unreachable - skipping cross-check)"
+fi
 
 if [ -x "$VERIFY_VENV/bin/python" ]; then
   VERIFY_PY="$VERIFY_VENV/bin/python"
@@ -113,8 +137,31 @@ else
   esac
 fi
 
+# Skip a package whose version is already on PyPI rather than failing on it.
+#
+# This is the NORMAL case, not an edge case: `curator-schema` belongs to another
+# lane and rarely changes, so a release of `curator-data` alone would otherwise
+# abort on the first upload and never reach the packages that did change. A
+# release script has to be idempotent or it can only ever be run once.
+already_published() {
+  uv run python - "$1" "$2" <<'CHECK'
+import sys, urllib.request
+name, version = sys.argv[1].replace("_", "-"), sys.argv[2]
+try:
+    with urllib.request.urlopen(f"https://pypi.org/pypi/{name}/{version}/json", timeout=15) as r:
+        sys.exit(0 if r.status == 200 else 1)
+except Exception:
+    sys.exit(1)
+CHECK
+}
+
 for pkg in curator_schema curator_data curator_mcp; do
-  echo "==> Publishing $pkg"
+  version=$(ls "$DIST/$pkg"-*.tar.gz | sed -E "s/.*${pkg}-(.*)\.tar\.gz/\1/" | head -1)
+  if already_published "$pkg" "$version"; then
+    echo "==> $pkg $version is already on PyPI - skipping (unchanged since last release)"
+    continue
+  fi
+  echo "==> Publishing $pkg $version"
   if [ -n "$INDEX" ]; then
     uv publish --publish-url "$INDEX" --token "$UV_PUBLISH_TOKEN" "$DIST/$pkg"-*
   else

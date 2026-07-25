@@ -151,6 +151,50 @@ async def check_chainlink(
         await source.close()
 
 
+async def check_source(key: str, settings: Settings, assets: tuple[str, ...]) -> CheckResult:
+    """Drive any registered source through the registry and report what came back.
+
+    Generic on purpose. Wave 1 and Wave 2 added six sources and none of them
+    reached this gate, so `verify-live` was reporting 6/7 green while checking
+    four of ten sources. A gate that only knows about the sources that existed
+    when it was written is not a gate.
+    """
+    from .registry import build_registry
+
+    registry = build_registry(settings)
+    try:
+        snapshot = await registry.snapshot([key], list(assets))
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult(name=key, ok=False, detail=f"{type(exc).__name__}: {exc}")
+    finally:
+        await registry.aclose()
+
+    if snapshot.errors:
+        return CheckResult(name=key, ok=False, detail=snapshot.errors[0].message[:150])
+    if not snapshot.facts:
+        note = snapshot.notes[0].message if snapshot.notes else "no facts and no explanation"
+        return CheckResult(name=key, ok=False, detail=note[:150])
+
+    kinds = sorted({f.kind for f in snapshot.facts})
+    sample = []
+    for fact in snapshot.facts[:2]:
+        subject = fact.subject.market or fact.subject.token or fact.subject.protocol or "-"
+        value = (
+            f"{fact.value:.2%}"
+            if fact.unit in ("apy_fraction", "ratio")
+            else f"${fact.value:,.2f}"
+            if fact.unit == "usd"
+            else f"{fact.value:g}"
+        )
+        sample.append(f"{subject} {fact.kind}: {value}")
+    return CheckResult(
+        name=key,
+        ok=True,
+        detail=f"{len(snapshot.facts)} facts ({', '.join(kinds)})",
+        sample=sample,
+    )
+
+
 async def check_token_api(settings: Settings, symbol: str = "WETH") -> CheckResult:
     source = TokenApiSource(settings)
     try:
@@ -225,6 +269,19 @@ async def verify_live(
                     detail="skipped - no DATA_RPC_URL / ANVIL_RPC_URL / BASE_RPC_URL",
                 )
             )
+
+    if only is None:
+        # Every other registered source, through the generic check. Named
+        # explicitly rather than "everything else" so adding a source shows up
+        # here automatically but the bespoke checks above are not duplicated.
+        from .sources import PROTOCOL_BACKED, SOURCE_FACTORIES
+
+        # `PROTOCOL_BACKED` comes from sources/ rather than being restated
+        # here: a second list of source keys is one that goes stale, which is
+        # what `test_source_agnostic` exists to prevent.
+        covered = set(PROTOCOL_BACKED) | {"chainlink", "token_api"}
+        for key in sorted(set(SOURCE_FACTORIES) - covered):
+            results.append(await check_source(key, resolved, ("USDC", "WETH", "wstETH")))
 
     if include_token_api and only is None:
         if resolved.has_token_api_credential:

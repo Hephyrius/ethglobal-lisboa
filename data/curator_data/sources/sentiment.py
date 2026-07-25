@@ -34,7 +34,10 @@ chain, which is worth knowing before anyone reads too much into it.
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+
+# `datetime.UTC` is 3.11+, and this package supports 3.10 (the MCP SDK's
+# floor). `timezone.utc` is the portable spelling.
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -119,7 +122,7 @@ class SentimentSource(BaseSource):
 
         observed = self._observed_at(row)
         if observed is not None:
-            age = (datetime.now(UTC) - observed).total_seconds()
+            age = (datetime.now(timezone.utc) - observed).total_seconds()
             if age > STALE_AFTER_S:
                 self.remark(
                     f"the index is {age / 3600:.0f}h old — it updates daily, so treat this as "
@@ -146,7 +149,7 @@ class SentimentSource(BaseSource):
         """`timestamp` is a unix string. When the index was published, not when
         we asked — staleness is the agent's to reason about (frozen schema)."""
         try:
-            return datetime.fromtimestamp(int(row.get("timestamp")), tz=UTC)
+            return datetime.fromtimestamp(int(row.get("timestamp")), tz=timezone.utc)
         except (TypeError, ValueError):
             return None
 

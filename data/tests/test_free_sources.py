@@ -202,3 +202,72 @@ async def test_gas_still_reports_gwei_when_the_price_feed_is_unreachable():
     assert [f.unit for f in facts] == ["token_amount"]
     assert source.drain_notes() == [], "a missing extra is not a source failure"
     assert any("USD cost" in r for r in source.drain_remarks())
+
+
+# ── liquid-staking yield: the yield that is not chain-scoped ──────────────
+#
+# The Wave 2 feedback asked for LST yield by name. It is the one rate here that
+# deliberately ignores the Base filter: a staking rate attaches to the TOKEN,
+# not the venue, so wstETH held on Base accrues exactly the Lido rate. Live
+# values on 2026-07-25: Lido STETH 2.045%, rocket-pool RETH 2.207%,
+# coinbase cbETH 2.358%.
+
+def _staking_pool(project: str, symbol: str, apy: float, tvl: float = 5e9,
+                  chain: str = "Ethereum") -> dict:
+    return {
+        "project": project, "symbol": symbol, "chain": chain,
+        "apy": apy, "apyBase": apy, "apyReward": None, "tvlUsd": tvl,
+    }
+
+
+async def test_the_staking_yield_of_a_held_token_is_reported():
+    source = _llama([_staking_pool("rocket-pool", "RETH", 2.20696)])
+    facts = await source.fetch(["rETH"])
+
+    staking = [f for f in facts if f.subject.token == "RETH"]
+    assert len(staking) == 1
+    assert round(staking[0].value, 5) == 0.02207
+
+
+async def test_wsteth_resolves_through_lidos_steth_pool():
+    """A mandate names wstETH; Lido publishes STETH. Looking for a pool called
+    WSTETH finds nothing, and the agent concludes wstETH earns only the 0.08%
+    it gets from lending."""
+    source = _llama([_staking_pool("lido", "STETH", 2.045, tvl=1.7e10)])
+    facts = await source.fetch(["wstETH"])
+
+    staking = [f for f in facts if f.subject.token == "WSTETH"]
+    assert len(staking) == 1
+    assert round(staking[0].value, 5) == 0.02045
+
+
+async def test_the_staking_pool_is_not_chain_filtered():
+    """Every other pool here is Base-only. This one must not be, or the
+    canonical Lido pool on Ethereum is invisible."""
+    source = _llama([_staking_pool("lido", "STETH", 2.045, chain="Ethereum")])
+    assert [f for f in await source.fetch(["wstETH"]) if f.subject.token]
+
+
+async def test_a_small_mirror_pool_does_not_set_the_rate():
+    """The same project publishes small mirrors on other chains."""
+    source = _llama([
+        _staking_pool("lido", "STETH", 9.99, tvl=1_000.0, chain="Fantom"),
+        _staking_pool("lido", "STETH", 2.045, tvl=1.7e10, chain="Ethereum"),
+    ])
+    facts = [f for f in await source.fetch(["wstETH"]) if f.subject.token]
+    assert round(facts[0].value, 5) == 0.02045
+
+
+async def test_the_note_says_staking_stacks_with_lending():
+    """An agent reading them as alternatives draws the wrong conclusion:
+    holding wstETH earns staking, and lending it earns lending on top."""
+    source = _llama([_staking_pool("lido", "STETH", 2.045)])
+    await source.fetch(["wstETH"])
+    note = [n for n in source.drain_remarks() if "staking yield" in n][0]
+    assert "just for being held" in note
+    assert "stacks" in note
+
+
+async def test_an_unrequested_lst_is_not_reported():
+    source = _llama([_staking_pool("lido", "STETH", 2.045)])
+    assert [f for f in await source.fetch(["USDC"]) if f.subject.token] == []

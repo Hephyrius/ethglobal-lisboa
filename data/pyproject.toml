@@ -4,7 +4,7 @@ name = "curator-data"
 # Bumping is not ceremony here — uv caches built wheels by name+version, so
 # reusing 0.1.0 serves a stale wheel missing the new modules and fails with a
 # confusing ModuleNotFoundError.
-version = "0.2.0"
+version = "0.3.0"
 description = "Pluggable market-data registry: mandate-named sources merged into a source-agnostic MarketSnapshot"
 readme = "README.md"
 license = { text = "MIT" }

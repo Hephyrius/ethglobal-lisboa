@@ -91,6 +91,16 @@ SOURCE_FACTORIES: Mapping[str, SourceFactory] = {
 }
 
 
+#: Sources whose coverage is verified per-protocol rather than per-source,
+#: because one source serves many subgraphs and "messari is up" is less useful
+#: than "moonwell is up, uniswap-v3 is not".
+#:
+#: Lives here because this module is the only place source keys may be
+#: enumerated - `tests/test_source_agnostic.py` fails the build otherwise, and
+#: it was right to: a second list elsewhere is a list that goes stale.
+PROTOCOL_BACKED = ("messari", "aave")
+
+
 def available_sources() -> list[str]:
     """Registered keys, sorted. The grantable set at genesis."""
     return sorted(SOURCE_FACTORIES)

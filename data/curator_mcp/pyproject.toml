@@ -2,7 +2,7 @@
 name = "curator-mcp"
 #: See the note in ../pyproject.toml — a version bump is what invalidates uv's
 #: wheel cache, not just changelog hygiene.
-version = "0.2.0"
+version = "0.3.0"
 description = "MCP server exposing DeFi lending yields, TVL, utilization and token prices from The Graph"
 readme = "README.md"
 classifiers = [

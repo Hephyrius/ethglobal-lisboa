@@ -54,6 +54,36 @@ POOLS_URL = "https://yields.llama.fi/pools"
 #: DefiLlama's name for Base.
 CHAIN_NAME = "Base"
 
+#: Liquid-staking tokens, and the DefiLlama project publishing their staking
+#: rate. **This is the one yield that is deliberately NOT chain-scoped.**
+#:
+#: A staking rate attaches to the token, not the venue: wstETH held on Base
+#: accrues exactly the Lido rate, because it is the same underlying stETH. The
+#: canonical pool is on Ethereum, so filtering to Base — correct for every
+#: other pool here — would hide it.
+#:
+#: It is also the yield the Wave 2 feedback asked for by name, and it stacks
+#: with lending rather than competing: holding wstETH earns the staking rate,
+#: and lending that wstETH earns the lending rate on top. An agent shown only
+#: the 0.08% lending rate concludes wstETH is a bad asset.
+#: requested symbol -> (DefiLlama project, the symbol that project publishes)
+#:
+#: The two differ for wrapped tokens, and missing that silently drops the most
+#: important one: a mandate names **wstETH**, but Lido's pool is published as
+#: **STETH**. wstETH is wrapped stETH and accrues exactly the same rate, so
+#: looking for a pool called "WSTETH" finds nothing and the agent concludes
+#: wstETH earns only the 0.08% it gets from lending.
+LST_STAKING: dict[str, tuple[str, str]] = {
+    "WSTETH": ("lido", "STETH"),
+    "STETH": ("lido", "STETH"),
+    "RETH": ("rocket-pool", "RETH"),
+    "CBETH": ("coinbase-wrapped-staked-eth", "CBETH"),
+    "WBETH": ("binance-staked-eth", "WBETH"),
+}
+
+#: The staking pool must be the real one, not a small mirror on another chain.
+MIN_STAKING_TVL_USD = 100_000_000.0
+
 #: Pools below this are not investable for a vault of any size — entering one
 #: would make the vault most of the pool, and exiting would move the price.
 MIN_TVL_USD = 1_000_000.0
@@ -117,6 +147,7 @@ class DefiLlamaSource(BaseSource):
             raise RuntimeError("DefiLlama returned no pools")
 
         candidates = [row for row in rows if self._is_relevant(row, wanted)]
+        staking = self._staking_rows(rows, wanted)
         candidates.sort(key=lambda row: float(row.get("tvlUsd") or 0), reverse=True)
         kept = candidates[:TOP_N]
 
@@ -136,6 +167,12 @@ class DefiLlamaSource(BaseSource):
         for row in kept:
             facts.extend(self._facts_for(row, builder))
 
+        # Staking yields last, so a thin pool set never hides them.
+        for symbol, row in sorted(staking.items()):
+            fact = self._staking_fact(symbol, row, builder)
+            if fact is not None:
+                facts.append(fact)
+
         if not facts:
             self.diagnose(
                 "pool universe",
@@ -145,6 +182,59 @@ class DefiLlamaSource(BaseSource):
                 failure=False,
             )
         return facts
+
+    def _staking_rows(self, rows: list[dict], wanted: set[str]) -> dict[str, dict]:
+        """The canonical staking pool for each permitted LST, by symbol.
+
+        Not chain-filtered — see `LST_STAKING`. The deepest pool wins, because
+        the same project publishes small mirrors on other chains whose rate is
+        the same but whose TVL says nothing.
+        """
+        # Keyed by the symbol the MANDATE named, not the one the pool uses,
+        # so wstETH resolves through Lido's STETH pool.
+        targets = {
+            symbol: pair
+            for symbol, pair in LST_STAKING.items()
+            if not wanted or symbol in wanted
+        }
+        best: dict[str, dict] = {}
+        for row in rows:
+            pool_symbol = str(row.get("symbol") or "").upper()
+            project = row.get("project")
+            for symbol, (want_project, want_symbol) in targets.items():
+                if project != want_project or pool_symbol != want_symbol:
+                    continue
+                tvl = row.get("tvlUsd")
+                if not isinstance(tvl, int | float) or tvl < MIN_STAKING_TVL_USD:
+                    continue
+                if symbol not in best or tvl > (best[symbol].get("tvlUsd") or 0):
+                    best[symbol] = row
+        return best
+
+    def _staking_fact(self, symbol: str, row: dict, builder: FactBuilder) -> Fact | None:
+        """The staking rate the token itself accrues, for holding it."""
+        base = row.get("apyBase")
+        rate = base if isinstance(base, int | float) else row.get("apy")
+        if not isinstance(rate, int | float):
+            return None
+        fraction = float(rate) / 100.0
+        if fraction <= 0 or fraction > MAX_PLAUSIBLE_APY:
+            return None
+
+        project = str(row.get("project") or "staking")
+        subject = builder.subject(protocol=project, market=symbol, token=symbol)
+        # Said explicitly because the two yields STACK and an agent that reads
+        # them as alternatives draws the wrong conclusion: holding wstETH earns
+        # this rate, and lending that wstETH earns a lending rate on top.
+        self.diagnose(
+            f"{project} {symbol}",
+            f"{fraction:.2%} is the staking yield the token accrues just for being held "
+            f"(TVL ${float(row.get('tvlUsd') or 0):,.0f})",
+            "it stacks with any lending rate on the same token rather than competing with "
+            "it, and it is not chain-specific",
+            failure=False,
+        )
+        return builder.apy_from_fraction(subject, fraction, confidence=AGGREGATOR_CONFIDENCE)
 
     def _is_relevant(self, row: dict, wanted: set[str]) -> bool:
         if row.get("chain") != CHAIN_NAME:

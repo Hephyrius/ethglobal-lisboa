@@ -127,3 +127,44 @@ def test_uvx_curator_mcp_works_from_a_clean_machine():
 
     for tool in ("compare_protocols", "get_market_yields", "get_token_price", "list_markets"):
         assert tool in result.stdout, f"{tool} missing from a PyPI install"
+
+
+# ── the 3.10 floor is a promise, not a hope ───────────────────────────────
+
+
+def test_no_module_uses_a_python_311_api():
+    """`requires-python = ">=3.10"` is load-bearing: it is the MCP SDK's floor
+    and the version a judge's `uvx curator-mcp` may resolve.
+
+    Caught for real during the 0.3.0 release. `sentiment.py` used
+    `from datetime import UTC`, which is 3.11+, so the package imported fine on
+    the dev machine and failed outright in a clean 3.10 venv. Ruff cannot see
+    this — `target-version` governs which *rewrites* it suggests, not which
+    runtime APIs exist.
+    """
+    import pathlib
+
+    import curator_data
+
+    root = pathlib.Path(curator_data.__file__).parent
+    # (pattern, what it is, the portable spelling)
+    banned = [
+        ("from datetime import UTC", "datetime.UTC is 3.11+", "timezone.utc"),
+        ("datetime.UTC", "datetime.UTC is 3.11+", "timezone.utc"),
+        ("asyncio.timeout(", "asyncio.timeout is 3.11+", "asyncio.wait_for"),
+        ("ExceptionGroup", "ExceptionGroup is 3.11+", "a plain exception"),
+        ("from typing import Self", "typing.Self is 3.11+", 'the class name in quotes'),
+    ]
+    offenders = []
+    for path in sorted(root.rglob("*.py")):
+        # Executable lines only. A comment *explaining* that `datetime.UTC` is
+        # 3.11+ necessarily contains the string, and flagging the explanation
+        # for the bug it prevents would make the guard unusable.
+        code = "\n".join(
+            line.split("#", 1)[0] for line in path.read_text(encoding="utf-8").splitlines()
+        )
+        for pattern, why, instead in banned:
+            if pattern in code:
+                offenders.append(f"{path.relative_to(root)}: {pattern!r} - {why}; use {instead}")
+
+    assert offenders == [], "3.11+ APIs in a package that claims 3.10:\n  " + "\n  ".join(offenders)
