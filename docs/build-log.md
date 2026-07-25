@@ -8,6 +8,74 @@ the hackathon window.
 
 ---
 
+## 2026-07-25 — Wave 2 plan: a sixth lane, because the frozen schema has no owner
+
+**What changed.** [plans/2026-07-25-wave-2-six-lanes.md](../plans/2026-07-25-wave-2-six-lanes.md) —
+the operator-and-teammate feedback list turned into six parallel lanes. Five are the original A–E.
+The sixth, **Lane F**, is new: it owns `packages/schema/`, `scripts/`, `tests/e2e/`, `docs/`, and the
+running stack, and it builds no product feature. Each lane gets a copy-pasteable continuation prompt
+in the plan so six instances can start without a briefing.
+
+**Why a sixth lane, rather than five and a rule.** [Rule 7](../INSTRUCTIONS.md) hands every lane a
+directory and forbids crossing, which is what let five instances converge instead of collide. But it
+leaves three things with no owner, and each has already cost us something concrete:
+
+1. **`packages/schema/` is frozen and ownerless.** Five Wave 2 items need a schema field — a
+   tolerance band, a persona block, a preset set. Under Rule 7 nobody may add one, so five lanes
+   stall on a file none of them is allowed to open. Wave 1 only moved because the operator suspended
+   the rule by hand, which does not scale to six concurrent instances.
+2. **The cross-lane seam.** The e2e plan already said it: *"the seam between all five belongs to no
+   lane, so nobody built it."*
+3. **Shared-file hygiene and the request queue.** Requests #14/#21 (`git add -A` sweeping other
+   lanes' work into the wrong commits, twice in each direction) and #55 (a force-push against a
+   decision recorded in a table I had not re-read) are coordination failures, not code failures.
+   Nobody owns coordination, so nobody fixes them.
+
+**The tradeoff accepted.** A single owner for the schema is a bottleneck by construction. It is
+bounded by a stated commitment — **30-minute turnaround on schema requests for the duration of the
+wave** — because a frozen schema with a slow owner is strictly worse than one with no owner: it
+*looks* unblocked and is not. The alternative considered was letting each lane edit its own slice of
+the schema, which is how three mirrors (JSON Schema, pydantic, zod) silently drift apart.
+
+**Three design calls inside the plan worth recording, because each is a place the obvious answer is
+wrong.**
+
+**The ±5% tolerance band is not uniform.** The feedback asked for less rigid rules. Applied to every
+constraint, that is not flexibility — it is a 5% larger constraint plus a false sense of one. The
+band applies to *aims* (position caps, cash floors, target drift), where landing at 61% against a
+60% cap is a swap that priced a hair differently. It never applies to `max_slippage_bps`, because a
+ceiling was already compared against a worst-case bound rather than an estimate (#33), so banding it
+means quietly paying more than the mandate's stated maximum cost. It cannot apply to the asset,
+venue or source allowlists at all — there is no "5% of an asset that isn't permitted". And every
+banded acceptance must surface in the action, the feed and the reflection, or the band becomes a way
+to drift without anyone noticing.
+
+**Personas skew taste, never law.** An aggressive persona may prefer the riskier of two permitted
+assets. It may not reach an unpermitted one, raise a cap, or shrink the cash floor. If persona and
+constraint ever merge, "aggressive" stops being a style and becomes an exploit — so the invariant is
+pinned by a test rather than left to the prompt.
+
+**Idle capital is pushed by the scoreboard, not blocked by a gate.** The obvious implementation of
+*"make sure the agent deploys"* is a validation layer that rejects `hold`. That would be a mistake:
+`hold` is a first-class answer and a harness that punishes it churns the vault, which is the exact
+failure the six-layer design exists to prevent. Instead idle capital becomes a citable fact, the
+prompt states that deploying is the default and holding needs a reason, and Wave 1's reflection
+harness prices the *drag* — what the idle balance would have earned. The agent's own track record
+telling it that holding cost something is a stronger and more honest steer than a rejection.
+
+**One item is a measurement, not a build.** The 3B could not author an Aqua ship in three attempts
+even with the intent shape in the prompt, so `act_000020` carries a caveat that the decision was
+scripted. That sentence is the weakest thing in the submission. Lane F's model bake-off is what
+removes it — or produces a documented finding that nothing runnable on a CPU-only i5-8265U can, which
+is also a real answer.
+
+**Deferred deliberately, and named in the plan so nobody quietly starts one:** the ecosystem-wide
+Crystal Ball, x402-funded data-source selection (the best idea on the list, and Wave 3 work), and
+putting the agent in a multisig — which changes the custody model, and Pattern 1 is load-bearing for
+both the Aqua claim and R5's proof.
+
+---
+
 ## 2026-07-25 — Wave 1 P7: can Sam snoop on the USDC vault? Yes, and here is the boundary
 
 **What changed.** A `peers` data source: how every *other* curated vault on the deployment is doing,
