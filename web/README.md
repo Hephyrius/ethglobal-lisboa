@@ -118,12 +118,24 @@ which is why deposits work before `contracts/out/**` exists. Anything Lane A add
 | B | `GET /vault/{addr}/mandate` for a vault this browser did not create (#6) | ✅ done — the local cache is now only a second rung |
 | B | `GET /venues` exposing Lane D's capability manifest (#73) | ✅ done |
 | A | ABIs + `deployments/base-fork.json` (#2) | ✅ done — addresses always read from the file |
+| F | Archetype envelopes + `describeEnvelope()` (#91) | ✅ done — every bound on a card is generated from F's JSON |
+| A | `VaultCreated.deployer`, indexed and appended (#92) | ⚠️ compiled in `contracts/out/`, **not yet redeployed** — `deployerOf` reverts on-chain, so "My vaults" says the factory cannot answer rather than that you deployed none |
+| B | `POST /archetypes/{key}/deploy` (§B1) | ⏳ 404 today; cards render bounds and the button reports the missing route in plain words |
+| B | An injection finding that means something (#98) | 🔴 detector fires on **our own fact IDs** — 11 per tick, 0 real. Panel built, deliberately unwired |
 | B | A decision carrying `warnings[]`, so the banded-acceptance UI has something to show (§B3) | ⏳ renderer built and wired; 0 of 40 actions carry one yet |
 
 > **After Lane B ships a route, the shared `:8000` needs a restart to serve it.** Lane F alone
 > restarts the shared stack (Wave 2 §9), so ask rather than doing it. To verify against new API code
 > without touching theirs, run your own instance on another port and point the dev server at it:
 > `NEXT_PUBLIC_API_URL=http://localhost:8002 pnpm --filter @curator/web dev`.
+>
+> ⚠️ **That trick does not work for the web dev server, and leaving it running has bitten us once.**
+> Two `next dev` on one directory contend for `.next`, so a second one never finishes compiling.
+> Worse, `NEXT_PUBLIC_*` is inlined when the server **starts** — so a dev server launched with a
+> throwaway `NEXT_PUBLIC_API_URL` keeps serving that dead port long after `.env.local` is corrected,
+> looking perfectly healthy while every page falls back to golden fixtures (#99). **Kill a spare-port
+> web server the moment you are done with it**, and if the badge says `FIXTURES` when the API is up,
+> suspect the running process before the code.
 
 ---
 
@@ -178,13 +190,16 @@ src/
   app/                     routes + providers + global styles
   components/
     decision/              THE CENTREPIECE — DecisionCard is the three-stage causal chain,
-                           plus venue intents (SwapVM params), yield comparison, banded warnings
-    vault/                 header, stats, holdings donut, Aqua positions, deposit/withdraw, shell
+                           plus venue intents (SwapVM params), yield comparison, banded warnings,
+                           source notes, and the injection-findings panel
+    vault/                 header, stats, holdings donut, Aqua positions, deposit/withdraw,
+                           paused banner, shell
     mandate/               mandate viewer + the data-source grant list
-    genesis/               chat panel, live mandate draft, deploy panel, preset cards, universe strip
+    genesis/               chat panel, live mandate draft, deploy panel, preset cards (fixed
+                           mandates), ARCHETYPE cards (generative envelopes), universe strip
     venues/                venue capability strip (Lane D's manifest)
     performance/           track-record charts — hand-rolled SVG, no charting dependency
-    portfolio/             cross-vault strip for a connected wallet
+    portfolio/             held-by-me strip + deployed-by-me list, never merged
     layout/                header + the persistent disclaimer
     ui/                    Badge, Card, Button, Stat, AddressChip, ModeBadge, TokenMark
     wallet/                connect button
@@ -198,6 +213,47 @@ scripts/
   check-forbidden-imports.mjs imports this app must never contain (runs as prebuild)
   verify-vault-write-path.mjs approve → deposit → redeem against a running fork
 ```
+
+### Archetypes are not presets, and both are on `/create`
+
+Two paths, and confusing them makes the generative half look like a shortcut to the same three
+mandates:
+
+| | **Preset** (`genesis/PresetCards`) | **Archetype** (`genesis/ArchetypeCards`) |
+|---|---|---|
+| What it is | One fixed `Mandate`, byte-identical every time | A set of **bounds** — `packages/schema/archetypes/*.json` |
+| What a click does | Loads it into the chat to be edited by hand | Asks the model to write a **fresh** mandate inside the bounds, checks it, deploys it |
+| User input | A conversation | The archetype key and your address. Nothing else |
+| Twice on one card | The same mandate | **Two different vaults** |
+
+The word "archetype" meant *preset* until Wave 3 and the heading was renamed accordingly — one word
+for two things, one generative and one not, made the distinction the feature depends on unreadable.
+
+**No number on an archetype card is typed by this lane.** The bound lines come from
+`describeEnvelope()` in `packages/schema`, generated from the same JSON Lane B's deploy gate reads,
+so a card cannot promise a limit nobody enforces. **And there is no fake progress**: the endpoint is
+one request and the browser cannot see which stage is running, so the three stages are shown as a
+description of what the call does, never as a stepper advancing on a timer. What *is* real arrives
+with the response — elapsed time, and how many generations the envelope rejected before one passed.
+
+### Paused: the word means the opposite of what depositors expect
+
+`vault/PausedBanner` states the halt and the exit with equal weight, because "paused" reads as *your
+money is stuck* and here it is the reverse by construction — Lane A's §A2 pauses `execute` and is
+forbidden from touching `withdraw`/`redeem`.
+
+Making that claim true required fixing Lane A's #76 in the same commit. `maxWithdraw()` and
+`previewRedeem()` report the **claim, not what is payable**, so withdraw's Max used to offer the
+holder's whole share balance. Measured live on the demo vault: `totalAssets` 2,500.63 USDC against
+**985.20 in cash** — a holder of the entire supply could redeem **39.4%** of their position, and the
+rest reverts *from the ERC-20*, so it reads as a broken vault rather than a deployed one. The panel
+now caps on `min(shares, convertToShares(assetBalanceOf(vault)))`, asked of the chain rather than
+derived from a share-price ratio — the two share scales differ by 1e12 (#81) and that is exactly the
+arithmetic where it produces a plausible wrong number.
+
+`redeemInKind` (§A2b) is offered **only while paused**, and simulated before it is signed: "not
+paused" and "this vault predates §A2b" both revert, and an exit that is offered and then reverts
+looks broken rather than unavailable.
 
 ### Two components worth knowing about before you change them
 
