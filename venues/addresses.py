@@ -75,11 +75,42 @@ AAVE_V3_POOL: Final[str] = "0xA238Dd80C259a72e81d7e4664a9801593F98d1c5"
 ABAS_USDC: Final[str] = "0x4e65fE4DbA92790696d040ac24Aa414708F5c0AB"
 ABAS_WETH: Final[str] = "0xD4a0e0b9149BCee3C920d2E00b5dE09138fd8bb7"
 
+#: MetaMorpho, mirrored here for the same reason and under the same rule as the
+#: Aave addresses above — `venues/morpho/markets.py` documents and verifies it,
+#: `test_morpho.py` checks the two agree.
+#:
+#: One address covers both roles: it is the contract the deposit calls *and* the
+#: ERC-4626 share token the vault receives, so a single allowlist entry serves
+#: the approval and the deposit.
+METAMORPHO_GAUNTLET_USDC_PRIME: Final[str] = "0xeE8F4eC5672F09119b96Ab6fB59C27E1b7e44b61"
+
 #: Symbol → address, for resolving the symbols a mandate and an LLM speak in.
 #: VenueIntent carries symbols ("USDC"), not addresses, because that is what a
 #: model reliably produces; resolution to an address happens here and nowhere
 #: else. Extend deliberately: an unresolvable symbol must fail loudly rather
 #: than silently route to the wrong token.
+#:
+#: ⚠️ **THIS IS NOT A LIST OF ASSETS THE VAULT CAN SAFELY HOLD.** It answers
+#: "can this lane turn this symbol into an address", nothing more. Lane B's
+#: genesis menu derived from it (#78), which conflates two different questions
+#: and would have offered assets the vault cannot price.
+#:
+#: The vault can only value a token with a **registered USD price feed**, and
+#: the authority for that is on-chain, not here:
+#:
+#: * for an existing vault — `CuratedVault.valuedTokens()`
+#: * for a vault about to be created — `VaultFactory.defaultValuations()`
+#:
+#: Registrations are **immutable after `initialize`**, so a vault deployed
+#: holding an unvaluable token cannot be repaired, only redeployed — with
+#: depositors already in.
+#:
+#: **Before adding anything here, check the feed's denomination.** Every LST on
+#: Base (wstETH, cbETH, rETH) quotes **ETH at 18 decimals**, not USD at 8, so a
+#: naive registration reads wstETH as **$12,399,811,032** (#78). The vault holds
+#: one feed per token and cannot compose ETH-quoted with ETH/USD the way the
+#: data layer does in Python. Adding an LST needs a composing feed adapter first
+#: — `ERC4626PriceFeed` is the pattern, and it is the same shape of problem.
 TOKENS: Final[dict[str, str]] = {
     "USDC": USDC,
     "WETH": WETH,
@@ -155,6 +186,14 @@ FALLBACK_ALLOWLIST: Final[frozenset[str]] = frozenset(
         AAVE_V3_POOL,
         ABAS_USDC,
         ABAS_WETH,
+        # MetaMorpho: the vault the `morpho` venue supplies into. It is both the
+        # contract called and the share token received, so one entry covers the
+        # deposit and the approval. Registered by Lane F in #79 along with an
+        # ERC4626PriceFeed so the vault can value the share — an appreciating
+        # 4626 share, unlike a 1:1 rebasing aToken, which is why it needed a
+        # feed adapter at all.
+        #
+        METAMORPHO_GAUNTLET_USDC_PRIME,
     )
 )
 

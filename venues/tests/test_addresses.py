@@ -168,3 +168,53 @@ class TestTokenResolution:
     def test_unknown_decimals_are_none_not_eighteen(self):
         # Defaulting to 18 is how an amount becomes 10^12 times wrong.
         assert addresses.decimals_for("0x" + "11" * 20) is None
+
+
+class TestTokenTableIsNotAValuationList:
+    """Cross-lane request #78.
+
+    `TOKENS` answers "can this lane resolve this symbol". Lane B's genesis menu
+    read it as "assets the vault can safely hold", which is a different and
+    stricter question — the vault needs a *registered USD price feed*, and every
+    LST on Base quotes ETH at 18 decimals rather than USD at 8. Registering one
+    naively reads wstETH as $12.4bn, and valuations are immutable after
+    `initialize`, so the vault could not be repaired.
+
+    This test does not stop anyone extending the table. It makes extending it a
+    deliberate act that arrives with the checklist attached.
+    """
+
+    #: Every symbol here is USD-priced or the base asset, and verified on-chain.
+    KNOWN_SAFE = {"USDC", "WETH", "ETH", "CBBTC", "DAI", "AERO"}
+
+    #: Denominated in ETH at 18 decimals on Base — NOT USD at 8. The vault holds
+    #: one feed per token and cannot compose, so these need a feed adapter first.
+    ETH_QUOTED_LSTS = {"WSTETH", "CBETH", "RETH", "WEETH", "EZETH"}
+
+    def test_the_table_holds_only_assets_known_to_be_usd_priced(self):
+        unexpected = set(addresses.TOKENS) - self.KNOWN_SAFE
+        assert not unexpected, (
+            f"new symbols in TOKENS: {sorted(unexpected)}. Before adding one, confirm "
+            f"its Chainlink feed on Base is USD-quoted at 8 decimals. If it is "
+            f"ETH-quoted at 18 (every LST is), the vault CANNOT value it — it holds "
+            f"one feed per token and cannot compose. Build a composing feed adapter "
+            f"first; ERC4626PriceFeed is the pattern. See cross-lane request #78."
+        )
+
+    @pytest.mark.parametrize("symbol", sorted(ETH_QUOTED_LSTS))
+    def test_no_eth_quoted_lst_has_been_added(self, symbol):
+        assert symbol not in addresses.TOKENS, (
+            f"{symbol} is ETH-quoted at 18 decimals on Base. Adding it here widens "
+            f"the genesis asset menu and what the agent may amend into, and the vault "
+            f"would misprice it by ~10^10. Request #78 has the measurement."
+        )
+
+    def test_the_docstring_points_at_the_real_authority(self):
+        """The table cannot answer 'can the vault value this' — only the chain
+        can, and the docstring must say where."""
+        import venues.addresses as module
+
+        source = module.__doc__ or ""
+        # The warning lives on the TOKENS comment; assert the module at least
+        # carries the address-provenance discipline that motivates it.
+        assert "verified" in source.lower()

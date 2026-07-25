@@ -71,17 +71,33 @@ def allowed(monkeypatch):
     )
 
 
+@pytest.fixture
+def unregistered(monkeypatch):
+    """A deployment where the MetaMorpho share is *not* valued.
+
+    Constructed rather than assumed. The first version of these tests relied on
+    the real deployment never having registered one — true when written, false
+    the moment Lane F actioned #79, and the tests failed on someone else's
+    success. That is a test pinning an environmental fact instead of a
+    behaviour, which is the same mistake this lane flagged in R5's green run.
+    """
+    monkeypatch.setattr(
+        addresses,
+        "allowlist",
+        lambda: frozenset(addresses.FALLBACK_ALLOWLIST) - {TARGET.address.lower()},
+    )
+
+
 class TestTheValuationGuard:
     """The guard is the point of the adapter, so it is tested before anything."""
 
-    async def test_it_refuses_when_the_share_token_is_unvalued(self):
-        # Default deployment has never registered a MetaMorpho share.
+    async def test_it_refuses_when_the_share_token_is_unvalued(self, unregistered):
         with pytest.raises(PlanValidationError, match="cannot value"):
             await MorphoVenue().plan(
                 SupplyIntent(asset="USDC", pct_of_holdings=0.5), _vault()
             )
 
-    async def test_the_refusal_names_the_exact_fix(self):
+    async def test_the_refusal_names_the_exact_fix(self, unregistered):
         with pytest.raises(PlanValidationError) as caught:
             await MorphoVenue().plan(
                 SupplyIntent(asset="USDC", pct_of_holdings=0.5), _vault()
@@ -217,3 +233,30 @@ class TestMarketsTable:
     def test_vault_lookup_by_asset(self):
         assert vault_for_asset("USDC") is not None
         assert vault_for_asset(addresses.WETH) is None
+
+
+class TestAddressMirrorAgrees:
+    """`venues/addresses.py` mirrors the MetaMorpho address so the fallback
+    allowlist can name it without inverting the dependency (the same rule the
+    Aave addresses follow). Two copies eventually disagree unless something
+    checks."""
+
+    def test_the_mirrored_address_matches_the_markets_table(self):
+        assert (
+            addresses.METAMORPHO_GAUNTLET_USDC_PRIME.lower()
+            == VAULTS["gauntlet-usdc-prime"].address.lower()
+        )
+
+    def test_it_is_on_the_fallback_allowlist(self):
+        """Request #79 registered it as an execute() target. If the fallback
+        omits it, a fresh clone refuses a plan the deployed vault accepts —
+        which reads as a venue bug rather than a stale constant."""
+        assert (
+            addresses.METAMORPHO_GAUNTLET_USDC_PRIME.lower()
+            in addresses.FALLBACK_ALLOWLIST
+        )
+
+    def test_it_is_eip55_checksummed(self):
+        from eth_utils import is_checksum_address
+
+        assert is_checksum_address(addresses.METAMORPHO_GAUNTLET_USDC_PRIME)
