@@ -6,6 +6,7 @@ import { ChatPanel } from '@/components/genesis/ChatPanel'
 import { MandateDraft } from '@/components/genesis/MandateDraft'
 import { DeployPanel } from '@/components/genesis/DeployPanel'
 import { PresetCards } from '@/components/genesis/PresetCards'
+import { ArchetypeCards } from '@/components/genesis/ArchetypeCards'
 import { UniverseStrip } from '@/components/genesis/UniverseStrip'
 import { VenueStrip } from '@/components/venues/VenueStrip'
 import { suggestionsFor } from '@/lib/mandate/suggestions'
@@ -84,13 +85,29 @@ export default function CreatePage() {
           Design the strategy, then hand it over
         </h1>
         <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted">
-          Describe what the vault should do. The curator turns it into a mandate — constraints, the
-          data sources it may consult, the venues it may use. Deploying crystallises that mandate at
-          genesis; from then on the agent runs it alone.
+          Two ways in. Pick an <span className="text-ink">archetype</span> and the model writes and
+          deploys a strategy inside its bounds without asking you anything — or{' '}
+          <span className="text-ink">describe what you want</span> below and shape the mandate line
+          by line. Either way, deploying crystallises the mandate at genesis; from then on the agent
+          runs it alone.
         </p>
       </header>
 
       <ModeNotice />
+
+      <ArchetypeCards />
+
+      {/* The conversation path. Kept below and under its own rule, because it
+          answers a different question — the archetype path is "give me a good
+          one", this one is "I know what I want". Blurring them would make the
+          generative half look like a shortcut to the same three mandates. */}
+      <section className="border-t border-line pt-8">
+        <p className="label">Or design one yourself</p>
+        <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-muted">
+          The curator turns a conversation into a mandate — constraints, the data sources it may
+          consult, the venues it may use. Start from a preset or from nothing.
+        </p>
+      </section>
 
       <PresetCards onSelect={loadPreset} selectedKey={presetKey} />
 

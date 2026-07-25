@@ -82,12 +82,43 @@ export const VenueManifestRow = z
 
 export const VenueManifest = z.array(VenueManifestRow)
 
+/**
+ * `POST /archetypes/{key}/deploy` — Lane B's §B1. Their own endpoint, not part
+ * of the Wave 0 freeze, so `.passthrough()`.
+ *
+ * The only field this lane *needs* is the vault address; everything else makes
+ * the result legible. `mandate` matters more than it looks: the whole claim of
+ * the archetype flow is that a model wrote a fresh strategy rather than a
+ * template being copied, and showing the mandate it actually produced is how a
+ * viewer checks that two clicks really did diverge.
+ *
+ * `attempts` is requested rather than assumed to be 1. An envelope violation
+ * means regenerate-never-deploy, so a deploy that took three tries is evidence
+ * the gate is load-bearing — the same reason rejected decisions are rendered in
+ * the feed instead of hidden.
+ */
+export const ArchetypeDeployResponse = z
+  .object({
+    vault: z.string(),
+    mandate: Mandate.optional(),
+    mandate_hash: z.string().optional(),
+    tx_hash: z.string().optional(),
+    attempts: z.number().int().min(1).optional(),
+    /** Populated when a generation escaped the envelope and was regenerated. */
+    rejected: z
+      .array(z.object({ reason: z.string() }).passthrough())
+      .default([]),
+  })
+  .passthrough()
+
 export const routes = {
   genesisChat: () => '/genesis/chat',
   genesisFinalize: () => '/genesis/finalize',
   genesisSources: () => '/genesis/sources',
   /** Requested from Lane B in note #68; degrades cleanly until it exists. */
   venues: () => '/venues',
+  /** Lane B §B1. One call generates, envelope-checks, regenerates and deploys. */
+  archetypeDeploy: (key: string) => `/archetypes/${key}/deploy`,
   vaultState: (address: string) => `/vault/${address}/state`,
   vaultMandate: (address: string) => `/vault/${address}/mandate`,
   vaultDecisions: (address: string, limit = 20) => `/vault/${address}/decisions?limit=${limit}`,
@@ -108,4 +139,5 @@ export const schemas = {
   health: { response: AgentHealth },
   genesisSources: { response: GenesisSources },
   venues: { response: VenueManifest },
+  archetypeDeploy: { response: ArchetypeDeployResponse },
 } as const

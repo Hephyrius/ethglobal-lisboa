@@ -6,7 +6,7 @@ import { MANDATE_PRESETS } from '@/lib/mandate/presets'
 import { cn } from '@/lib/cn'
 
 /**
- * Three archetypes to start from, instead of an empty box.
+ * Three presets to start from, instead of an empty box.
  *
  * Genesis asks a first-time reader to invent an investment mandate from
  * nothing, in a vocabulary they may not have. A preset answers "what does one
@@ -17,6 +17,13 @@ import { cn } from '@/lib/cn'
  * upside is a sales page; the tradeoff line is the part that makes this a real
  * choice, and it comes from the preset's own metadata rather than from
  * copywriting here, so it cannot go stale when the limits change.
+ *
+ * ⚠️ These were called "archetypes" until Wave 3, when that word acquired a
+ * different and incompatible meaning: an *archetype* is now a set of bounds the
+ * model writes a new mandate inside on every click (`ArchetypeCards`), while a
+ * *preset* is one fixed mandate loaded verbatim, every time, to be edited by
+ * hand. Both appear on this page. One word for two things — one generative and
+ * one not — would make the distinction the feature depends on unreadable.
  */
 export function PresetCards({
   onSelect,
@@ -30,8 +37,10 @@ export function PresetCards({
   return (
     <section>
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-line pb-2">
-        <h2 className="text-sm font-semibold text-ink">Start from an archetype</h2>
-        <p className="text-2xs text-faint">Loads a whole mandate — then amend it by talking</p>
+        <h2 className="text-sm font-semibold text-ink">Start from a preset</h2>
+        <p className="text-2xs text-faint">
+          Loads one fixed mandate, the same every time — then amend it by talking
+        </p>
       </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-3">
