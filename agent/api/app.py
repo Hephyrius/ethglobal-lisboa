@@ -98,7 +98,13 @@ def create_app(config: Settings | None = None) -> FastAPI:
             mode=cfg.mode,
             data_registry=data.label,
             venue_registry=venues.label,
-            model_backend=f"{cfg.model_backend}:{cfg.model_name}",
+            # `resolved_model_name()`, not `model_name` (#100). The two are
+            # different namespaces: `.env` sets MODEL_NAME to an Ollama tag, so
+            # a Grok run reported `grok:qwen2.5:3b-instruct-q4_K_M` — a 3B that
+            # is authoring nothing. This is the endpoint anyone checking "what
+            # is actually running" reaches for, including us at the rehearsal,
+            # so it is the one place that must not answer with the wrong model.
+            model_backend=f"{cfg.model_backend}:{cfg.resolved_model_name()}",
             model_reachable=model_ok,
         )
 

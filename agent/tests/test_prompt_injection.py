@@ -194,6 +194,64 @@ def test_the_prompt_stays_ascii_under_a_unicode_payload(snapshot, vault):
     assert not [c for c in rendered if ord(c) > 127]
 
 
+def test_a_real_fact_id_renders_whole_so_the_model_can_cite_it():
+    """The fence's worst bug, and the reason this test names real ids.
+
+    `facts_used` is validated against the snapshot's ids, so a truncated id in
+    the prompt is one the model *cannot* cite: it copies what it was shown,
+    layer 4 finds no such fact, and the tick is rejected. Every tick.
+
+    The id cap was set to 8 on the assumption that ids look like `f1` — true of
+    every golden fixture and false of Lane C, whose ids are namespaced. Nothing
+    caught it because no fixture id is longer than two characters, so the real
+    ones are hardcoded here rather than taken from a fixture.
+    """
+    ids = ("f1", "aave:tvl:aave-v3/usdc", "messari:tvl:moonwell/usdc", "vault:idle-capital")
+    facts = [
+        _fact(protocol="aave-v3").model_copy(update={"id": fact_id}) for fact_id in ids
+    ]
+    rendered = _render_facts(_snapshot(*facts))
+
+    for fact_id in ids:
+        assert f"{fact_id} " in rendered, f"{fact_id} does not appear whole in the table"
+
+
+def test_a_namespaced_fact_id_is_not_a_finding_on_its_length():
+    """What cross-lane #98 and #101 both measured.
+
+    Eleven findings a tick, every one of them a first-party identifier, on a
+    vault granting no attacker-controlled source. **A security signal that
+    always fires carries no information** — and the one real injection then
+    lands in noise the viewer has learned to skip.
+    """
+    facts = [
+        _fact(protocol="aave-v3").model_copy(update={"id": "messari:tvl:moonwell/usdc"}),
+        _fact(protocol="aave-v3").model_copy(update={"id": "vault:idle-capital"}),
+    ]
+    assert scan(_snapshot(*facts)) == []
+
+
+def test_a_first_party_id_is_still_scanned_for_structure():
+    """Exempt from the *length* heuristic, not from the checks that matter.
+
+    Lane C's ids embed third-party protocol names, so an id is not first-party
+    all the way down.
+    """
+    poisoned = _fact(protocol="aave-v3").model_copy(
+        update={"id": f"messari:tvl:{PAYLOAD}"}
+    )
+    assert scan(_snapshot(poisoned))
+
+
+async def test_no_model_call_is_spent_classifying_our_own_identifiers():
+    backend = _Backend()
+    facts = [_fact(protocol="aave-v3").model_copy(update={"id": "messari:tvl:moonwell/usdc"})]
+    await InjectionDetector(backend).inspect(_snapshot(*facts))
+
+    listing = backend.calls[0][-1]["content"] if backend.calls else ""
+    assert "messari:tvl:moonwell/usdc" not in listing
+
+
 # ── the evidence survives ─────────────────────────────────────────────────
 
 

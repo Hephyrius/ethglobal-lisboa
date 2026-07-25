@@ -216,13 +216,20 @@ def _render_facts(snapshot: MarketSnapshot, marked: set[str] = frozenset()) -> s
     if not snapshot.facts:
         return "No market data could be read this tick."
 
+    # Sized to the ids actually present, not to a guess. Lane C's ids are
+    # namespaced (`messari:tvl:moonwell/usdc`) while the golden fixture's are
+    # `f1`, so a fixed width is either too narrow for the real ones or absurd for
+    # the fixtures. **An id must render whole**: the model cites it back in
+    # `facts_used`, and a truncated id is one grounding will reject.
+    id_width = max(4, *(len(sanitize(f.id, limit=ID_LIMIT)) for f in snapshot.facts))
     rows = [
         UNTRUSTED_PREAMBLE,
         "",
         "Each row states what it measures. Only rows saying 'per year' are yields.",
         "",
-        f"{'id':<5} | {'measures':<20} | {'about':<{_ABOUT_WIDTH}} | {'value':<28} | source",
-        "-" * 104,
+        f"{'id':<{id_width}} | {'measures':<20} | {'about':<{_ABOUT_WIDTH}} | "
+        f"{'value':<28} | source",
+        "-" * (id_width + _ABOUT_WIDTH + 67),
     ]
     for fact in snapshot.facts:
         subject = fact.subject
@@ -253,7 +260,7 @@ def _render_facts(snapshot: MarketSnapshot, marked: set[str] = frozenset()) -> s
         measures = _KIND_LABELS.get(fact.kind, fact.kind)
 
         rows.append(
-            f"{sanitize(fact.id, limit=ID_LIMIT):<5} | {measures:<20} | "
+            f"{sanitize(fact.id, limit=ID_LIMIT):<{id_width}} | {measures:<20} | "
             f"{about:<{_ABOUT_WIDTH}} | "
             f"{_format_value(fact):<28} | {sanitize(fact.source, limit=_SOURCE_LIMIT)}"
         )

@@ -78,8 +78,22 @@ MESSAGE_LIMIT = 320
 #: one on Base is 11. Past this it is not a ticker.
 SYMBOL_LIMIT = 24
 
-#: `f1`..`f12`. The leftmost column, where a forged separator does most damage.
-ID_LIMIT = 8
+#: Fact ids. **Generous on purpose, and this is the one limit that is not a
+#: judgement call.**
+#:
+#: `AllocationDecision.facts_used` is validated against the snapshot's ids, so a
+#: truncated id in the prompt is an id the model cannot cite: it copies what it
+#: was shown, layer 4 finds no such fact, and the tick is rejected. Every tick.
+#:
+#: Set to 8 on the assumption that ids look like `f1` — which is true of the
+#: golden fixture and false of Lane C, whose real ids are namespaced
+#: (`messari:tvl:moonwell/usdc`, 25 characters). No test caught it because every
+#: fixture id is two characters long. Sized for the real ones with room to spare.
+#:
+#: An id past even this is still truncated rather than allowed to run away with
+#: the row, and that fails closed: grounding rejects the citation, so the tick is
+#: rejected rather than acting on a fact nobody can name.
+ID_LIMIT = 64
 
 #: These are the four kinds of thing that cross into the prompt from outside,
 #: and **the limit is per kind rather than global** because the length check is

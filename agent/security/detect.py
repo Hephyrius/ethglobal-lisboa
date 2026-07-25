@@ -184,6 +184,22 @@ class Untrusted(NamedTuple):
     #: therefore has to be right: 67 characters is an ordinary source-error
     #: sentence and an obvious attack in a token symbol.
     kind: str = "label"
+    #: Minted by our own code rather than copied from a third party — a fact id,
+    #: a registry key. **Length alone is never a finding on these**, which is
+    #: what cross-lane #98 and #101 both measured: the detector was reporting
+    #: `messari:tvl:moonwell/usdc` as suspicious four times a tick, on vaults
+    #: granting no attacker-controlled source at all.
+    #:
+    #: Lane E's argument for fixing it rather than filtering downstream is the
+    #: right one and worth keeping here: **a security signal that always fires
+    #: carries no information.** Eleven false positives per tick trains a viewer
+    #: to skip the panel, and the one real injection then lands in noise the
+    #: audience has already learned to ignore.
+    #:
+    #: Structural and pattern checks still apply — a fact id containing a newline
+    #: or `IGNORE ALL PREVIOUS INSTRUCTIONS` is a finding whoever minted it,
+    #: because these ids embed third-party protocol names.
+    first_party: bool = False
 
 
 def untrusted_values(
@@ -216,9 +232,11 @@ def untrusted_values(
             # The id itself: grounding validates that a cited id *exists*, not
             # that it is well behaved, and it is rendered in the leftmost column
             # where a forged separator does the most damage.
-            yield Untrusted(f"{at} id", str(fact.id), fact.source, "id")
+            yield Untrusted(f"{at} id", str(fact.id), fact.source, "id", first_party=True)
 
         for error in snapshot.errors:
+            # A source *key* is a registry name this system chose; the message
+            # is whatever the source said, so only the message is third party.
             yield Untrusted(
                 f"error from {error.source}", str(error.message), str(error.source), "message"
             )
@@ -239,7 +257,7 @@ def untrusted_values(
                     yield Untrusted(f"{at} {label}", str(value), "chain", "symbol")
 
 
-def _reasons(value: str, kind: str = "label") -> list[str]:
+def _reasons(value: str, kind: str = "label", first_party: bool = False) -> list[str]:
     """Why this value is not what it claims to be, or an empty list."""
     found = []
     if _NEWLINE.search(value):
@@ -248,7 +266,10 @@ def _reasons(value: str, kind: str = "label") -> list[str]:
         found.append("control characters")
     if _BIDI.search(value):
         found.append("bidi override")
-    if len(value) > LIMITS.get(kind, LIMITS["label"]):
+    # Length is a heuristic about *third-party* text: a name that needed 400
+    # characters is not a name. Applied to something we minted it says only that
+    # our own namespacing is verbose, which is not a security finding.
+    if not first_party and len(value) > LIMITS.get(kind, LIMITS["label"]):
         found.append(f"{len(value)} characters")
     for pattern, label in _COMPILED:
         if pattern.search(value):
@@ -264,7 +285,7 @@ def scan(
     """The deterministic pass. Free, always on, cannot be talked out of firing."""
     findings = []
     for item in untrusted_values(snapshot, vault):
-        if reasons := _reasons(item.value, item.kind):
+        if reasons := _reasons(item.value, item.kind, item.first_party):
             findings.append(
                 Finding(
                     where=item.where,
@@ -332,7 +353,9 @@ class InjectionDetector:
         # anything this process has classified before.
         unique: dict[str, tuple[str, str]] = {}
         for item in untrusted_values(snapshot, vault):
-            if item.value in already or item.value in self._verdicts:
+            # First-party identifiers are not worth a model call. #98 caught one
+            # being spent on `messari:tvl:moonwell/usdc`.
+            if item.first_party or item.value in already or item.value in self._verdicts:
                 continue
             unique.setdefault(item.value, (item.where, item.source))
 

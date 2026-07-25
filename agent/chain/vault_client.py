@@ -75,6 +75,63 @@ def _selector(components) -> str:
     return keccak(text=f"createVault(({types}))")[:4].hex()
 
 
+#: `createVault` and `VaultCreated` as they were **before** Lane A's §A1
+#: attribution field, kept so this lane works against a fork deployed either
+#: side of that change.
+#:
+#: Not a duplicated interface in the sense Rule 7 forbids: it is a *historical*
+#: copy of one that Lane A has already replaced, used only to decide which of
+#: two on-chain shapes is actually deployed. It stops being reachable the moment
+#: the fork is redeployed, and `contracts/abis/VaultFactory.json` stays the only
+#: source for the current shape.
+#:
+#: The event changed too, which is the part that makes "just append the field"
+#: fail twice: `agent` went from indexed to non-indexed and `deployer` was added
+#: indexed, so a receipt from the old factory does not decode against the new
+#: event ABI and `createVault` would report emitting no `VaultCreated` at all.
+_LEGACY_FACTORY_ABI = [
+    {
+        "type": "function",
+        "name": "createVault",
+        "inputs": [
+            {
+                "name": "params",
+                "type": "tuple",
+                "components": [
+                    {"name": "asset", "type": "address"},
+                    {"name": "name", "type": "string"},
+                    {"name": "symbol", "type": "string"},
+                    {"name": "agent", "type": "address"},
+                    {"name": "guardian", "type": "address"},
+                    {"name": "mandateHash", "type": "bytes32"},
+                ],
+            }
+        ],
+        "outputs": [{"name": "vault", "type": "address"}],
+        "stateMutability": "nonpayable",
+    },
+    {
+        "type": "event",
+        "name": "VaultCreated",
+        "inputs": [
+            {"name": "vault", "type": "address", "indexed": True},
+            {"name": "asset", "type": "address", "indexed": True},
+            {"name": "agent", "type": "address", "indexed": True},
+            {"name": "mandateHash", "type": "bytes32", "indexed": False},
+        ],
+        "anonymous": False,
+    },
+]
+
+#: `(name, type)` pairs from `_LEGACY_FACTORY_ABI`, for computing its selector.
+#: Derived rather than restated so the two cannot drift.
+_LEGACY_CREATE_PARAMS = tuple(
+    (c["name"], c["type"])
+    for entry in _LEGACY_FACTORY_ABI
+    if entry["name"] == "createVault"
+    for c in entry["inputs"][0]["components"]
+)
+
 _SHARE_PRICE_SCALE = 10**18
 #: Enough for an anvil fork; the real Base demo run is far below this.
 _GAS_LIMIT = 3_000_000
@@ -120,7 +177,7 @@ class Web3VaultClient:
         self._decimals: dict[str, int] = {}
         #: Resolved on the first deploy, because it costs an `eth_getCode` and
         #: the deployed factory does not change under a running process.
-        self._create_params_cache: tuple[str, ...] | None = None
+        self._create_params_cache: tuple[tuple[str, ...], list] | None = None
         log.info("agent signing as %s against %s", self._account.address, settings.rpc_url)
 
     @property
@@ -318,12 +375,18 @@ class Web3VaultClient:
     ) -> tuple[str, str]:
         """Clone a vault via Lane A's factory, bound to this mandate's hash.
 
-        `deployer` is Lane A's §A1 attribution field and is **read off the ABI
-        rather than assumed**, because this lane and `contracts/` ship
-        independently: the field appeared mid-wave and a hardcoded 7-tuple would
-        have broken every deploy until Lane A landed, while a hardcoded 6-tuple
-        breaks every deploy after. Building the arguments from the ABI's own
-        component names means neither ordering of those two events matters.
+        `deployer` is Lane A's §A1 attribution field, and which shape to send is
+        **decided by the deployed bytecode, not by the ABI file** (cross-lane
+        #99). `contracts/out/` is committed ahead of deployment on purpose, so
+        there is a real window in which the artifact declares a field the running
+        contract does not have — and during that window genesis returned 500 for
+        every vault, which is the demo's primary path.
+
+        Neither hardcoding works: a fixed six-tuple breaks the moment Lane A
+        redeploys, and a fixed seven-tuple encodes cleanly and then reverts with
+        a bare *transaction reverted* that reads as a bad mandate. So both are
+        supported and the chain decides, which is also the only ordering that
+        does not require the two lanes to land in step.
 
         The agent still submits the transaction, so this records *who asked*.
         It is not a signature and Lane A's `SECURITY.md` says so.
@@ -334,9 +397,9 @@ class Web3VaultClient:
                 "deployments/base-fork.json by Lane A's deploy script"
             )
 
+        fields, abi = await self._create_params_fields()
         factory = self._w3.eth.contract(
-            address=self._w3.to_checksum_address(self._settings.factory_address),
-            abi=self._factory_abi,
+            address=self._w3.to_checksum_address(self._settings.factory_address), abi=abi
         )
         asset = await self._resolve_asset(mandate)
         by_name = {
@@ -352,7 +415,7 @@ class Web3VaultClient:
             if deployer
             else self._account.address,
         }
-        params = tuple(by_name[c] for c in await self._create_params_fields())
+        params = tuple(by_name[c] for c in fields)
 
         tx_hash = await self._send(factory.functions.createVault(params))
         receipt = await self._w3.eth.get_transaction_receipt(tx_hash)
@@ -366,19 +429,6 @@ class Web3VaultClient:
             raise RuntimeError(f"createVault in {tx_hash} emitted no VaultCreated event")
         return events[0]["args"]["vault"], tx_hash
 
-    #: The shape `CreateParams` had before Lane A's §A1 attribution field, with
-    #: the Solidity types needed to compute its selector. Kept because
-    #: `contracts/out/` and the deployed factory are published by the same lane
-    #: but at different moments — see `_create_params_fields`.
-    _LEGACY_CREATE_PARAMS = (
-        ("asset", "address"),
-        ("name", "string"),
-        ("symbol", "string"),
-        ("agent", "address"),
-        ("guardian", "address"),
-        ("mandateHash", "bytes32"),
-    )
-
     def _abi_create_params(self) -> tuple[tuple[str, str], ...] | None:
         """`CreateParams` as the published ABI declares it, name and type."""
         for entry in self._factory_abi:
@@ -389,56 +439,63 @@ class Web3VaultClient:
                 return tuple((c["name"], c["type"]) for c in components)
         return None
 
-    async def _create_params_fields(self) -> tuple[str, ...]:
-        """The argument order the **deployed** factory actually accepts.
+    _LEGACY_FIELDS = tuple(name for name, _ in _LEGACY_CREATE_PARAMS)
 
-        Read from the ABI so a field added in `contracts/` needs no change here,
-        then **checked against the deployed bytecode**, which is the part that
-        matters: `contracts/out/` is committed on purpose so other lanes get the
-        ABI early, so there is a real window in which the artifact has a field
-        the running contract does not.
+    async def _create_params_fields(self) -> tuple[tuple[str, ...], list]:
+        """The argument order and ABI the **deployed** factory actually accepts.
 
-        That window cost a reverted `createVault` once already. The ABI declared
-        the seven-field `CreateParams` from §A1 while the fork was still running
-        the six-field one, so the call encoded cleanly, went out with a selector
-        nothing on-chain implements, and came back as a bare `reverted` — which
-        reads as a bad mandate rather than a stale deployment.
+        Read from the published ABI so a field added in `contracts/` needs no
+        change here, then **checked against the deployed bytecode**, which is
+        the part that matters: `contracts/out/` is committed on purpose so other
+        lanes get the ABI early, and that leaves a real window in which the
+        artifact declares a field the running contract does not have.
+
+        Both sides of that window are supported rather than one (#99). The
+        alternative is to fail with a good message, which was the first attempt
+        and is still worse than working: the window is hours long, genesis is the
+        demo's primary path, and §F3's injection e2e cannot deploy a vault at
+        all while it is open.
 
         A component this code has no value for raises `KeyError` naming it,
         which beats silently passing the wrong argument in that slot.
         """
-        declared = self._abi_create_params()
-        if declared is None:
-            log.warning("no CreateParams in the factory ABI; assuming the pre-A1 shape")
-            return tuple(name for name, _ in self._LEGACY_CREATE_PARAMS)
         if self._create_params_cache is not None:
             return self._create_params_cache
 
-        fields = tuple(name for name, _ in declared)
+        declared = self._abi_create_params()
+        if declared is None:
+            log.warning("no CreateParams in the factory ABI; assuming the pre-A1 shape")
+            return self._LEGACY_FIELDS, _LEGACY_FACTORY_ABI
+
+        resolved = (tuple(name for name, _ in declared), self._factory_abi)
         try:
             code = (await self._w3.eth.get_code(
                 self._w3.to_checksum_address(self._settings.factory_address)
             )).hex()
         except Exception as exc:  # noqa: BLE001 - trust the ABI if we cannot look
             log.warning("could not read the factory's bytecode (%s); trusting the ABI", exc)
-            return fields
+            return resolved
 
         if _selector(declared) not in code:
-            which = (
-                "it is still the pre-A1 six-field one"
-                if _selector(self._LEGACY_CREATE_PARAMS) in code
-                else "no known shape matches"
+            if _selector(_LEGACY_CREATE_PARAMS) not in code:
+                raise RuntimeError(
+                    f"the factory at {self._settings.factory_address} implements neither "
+                    f"createVault shape this lane knows. The published ABI and the deployed "
+                    f"bytecode disagree in a way that is not the known pre-A1 gap, so this "
+                    f"is a wrong VAULT_FACTORY_ADDRESS or an unexpected redeploy rather "
+                    f"than a bad mandate. Nothing was deployed."
+                )
+            log.warning(
+                "the factory at %s is still the pre-A1 six-field one while "
+                "contracts/out/ declares the seven-field shape; deploying against the "
+                "deployed shape. Deployer attribution is unavailable until Lane A "
+                "redeploys and updates deployments/base-fork.json (#99).",
+                self._settings.factory_address,
             )
-            raise RuntimeError(
-                f"the factory at {self._settings.factory_address} does not implement the "
-                f"createVault that contracts/out/VaultFactory.json declares ({which}). "
-                f"The ABI artifact is committed ahead of the deployment, so this is a stale "
-                f"factory rather than a bad mandate — Lane A needs to redeploy and update "
-                f"deployments/base-fork.json. Nothing was deployed."
-            )
+            resolved = (self._LEGACY_FIELDS, _LEGACY_FACTORY_ABI)
 
-        self._create_params_cache = fields
-        return fields
+        self._create_params_cache = resolved
+        return resolved
 
     async def _resolve_asset(self, mandate: Mandate) -> str:
         """Map the mandate's base-asset symbol to an address.
