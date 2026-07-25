@@ -30,32 +30,6 @@ export default function HomePage() {
       </section>
 
       <section>
-        <h2 className="rule-heading">The record of every decision</h2>
-        <div className="mt-6 grid gap-8 md:grid-cols-3">
-          <Step
-            index="I"
-            title="Data consulted"
-            body="Every fact the agent read, with the source that reported it and when. A source that failed is shown too — what the agent could not see shapes what it decided."
-          />
-          <Step
-            index="II"
-            title="Reasoning"
-            body="The curator's own words, verbatim, alongside the exact facts it cited. If it cites a figure that was not in its snapshot, that is visible rather than hidden."
-          />
-          <Step
-            index="III"
-            title="Execution"
-            body="The calldata it sent and the transaction it landed. Rotation through Uniswap; positions held in 1inch Aqua, where the assets never leave the vault."
-          />
-        </div>
-      </section>
-
-      {/* Renders nothing at all when no wallet is connected — an empty panel
-          captioned "connect a wallet" occupies the space a reader is scanning
-          for content, which is worse than no panel. */}
-      <PortfolioStrip />
-
-      <section>
         <div className="flex items-baseline justify-between border-b border-line pb-2">
           <h2 className="text-sm font-semibold text-ink">Vaults</h2>
           <Link href="/create" className="text-xs text-muted transition-colors hover:text-ink">
@@ -66,18 +40,12 @@ export default function HomePage() {
           <VaultList />
         </div>
       </section>
-    </div>
-  )
-}
 
-function Step({ index, title, body }: { index: string; title: string; body: string }) {
-  return (
-    <div>
-      <div className="flex items-baseline gap-2.5 border-b border-line pb-2">
-        <span className="font-serif text-sm text-agent">{index}</span>
-        <h3 className="text-sm font-semibold text-ink">{title}</h3>
-      </div>
-      <p className="mt-3 text-sm leading-relaxed text-muted">{body}</p>
+      {/* Below the vault list so the vaults sit directly under the hero. Renders
+          nothing at all when no wallet is connected — an empty panel captioned
+          "connect a wallet" occupies the space a reader is scanning for content,
+          which is worse than no panel. */}
+      <PortfolioStrip />
     </div>
   )
 }
