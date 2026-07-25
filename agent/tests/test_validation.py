@@ -387,3 +387,76 @@ def test_validated_output_is_an_allocation_decision(mandate, snapshot, good_json
     result = validate_decision(good_json, mandate, snapshot)
     assert isinstance(result, AllocationDecision)
     assert result.facts_used and set(result.facts_used) <= {f.id for f in snapshot.facts}
+
+
+# ── retry-hint quality: the message IS the mechanism ──────────────────────
+#
+# Observed live, and the reason these exist: the model omitted `token_out` on a
+# swap. `VenueIntent` is a union of three shapes, so pydantic reported failures
+# for all three — twelve errors, truncated to six, with the one real problem
+# buried among complaints that the swap was not a valid `AquaShipIntent`. The
+# model failed three attempts in a row, 260 seconds, without ever being told the
+# single thing that was wrong.
+#
+# Layer 2 exists to teach the model what to fix. A message describing two shapes
+# it never attempted is worse than no message at all.
+
+
+def _swap_missing_token_out() -> str:
+    return json.dumps(
+        {
+            "action": "rebalance",
+            "reasoning": "Rebalance toward the target split.",
+            "facts_used": ["f1"],
+            "target_allocations": [
+                {"asset": "USDC", "weight": 0.5},
+                {"asset": "WETH", "weight": 0.5},
+            ],
+            "venue_intents": [
+                {"venue": "uniswap", "kind": "swap", "token_in": "WETH", "pct_of_holdings": 0.5}
+            ],
+        }
+    )
+
+
+def test_a_union_error_names_only_the_shape_the_model_attempted(mandate, snapshot):
+    with pytest.raises(ValueError) as caught:
+        validate_decision(_swap_missing_token_out(), mandate, snapshot)
+    message = str(caught.value)
+
+    assert "token_out" in message, "the actual problem must be stated"
+    for unattempted in ("AquaShipIntent", "AquaDockIntent", "tokens", "amounts"):
+        assert unattempted not in message, (
+            f"the hint mentions {unattempted!r}, which the model never wrote — "
+            "that is the noise that made three retries fail"
+        )
+
+
+def test_the_union_variant_is_stripped_from_the_reported_path(mandate, snapshot):
+    """The model wrote `venue_intents[0]`, not `venue_intents[0].SwapIntent`.
+
+    Pointing at a path it did not write is one more thing to be confused by.
+    """
+    with pytest.raises(ValueError) as caught:
+        validate_decision(_swap_missing_token_out(), mandate, snapshot)
+
+    assert "venue_intents.0.token_out" in str(caught.value)
+    assert "SwapIntent" not in str(caught.value)
+
+
+def test_the_hint_stays_short_enough_to_act_on(mandate, snapshot):
+    """One missing field should produce one line, not a wall."""
+    with pytest.raises(ValueError) as caught:
+        validate_decision(_swap_missing_token_out(), mandate, snapshot)
+
+    body = str(caught.value).split("—", 1)[-1]
+    assert body.count(";") <= 1, f"too many errors reported for one mistake: {body}"
+
+
+def test_errors_outside_a_union_are_still_reported(mandate, snapshot):
+    """Filtering union noise must not swallow ordinary field errors."""
+    with pytest.raises(ValueError) as caught:
+        validate_decision(_decision(action="yolo", confidence=4.2), mandate, snapshot)
+    message = str(caught.value)
+
+    assert "action" in message and "confidence" in message

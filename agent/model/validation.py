@@ -107,12 +107,59 @@ class ValidatedDecision:
         return self.attempts - 1
 
 
+def _is_union_variant(segment: Any) -> bool:
+    """A `loc` segment naming a union member rather than a field.
+
+    Pydantic reports `('venue_intents', 0, 'SwapIntent', 'token_out')`. Model
+    names are CamelCase; field names in this schema are snake_case.
+    """
+    return isinstance(segment, str) and segment[:1].isupper()
+
+
+def _best_union_variant(errors: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep only the union member the model was plainly trying to produce.
+
+    `VenueIntent` is a union of three shapes, so one missing field on a swap
+    makes pydantic report failures for **all three** — the real problem buried
+    among complaints that the swap is not a valid `AquaShipIntent`. Observed
+    live: the model omitted `token_out`, got told about `AquaShipIntent.tokens`
+    and `AquaShipIntent.amounts`, and failed three attempts in a row without ever
+    being told the one thing that was wrong.
+
+    Layer 2's whole purpose is to teach the model what to fix, so a message that
+    describes two shapes it never attempted is worse than no message. The variant
+    with the fewest errors is the one it meant; the rest are noise.
+    """
+    grouped: dict[tuple, dict[str, list[dict[str, Any]]]] = {}
+    passthrough: list[dict[str, Any]] = []
+
+    for item in errors:
+        loc = tuple(item["loc"])
+        variant_at = next(
+            (i for i, seg in enumerate(loc) if _is_union_variant(seg) and i < len(loc) - 1),
+            None,
+        )
+        if variant_at is None:
+            passthrough.append(item)
+            continue
+        grouped.setdefault(loc[:variant_at], {}).setdefault(str(loc[variant_at]), []).append(item)
+
+    kept = list(passthrough)
+    for variants in grouped.values():
+        kept.extend(min(variants.values(), key=len))
+    return kept
+
+
 def _compact_schema_errors(error: ValidationError) -> str:
+    errors = _best_union_variant(error.errors())
     lines = []
-    for item in error.errors()[:_MAX_SCHEMA_ERRORS]:
-        location = ".".join(str(p) for p in item["loc"]) or "<root>"
+    for item in errors[:_MAX_SCHEMA_ERRORS]:
+        # Drop the union-variant segment: the model wrote `venue_intents[0]`, not
+        # `venue_intents[0].SwapIntent`, and pointing at a path it did not write
+        # is one more thing to be confused by.
+        location = ".".join(str(p) for p in item["loc"] if not _is_union_variant(p)) or "<root>"
         lines.append(f"{location}: {item['msg']}")
-    remaining = len(error.errors()) - len(lines)
+    remaining = len(errors) - len(lines)
     if remaining > 0:
         lines.append(f"(and {remaining} more)")
     return "; ".join(lines)
