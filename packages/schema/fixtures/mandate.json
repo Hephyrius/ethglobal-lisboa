@@ -12,7 +12,7 @@
     "rebalance_cooldown_seconds": 3600,
     "max_actions_per_tick": 2
   },
-  "permitted_data_sources": ["messari", "aave", "token_api"],
+  "permitted_data_sources": ["messari", "aave", "chainlink", "token_api"],
   "permitted_venues": ["uniswap", "aqua"],
   "risk_posture": "conservative",
   "update_rules": "May widen allowed_assets only to assets with a Chainlink Base feed and >$50M TVL. May never reduce min_cash_pct below 0.1, and may never remove a data source that is currently the sole provider of a fact class it relies on."

@@ -9,8 +9,11 @@
 # from there. On macOS this is a no-op.
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
-[ -f .env ] && set -a && . ./.env && set +a
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR/.."
+# .env is a default; an exported variable is an instruction (#45).
+. "$SCRIPT_DIR/lib/load-env.sh"
+load_dotenv
 
 : "${BASE_RPC_URL:?set BASE_RPC_URL in .env — must be ARCHIVE-CAPABLE.
    The public mainnet.base.org is rate-limited and will crawl or fail under

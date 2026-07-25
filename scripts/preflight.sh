@@ -26,8 +26,12 @@
 
 set -u
 
-cd "$(dirname "$0")/.."
-[ -f .env ] && set -a && . ./.env && set +a
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR/.."
+# .env is a default; an exported variable is an instruction (#45). Matters more here than anywhere:
+# a preflight that checks a different node than the one you meant is worse than no preflight.
+. "$SCRIPT_DIR/lib/load-env.sh"
+load_dotenv
 
 RPC="${ANVIL_RPC_URL:-http://127.0.0.1:8540}"
 OLLAMA="${OLLAMA_BASE_URL:-http://localhost:11434/v1}"

@@ -174,8 +174,9 @@ those, three checks on the tooling itself, because a broken gate is worse than n
 **Definition of done**
 - [ ] R8 green — the whole narrative from a cold anvil
 - [ ] Every rung's proof passing, nothing stubbed; `/health` `live` on three seams throughout
-- [ ] One agent-driven Uniswap rotation **and** one agent-driven Aqua ship, with tx hashes, and
-      `safeBalances()` confirming the Aqua position is real rather than merely created
+- [ ] One agent-driven Uniswap rotation **and** one agent-driven Aqua ship, with tx hashes, and a
+      **non-zero vault→Aqua allowance** confirming the position is fillable rather than merely
+      created (#39 — `safeBalances()` alone cannot tell those apart)
 - [ ] At least one validation guard shown *rejecting* a bad decision — the layers exist but have
       never been demonstrated catching the failures that motivated them
 - [ ] `docs/runbook.md` walkable by someone who has not seen the repo
@@ -261,12 +262,20 @@ fill, is the qualifying event.
 
 **Blocked by: Lanes B + D.** Currently proven only through Lane D's relay, not the product.
 
-**Proves:** an agent-driven `ship()` from the real vault, **and `Aqua.safeBalances()` non-zero for
-the vault afterwards.**
+**Proves:** an agent-driven `ship()` from the real vault, **and a non-zero ERC-20 allowance from the
+vault to Aqua** equal to the shipped amount.
 
-> Per request #17, `ship()` **succeeds with zero allowance** and leaves a position that looks
-> healthy in every observable way and is silently unfillable. A successful tx is *not* evidence here
-> — the balance assertion is the whole rung.
+> **Corrected per request #39 — the original proof was wrong.** This rung previously asked for
+> `Aqua.safeBalances()` non-zero. That is exactly the value request #17 lists among the things a
+> *broken* position also shows: a ship with no approvals yields "non-zero `safeBalances`, valid
+> hash, no error, a successful tx" and is silently never fillable. The stated proof would have
+> passed on a dead position, which is worse than no check — it would have manufactured confidence in
+> the 1inch centrepiece.
+>
+> The discriminator is the **allowance**: zero in the broken case, equal to the shipped amount in
+> the good one, because Aqua only `pull()`s when a taker fills. Keep `safeBalances()` as a liveness
+> check; **gate the rung on the allowance.** Needs only a standard ERC-20 ABI, so the e2e suite can
+> assert it without reaching into Lane D's source.
 
 ### R6 · Genesis closes the loop — chat → mandate → real vault
 

@@ -27,8 +27,12 @@
 
 set -eu
 
-cd "$(dirname "$0")/.."
-[ -f .env ] && set -a && . ./.env && set +a
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR/.."
+# .env is a default; an exported variable is an instruction. See lib/load-env.sh (#45) — the plain
+# `set -a; . ./.env` this replaces seeded the wrong node for someone who passed ANVIL_RPC_URL.
+. "$SCRIPT_DIR/lib/load-env.sh"
+load_dotenv
 
 RPC="${ANVIL_RPC_URL:-http://127.0.0.1:8540}"
 USDC="${USDC_ADDRESS:-0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913}"
