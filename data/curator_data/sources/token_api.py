@@ -151,7 +151,7 @@ class TokenApiSource(BaseSource):
             )
 
         network = NETWORK_IDS.get(self.settings.chain, self.settings.chain)
-        builder = FactBuilder(self.key, chain=self.settings.chain)
+        builder = FactBuilder(self.key, chain=self.settings.chain, on_finding=self.diagnose)
         quotes = {_norm(address_for(q, self.settings.chain)) for q in QUOTE_TOKENS}
         quotes.discard("")
 

@@ -162,7 +162,7 @@ class DefiLlamaSource(BaseSource):
                 failure=False,
             )
 
-        builder = FactBuilder(self.key, chain=self.settings.chain)
+        builder = FactBuilder(self.key, chain=self.settings.chain, on_finding=self.diagnose)
         facts: list[Fact] = []
         for row in kept:
             facts.extend(self._facts_for(row, builder))

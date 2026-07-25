@@ -313,7 +313,7 @@ class MessariSource(BaseSource):
             ) from None
 
     async def _fetch_protocol(self, protocol: Protocol, wanted: set[str]) -> list[Fact]:
-        builder = FactBuilder(self.key, chain=protocol.chain)
+        builder = FactBuilder(self.key, chain=protocol.chain, on_finding=self.diagnose)
         if protocol.family == "lending":
             data = await self._gateway.query(
                 protocol.subgraph_id, LENDING_QUERY, {"first": MARKET_LIMIT}

@@ -18,11 +18,19 @@ so the conversion is a decision at the call site rather than an assumption.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from datetime import datetime, timezone
 
 from curator_schema.models import Fact, FactKind, FactSubject
 
+from .sanitize import clean_and_report
+
 _SLUG_STRIP = re.compile(r"[^a-z0-9]+")
+
+#: Signature of `BaseSource.diagnose` — (subject, observation, consequence).
+#: Typed as a callable rather than importing `BaseSource` because `ports`
+#: imports this module, and the dependency has to point one way.
+Finding = Callable[..., None]
 
 
 def utcnow() -> datetime:
@@ -61,12 +69,24 @@ class FactBuilder:
     it was never shown. The registry de-duplicates collisions at merge time.
     """
 
-    def __init__(self, source: str, *, chain: str = "base", observed_at: datetime | None = None):
+    def __init__(
+        self,
+        source: str,
+        *,
+        chain: str = "base",
+        observed_at: datetime | None = None,
+        on_finding: Finding | None = None,
+    ):
         if not source:
             raise ValueError("FactBuilder requires a source key — provenance is not optional")
         self.source = source
         self.chain = chain
         self.observed_at = observed_at or utcnow()
+        #: Where a sanitisation finding is reported. Wire it to the owning
+        #: source's `diagnose` and a cleaned or hostile label announces itself;
+        #: leave it unset and the cleaning still happens, silently. Safety does
+        #: not depend on remembering this — only visibility does.
+        self.on_finding = on_finding
 
     # ── subject helpers ───────────────────────────────────────────────────
 
@@ -78,9 +98,43 @@ class FactBuilder:
         token: str | None = None,
         pair: list[str] | None = None,
     ) -> FactSubject:
+        """Build a subject, cleaning every field that a third party may have written.
+
+        **This is a chokepoint, and that is the point.** Four of this lane's
+        sources carry attacker-writable names — a peer vault's `symbol()`, a
+        permissionless Morpho market, a DefiLlama listing, an ERC-20 symbol
+        nobody vetted — and all four reach an LLM's prompt through here. Doing
+        the cleaning at each call site instead would work exactly until the
+        eleventh source forgot, which is the failure this lane's "adding a
+        source is one line" claim would otherwise invite.
+
+        Cleaning a first-party label costs nothing: `"aave-v3"` is unchanged by
+        every rule, so there is no reason to make the caller decide which of
+        their fields are foreign — a decision they would eventually get wrong.
+        """
         return FactSubject(
-            protocol=protocol, market=market, token=token, pair=pair, chain=self.chain
+            protocol=self._label(protocol, "protocol"),
+            market=self._label(market, "market"),
+            token=self._label(token, "token"),
+            pair=(
+                [cleaned for p in pair if (cleaned := self._label(p, "pair leg"))] or None
+                if pair
+                else None
+            ),
+            chain=self.chain,
         )
+
+    def _label(self, value: str | None, field: str) -> str | None:
+        """Clean one subject field and report anything worth knowing about it.
+
+        Returns `None` for a value that cleans to nothing. A name made entirely
+        of zero-width characters is *absent*, not blank — and an empty string
+        rendered in a decision feed reads as a real name that happens to look
+        like nothing, which is strictly worse than a missing field.
+        """
+        if value is None:
+            return None
+        return clean_and_report(value, field=field, on_finding=self.on_finding) or None
 
     # ── the general form ──────────────────────────────────────────────────
 

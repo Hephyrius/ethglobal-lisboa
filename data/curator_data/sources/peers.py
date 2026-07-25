@@ -90,6 +90,12 @@ MAX_PEERS: Final[int] = 8
 #: Lower than a market fact and deliberately so.
 PEER_CONFIDENCE: Final[float] = 0.6
 
+#: A peer's `symbol()` is the **most attacker-controlled string in this whole
+#: lane** — genesis takes a vault's name as free text, so this is not a name we
+#: are trusting, it is a name a stranger chose knowing an LLM would read it.
+#: It is bounded and reported by `FactBuilder.subject`, and the label is built
+#: address-first so a cap can only ever truncate the name, never the address.
+
 
 class PeerVaultSource(BaseSource):
     """How the other vaults on this deployment are doing."""
@@ -184,7 +190,7 @@ class PeerVaultSource(BaseSource):
                 f"{len(scored)} funded peers exist; showing the {MAX_PEERS} largest by assets"
             )
 
-        builder = FactBuilder(self.key, chain=self.settings.chain)
+        builder = FactBuilder(self.key, chain=self.settings.chain, on_finding=self.diagnose)
         facts: list[Fact] = []
         for _, address, reading in kept:
             facts.extend(self._facts_for(address, reading, builder))
@@ -247,7 +253,19 @@ class PeerVaultSource(BaseSource):
         return {"assets": scaled, "share_price": share_price, "symbol": symbol}
 
     def _facts_for(self, address: str, reading: dict, builder: FactBuilder) -> list[Fact]:
-        label = f"{reading['symbol']} {address[:10]}"
+        # ADDRESS FIRST, and the ordering is the whole defence. This label was
+        # `"{symbol} {address}"`, which put the one attacker-chosen part of it
+        # in front of the one trustworthy part - so a peer naming itself with
+        # 60 characters of anything pushed the address past the 64-character
+        # cap and off the end. The address is what lets a human check the vault
+        # on a block explorer; losing it to a long name is losing the only
+        # identity the peer did not choose for itself.
+        #
+        # Reversed, truncation can only ever eat the attacker's half, and no
+        # second cap is needed here - `builder.subject` is the one chokepoint,
+        # and it reports what it cleaned. A pre-clean at this call site would
+        # have to remember to report, and the first version of it did not.
+        label = f"{address[:10]} {reading['symbol']}"
         subject = builder.subject(protocol="curated-vault", market=label)
 
         facts = [

@@ -93,7 +93,7 @@ class GasSource(BaseSource):
         except RpcError as exc:
             raise RuntimeError(f"could not read gas price: {exc}") from exc
 
-        builder = FactBuilder(self.key, chain=self.settings.chain)
+        builder = FactBuilder(self.key, chain=self.settings.chain, on_finding=self.diagnose)
         subject = builder.subject(market="base gas")
         gwei = gas_wei / 1e9
 

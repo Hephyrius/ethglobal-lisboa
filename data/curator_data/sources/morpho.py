@@ -146,7 +146,7 @@ class MorphoSource(BaseSource):
         if items is None:
             return []
 
-        builder = FactBuilder(self.key, chain=self.settings.chain)
+        builder = FactBuilder(self.key, chain=self.settings.chain, on_finding=self.diagnose)
         facts: list[Fact] = []
         matched = 0
         #: pair -> deepest market for that pair. Morpho Blue permits many

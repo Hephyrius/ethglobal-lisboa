@@ -16,6 +16,8 @@ from abc import ABC, abstractmethod
 from curator_schema.models import Fact
 from curator_schema.ports import DataSource, DataSourceRegistry
 
+from .sanitize import MAX_LABEL_CHARS, clean_and_report, clean_message
+
 __all__ = ["DataSource", "DataSourceRegistry", "BaseSource"]
 
 
@@ -89,8 +91,13 @@ class BaseSource(ABC):
         Only for something that was supposed to work and did not. If you are
         reaching for this to explain a deliberate skip or a question the source
         was never able to answer, use `remark` — see below.
+
+        Cleaned on the way in. Messages routinely interpolate third-party text
+        — an HTTP body, a market name, a Polymarket question — and this channel
+        is rendered directly in the curator prompt, so it is the second place a
+        stranger's newline could fake prompt structure.
         """
-        self._notes.append(message)
+        self._notes.append(clean_message(message))
 
     def drain_notes(self) -> list[str]:
         """Return and clear notes. Called by the registry after each fetch."""
@@ -112,8 +119,11 @@ class BaseSource(ABC):
     # neither is a gap in the agent's view of the market.
 
     def remark(self, message: str) -> None:
-        """Record non-failure context, surfaced in `MarketSnapshot.notes`."""
-        self._remarks.append(message)
+        """Record non-failure context, surfaced in `MarketSnapshot.notes`.
+
+        Cleaned on the way in, for the same reason `note` is.
+        """
+        self._remarks.append(clean_message(message))
 
     def drain_remarks(self) -> list[str]:
         """Return and clear remarks. Called by the registry after each fetch."""
@@ -164,6 +174,24 @@ class BaseSource(ABC):
         """
         message = f"{subject}: {observation} - {consequence}"
         (self.note if failure else self.remark)(message)
+
+    # ── third-party text at a call site ───────────────────────────────────
+
+    def clean(self, value: str | None, *, field: str, limit: int = MAX_LABEL_CHARS) -> str:
+        """Clean a third-party string this source is about to put in a message.
+
+        `FactBuilder.subject` already covers everything that becomes a *fact
+        field*, so reach for this only for text interpolated into a `note` or
+        `remark` — a Polymarket question, an upstream error body. `note` and
+        `remark` strip invisibles and newlines from the whole message, but only
+        the call site knows *which part* is foreign, so only the call site can
+        bound that part without also truncating our own prose.
+
+        Use this rather than `sanitize.clean_label`, whose second return value
+        is easy to discard. Doing exactly that is how the first cut of this
+        removed a newline from a hostile vault name and reported it nowhere.
+        """
+        return clean_and_report(value, field=field, on_finding=self.diagnose, limit=limit)
 
     async def close(self) -> None:
         """Release held resources. Safe to call more than once."""

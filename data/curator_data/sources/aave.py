@@ -135,7 +135,7 @@ class AaveSource(BaseSource):
         data = await self._gateway.query(
             protocol.subgraph_id, RESERVES_QUERY, {"first": RESERVE_LIMIT}
         )
-        builder = FactBuilder(self.key, chain=protocol.chain)
+        builder = FactBuilder(self.key, chain=protocol.chain, on_finding=self.diagnose)
         facts: list[Fact] = []
         matched = 0
 

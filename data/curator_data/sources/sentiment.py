@@ -129,7 +129,7 @@ class SentimentSource(BaseSource):
                     f"a stale reading rather than current mood"
                 )
 
-        builder = FactBuilder(self.key, chain=self.settings.chain)
+        builder = FactBuilder(self.key, chain=self.settings.chain, on_finding=self.diagnose)
         classification = str(row.get("value_classification") or "").strip()
         return [
             builder.ratio(

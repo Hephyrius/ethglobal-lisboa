@@ -116,7 +116,7 @@ class ChainlinkSource(BaseSource):
 
     async def fetch(self, assets: list[str]) -> list[Fact]:
         wanted = {a.strip().upper() for a in assets if a and a.strip()}
-        builder = FactBuilder(self.key, chain=self.settings.chain)
+        builder = FactBuilder(self.key, chain=self.settings.chain, on_finding=self.diagnose)
 
         # USD-quoted feeds first: an ETH-quoted feed is an exchange RATE and
         # needs ETH/USD to become a price, so the order is load-bearing rather

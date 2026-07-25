@@ -93,6 +93,13 @@ SCAN_LIMIT = 100
 #: the snapshot stays readable.
 TOP_N = 6
 
+#: How much of a market question is quoted in the note. Longer than a label cap
+#: because the question is the whole value of this source - "will the Fed
+#: decrease interest rates by 50+ bps at the July 2026 meeting" needs its
+#: qualifiers to mean anything - and short enough that a market author cannot
+#: use the field as a paragraph.
+QUESTION_CHARS = 140
+
 #: Prediction markets are a third-party consensus rather than a measurement, so
 #: their facts carry lower confidence than an on-chain read - the same
 #: treatment `defillama` gets for the same reason.
@@ -185,7 +192,7 @@ class PredictionSource(BaseSource):
             return []
 
         relevant.sort(key=lambda row: -row[0])
-        builder = FactBuilder(self.key, chain=self.settings.chain)
+        builder = FactBuilder(self.key, chain=self.settings.chain, on_finding=self.diagnose)
         facts: list[Fact] = []
 
         for volume, question, probability, market in relevant[:TOP_N]:
@@ -203,9 +210,20 @@ class PredictionSource(BaseSource):
             # The slug alone does not say what was asked. Without the question
             # and the resolution date, a bare 0.751 is unreadable.
             ends = str(market.get("endDate") or "")[:10]
+            # The question and the outcome label are written by whoever created
+            # the market, and this note is rendered straight into the curator
+            # prompt. `BaseSource.remark` strips invisibles and newlines from
+            # every message, but only this call site knows *which part* of the
+            # sentence is foreign - so the cap belongs here, on the question
+            # alone, rather than on a message whose other 90 characters we
+            # wrote ourselves.
+            safe_question = self.clean(
+                question, field="market question", limit=QUESTION_CHARS
+            )
+            safe_outcome = self.clean(outcome, field="outcome label", limit=24)
             self.diagnose(
                 _slug(question),
-                f'"{question}" - {outcome} at {value:.0%}'
+                f'"{safe_question}" - {safe_outcome} at {value:.0%}'
                 + (f", resolving {ends}" if ends else ""),
                 f"a forward-looking market consensus with ${volume:,.0f} of 24h volume "
                 f"behind it, not a measurement",
