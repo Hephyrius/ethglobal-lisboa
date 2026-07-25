@@ -375,3 +375,7 @@ export type ExecutionStep = z.infer<typeof ExecutionStep>
 export type AgentAction = z.infer<typeof AgentAction>
 export type VaultState = z.infer<typeof VaultState>
 export type Holding = z.infer<typeof Holding>
+export type AllocationSlice = z.infer<typeof AllocationSlice>
+export type PerformancePoint = z.infer<typeof PerformancePoint>
+export type PerformanceSummary = z.infer<typeof PerformanceSummary>
+export type VaultPerformance = z.infer<typeof VaultPerformance>

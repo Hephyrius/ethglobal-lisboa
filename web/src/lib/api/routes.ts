@@ -6,6 +6,7 @@ import {
   GenesisFinalizeRequest,
   GenesisFinalizeResponse,
   Mandate,
+  VaultPerformance,
   VaultState,
 } from '@curator/schema'
 
@@ -62,6 +63,8 @@ export const routes = {
   vaultMandate: (address: string) => `/vault/${address}/mandate`,
   vaultDecisions: (address: string, limit = 20) => `/vault/${address}/decisions?limit=${limit}`,
   vaultTick: (address: string) => `/vault/${address}/tick`,
+  vaultPerformance: (address: string, window = 'all') =>
+    `/vault/${address}/performance?window=${window}`,
   health: () => '/health',
 } as const
 
@@ -72,6 +75,7 @@ export const schemas = {
   vaultMandate: { response: Mandate },
   vaultDecisions: { response: AgentActionList },
   vaultTick: { response: AgentAction },
+  vaultPerformance: { response: VaultPerformance },
   health: { response: AgentHealth },
   genesisSources: { response: GenesisSources },
 } as const

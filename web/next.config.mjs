@@ -7,6 +7,12 @@ const repoRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const nextConfig = {
   reactStrictMode: true,
 
+  // Lets a production build run without fighting a live `next dev` for
+  // `.next/trace`, which fails EPERM on Windows and reads as a code error when
+  // it is a file lock. `NEXT_DIST_DIR=.next-build pnpm build` verifies the tree
+  // while the demo stays up.
+  distDir: process.env.NEXT_DIST_DIR || '.next',
+
   // @curator/schema is published as raw TypeScript (main → src/index.ts) so the
   // zod mirror stays a single source of truth with no build step. Next has to
   // compile it rather than treat it as prebuilt node_modules.

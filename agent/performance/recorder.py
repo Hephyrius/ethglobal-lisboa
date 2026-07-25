@@ -6,26 +6,71 @@ and from the sampler in between, and both hand it the same `VaultState` the
 agent itself reasoned over. The chart and the agent therefore see identical
 numbers by construction rather than by agreement.
 
-## Why `share_price` is copied verbatim rather than recomputed
+## `share_price` is RESCALED here, and getting this wrong cost a 1e12 error
 
-`VaultState.share_price` comes from the vault's own `convertToAssets(1e18)` and
-carries the 6-decimal convention (request #27: a price of 1.0025 is `1002506`,
-not `1e18`). Recomputing it here from `total_assets / total_supply` would drop
-the virtual-share offset that ERC-4626 rounding depends on, and produce a curve
-that disagrees with the contract in the fourth decimal — the kind of discrepancy
-that is invisible until someone compares the chart to a withdrawal.
+There are two live conventions for "share price" in this system and they differ
+by exactly 10^12:
+
+| Source | Value for a price of 0.999653 | Convention |
+|---|---|---|
+| `VaultState.share_price` (`Web3VaultClient`) | `999653474600000000` | dimensionless ratio × 1e18 |
+| `convertToAssets(1e18)` (the contract, and the backfill) | `999653` | **base-asset units** |
+
+`PerformancePoint.share_price` is specified as the second — "assets per whole
+share, in BASE-ASSET decimals" (`performance.schema.json`). The first version of
+this file copied `VaultState.share_price` through verbatim, with a comment
+confidently asserting it already carried that convention. It does not.
+
+The result was a series where backfilled points read `999653` and live points
+read `999653474600000000`, and the vault page reported a **return of
+99,965,347,459,900%** on a vault that was down 3 bps. 10^18 / 10^6 = 10^12 —
+the same discrepancy `VaultStats.tsx` documents from the UI side and cross-lane
+request #12 raised from the schema side. It is not a new trap; it is the known
+one, walked into from a third direction.
+
+So: convert explicitly, from a named constant, with the arithmetic in one place.
+Not with a magnitude heuristic — "if it looks too big, divide" is how a real
+1000× move becomes a silent rescale.
 """
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Literal
 
 from curator_schema import AllocationSlice, PerformancePoint, VaultState
 
+from ..chain.vault_client import _SHARE_PRICE_SCALE
 from ..clock import utcnow
 
-__all__ = ["point_from_state"]
+__all__ = ["point_from_state", "share_price_in_asset_units"]
+
+log = logging.getLogger(__name__)
+
+
+def share_price_in_asset_units(state: VaultState) -> str | None:
+    """`VaultState.share_price` (1e18 ratio) → base-asset units.
+
+    `999653474600000000` with a 6-decimal asset becomes `999653`.
+
+    Returns None when the vault has no price to report, which is a real state —
+    before the first deposit `total_supply` is 0 and a share of nothing has no
+    price. Zero would be a claim that the share is worthless.
+    """
+    if state.share_price is None:
+        return None
+    try:
+        ratio = int(state.share_price)
+    except ValueError:
+        log.warning("unparseable share_price %r on %s", state.share_price, state.address)
+        return None
+    if ratio <= 0:
+        return None
+
+    # Multiply before dividing: the other order throws away every digit that
+    # matters, since the ratio is O(1e18) and the divisor is 1e18.
+    return str(ratio * (10**state.asset_decimals) // _SHARE_PRICE_SCALE)
 
 
 def point_from_state(
@@ -44,7 +89,7 @@ def point_from_state(
     return PerformancePoint(
         timestamp=at or utcnow(),
         block_number=state.block_number,
-        share_price=state.share_price,
+        share_price=share_price_in_asset_units(state),
         total_assets=state.total_assets,
         total_supply=state.total_supply,
         allocation=[
