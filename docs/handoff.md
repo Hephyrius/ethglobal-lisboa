@@ -350,3 +350,182 @@ lanes when you do.
 For a real network, set `DEPLOY_NETWORK`, `DEPLOYER_PRIVATE_KEY`, `AGENT_ADDRESS` and
 `GUARDIAN_ADDRESS` to funded, non-anvil values; `priceMaxAge` defaults to 3600 automatically. Then
 `./script/verify.sh <network>`.
+
+---
+
+## Lane C — `data/` · the market data layer
+
+**Status: MVP + phase 2 extensions complete.** Four sources live, 180 tests, no chain contention —
+this lane never writes to the chain, so nothing here can disturb the fork.
+
+### Run it
+
+```bash
+uv sync --all-extras                        # NOT --extra data; see gotchas
+uv run pytest data/tests -q                 # 180 tests, no network, no credentials
+uv run curator-data verify-live             # the live submission gate
+uv run curator-data snapshot --assets USDC,WETH
+uv run curator-data sources                 # what a mandate may grant
+uv run curator-data protocols               # what is configured
+```
+
+### What works, verified live
+
+| Source | Provides | Live status |
+|---|---|---|
+| `messari` | yield, tvl, utilization, liquidity | ✅ Moonwell. Uniswap V3 intermittent (indexer-side) |
+| `aave` | yield, tvl, utilization | ✅ Aave V3 Base, ~$175M USDC market |
+| `chainlink` | price | ✅ on-chain via the fork, no credential |
+| `token_api` | price | ✅ derived from executed dex swaps |
+
+A representative live snapshot:
+
+```
+moonwell   USDC   12.74% APY   $14.5M TVL   0.91 util
+aave-v3    USDC    3.41% APY  $174.9M TVL   0.84 util
+price WETH: $1,857.18  (via chainlink, token_api, spread 0.19%)
+```
+
+Two lending protocols merged from two independent sources, and **two mechanically independent price
+sources cross-validating** — an oracle read and executed swap prices agreeing to 0.19%. A wide
+spread between them is a real signal (stale oracle, manipulated pool, dislocated market) and is
+surfaced as `disagreement`.
+
+### Integration
+
+Lane B binds via `AGENT_DATA_REGISTRY=curator_data:build_registry` (already set). The instance form
+`curator_data.default:registry` also works. Both are pinned by tests.
+
+Full interface in [data/README.md](../data/README.md).
+
+### What is known-broken / unverified
+
+- **x402 has never completed a payment — the wallet is unfunded, and that is the only thing left.**
+  Verified against the live gateway that the payload format is correct and **the EIP-712 signature
+  validates**: the gateway's refusal is `invalid_exact_evm_insufficient_balance`. Send a few dollars
+  of USDC on real Base to `X402_PRIVATE_KEY` (`0x64D2…fBb7`) and it should settle at $0.01/query.
+  Enable with `X402_ENABLED=true`. It is off by default and falls back to the API key on any
+  failure, so it cannot break a demo.
+- **`uvx curator-mcp` does not work yet** — the packages are not on PyPI. `uv pip install
+  ./data/curator_mcp` works today from a clone (verified in a clean 3.10 venv outside the repo).
+  Publishing needs a token: [data/PUBLISHING.md](../data/PUBLISHING.md) has the verified commands.
+- **Uniswap V3's subgraph is intermittent** — the gateway returns `bad indexers` or times out at
+  ~20s. Not our code; it recovers on its own. Lending data does not depend on it.
+- **Prices only cover configured assets.** Chainlink feeds live in `sources/feeds.py`, token
+  addresses in `sources/tokens.py`. An unknown symbol produces a note naming the file to edit —
+  never a guessed address.
+
+### Gotchas that will cost you an hour
+
+- **`uv sync --extra data` PRUNES every other lane's packages** from the shared venv. It silently
+  uninstalled Lane B's `fastapi`/`web3` once. Always `uv sync --all-extras`.
+- **The Token API's free plan caps `limit` at 10.** `limit=20` returns a 403 that looks like an auth
+  failure but is a parameter complaint. `MAX_PAGE` pins it.
+- **`token-api.thegraph.com` does not resolve** — that host is named in The Graph's own docs. The
+  live host is `api.pinax.network/v1`. Do not "fix" the working default back to the broken one.
+- **The subgraph gateway returns HTTP 200 for auth failures**, with the error inside the GraphQL
+  `errors[]`. Status code alone will mislead you.
+- **The Token API's `price` field flips with swap direction** — `1858.02` one way, `0.0005` the
+  other. We compute from both legs by address instead; never read that field directly.
+- Tests are hermetic by design (`data/tests/conftest.py` strips credentials and disables `.env`), so
+  they behave identically on a fresh macOS clone. Live checks live in `verify-live`, deliberately.
+
+---
+
+## Lane D — `venues/` · Uniswap (taker) and 1inch Aqua/SwapVM (maker)
+
+**Status: MVP complete, claim released.** Both venues implement the frozen `Venue` port. 59 Python
+tests + 25 Foundry tests green; 1 Foundry test committed **skipped** on purpose (see the open
+question below). Lane B is already bound to this lane with zero code change on either side.
+
+### Run it
+
+```sh
+uv sync --all-extras                      # NOT --extra venues: that prunes other lanes' packages
+uv run pytest venues/tests                # offline, green with no credentials
+uv run pytest venues/tests -m live        # real Uniswap API + a live RPC
+```
+
+Solidity (needs Foundry, in `wsl -d Ubuntu-24.04`; native on macOS):
+
+```sh
+cd venues/aqua/solidity
+pnpm install --ignore-workspace           # the flag is REQUIRED — see below
+forge test                                # 13 encoding tests, offline
+forge test --fork-url $BASE_RPC_URL       # + 12 against the REAL deployed Aqua
+sh build.sh                               # recompile + republish program_builder.json
+```
+
+**You do not need Foundry to use this lane.** The compiled artifact is committed at
+`venues/aqua/program_builder.json`, so Python works on a fresh clone with no toolchain. Verified by
+cloning and building a plan with nothing installed.
+
+### What is proven, and against what
+
+Everything below ran against the **real deployed Aqua and SwapVM contracts** on a Base mainnet fork,
+not mocks:
+
+- `ship()` accepted by the live registry; the strategy hash it returns equals the one we compute
+  off-chain, so a later `dock()` targets the right position
+- **`ship()` moves zero tokens** — the Pattern 1 custody invariant, asserted against the contract
+  rather than against our description of it
+- virtual balances match the shipped amounts; `dock()` clears them and is equally capital-neutral
+- a **contract maker** works end to end (the vault has no private key — this is what
+  `useAquaInsteadOfSignature = true` is for), with balances credited to the vault rather than to the
+  agent EOA that authorised the call
+- the full Uniswap path: live `/quote` → `/swap` → a schema-valid three-step `ExecutionPlan`
+
+### ⚠️ The one open question — read before claiming anything about SwapVM
+
+**We cannot yet claim the strategy prices correctly when executed.** `Aqua.ship()` stores the
+strategy as *opaque bytes* and never runs it; the first execution is a taker fill.
+
+`@1inch/swap-vm` was originally unpinned and resolved to the default branch, which numbers opcodes
+completely differently from the deployed contract (banked hex enum vs positions in
+`AquaOpcodes._opcodes()` — `XYCSwap` is `0x50` there and `17` on chain). Now pinned to **v1.0.1**,
+and the builder derives every opcode from 1inch's own table via function pointers, so no opcode
+number appears in our source.
+
+The deployed table still does not match v1.0.1 exactly: it reads index 20 as `Decay` where v1.0.1
+puts `Salt`, and no probed index produced a real constant-product quote. Full evidence and the next
+step are in the header of `venues/aqua/solidity/test/AquaTakerFillFork.t.sol`, which is committed
+and `vm.skip`ped rather than passing on a claim we cannot support.
+
+**Next step: ask 1inch at the venue for the exact deployed source or ABI.** Five minutes for them,
+hours of probing otherwise. Do **not** guess the indices — a wrong opcode ships successfully, looks
+healthy, and misprices on fill, which is strictly worse than shipping no position.
+
+Safe phrasing for the submission: *"the vault ships and docks real Aqua positions in SwapVM/Aqua
+mode, verified on-chain"* — not *"the vault market-makes"*.
+
+### Traps that will cost you time
+
+- **`pnpm install` here must use `--ignore-workspace`.** Without it pnpm walks up, finds the repo
+  root workspace, and installs the *web app's* dependencies into this directory while ignoring the
+  local `package.json`. There is no `.npmrc` key for it. `build.sh` already passes the flag.
+- **`uv sync --extra venues` prunes every other lane's packages** from the shared venv. Always
+  `--all-extras`.
+- **An Aqua ship with no approvals does not revert** — it produces a position that looks healthy in
+  every observable way and is silently never fillable, because shipping moves nothing and the
+  allowance is only consumed on fill. Never drop or reorder the approval steps. This is the only
+  place in the lane where a missing step fails quietly (cross-lane request #17).
+- **The allowlist is read from `deployments/base-fork.json`**, not hardcoded — the vault's
+  `allowedTargets()` is guardian-mutable. Point `DEPLOYMENTS_FILE` at a mainnet manifest for the
+  mainnet run.
+- **The public `https://mainnet.base.org` supports `eth_call` state overrides**, which is why the
+  program builder needs no deployment and no funded key. If you swap in an endpoint that lacks
+  override support, set `AQUA_PROGRAM_BUILDER_ADDRESS` to a deployed builder instead.
+- Uniswap's API rejects `routingPreference: CLASSIC` while echoing `routing: CLASSIC` back in
+  successful responses, and returns `swap.value` hex-encoded while every sibling integer is decimal.
+  Both are handled; both are written up in `FEEDBACK.md`.
+
+### Outstanding
+
+| Item | Owner |
+|---|---|
+| **Uniswap Developer Feedback Form** — `FEEDBACK.md` is written and substantive; the *form* is a separate hard requirement | **a human** |
+| Taker fill / "the vault earns" demo | blocked on the deployed opcode table above |
+| Surfacing SwapVM program parameters in the UI | Lane E, optional; ask me for a decode helper |
+
+Full interface: [venues/README.md](../venues/README.md). Plan and DoD:
+[plans/2026-07-25-lane-d-venues.md](../plans/2026-07-25-lane-d-venues.md).
