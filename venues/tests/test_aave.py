@@ -28,6 +28,33 @@ VAULT = "0x0E2c0e50E67B96C9C401C94e111a3DBD00DEB5d1"
 ABAS_USDC = ATOKENS[addresses.USDC.lower()]
 
 
+@pytest.fixture
+def registered(monkeypatch):
+    """A deployment where the aToken *is* a valued, allowlisted target.
+
+    Constructed rather than borrowed from whatever is deployed right now. These
+    tests assert how a plan is *built* — approval ordering, `onBehalfOf`, the
+    max sentinel — and none of that is a fact about the current fork. Reading
+    the live allowlist made them fail the moment Lane A redeployed and
+    `expand-universe.sh` had not been re-run, which reports a deployment gap as
+    seven broken venue tests and buries the one test that actually means it.
+
+    The same mistake, in the same shape, as the Morpho tests that broke on Lane
+    F's success in Wave 2 — fixed there with an explicit fixture and not
+    carried across to here until it bit.
+
+    `test_the_atoken_is_on_the_allowlist_so_a_new_vault_can_hold_it`
+    deliberately does **not** use this: reconciling against the real deployment
+    is that test's entire job, and it is the alarm this fixture must not
+    silence.
+    """
+    monkeypatch.setattr(
+        addresses,
+        "allowlist",
+        lambda: frozenset(addresses.FALLBACK_ALLOWLIST) | {ABAS_USDC.lower()},
+    )
+
+
 def _vault(usdc: int = 10_000_000_000, weth: int = 0) -> VaultState:
     holdings = [
         Holding(
@@ -75,7 +102,7 @@ def _uint_arg(calldata: str, index: int) -> int:
 # ── supply ────────────────────────────────────────────────────────────────
 
 
-async def test_a_supply_approves_the_pool_then_calls_supply():
+async def test_a_supply_approves_the_pool_then_calls_supply(registered):
     plan = await AaveVenue().plan(
         SupplyIntent(asset="USDC", pct_of_holdings=0.5), _vault()
     )
@@ -91,7 +118,7 @@ async def test_a_supply_approves_the_pool_then_calls_supply():
     assert supply.calldata.startswith("0x" + selector(SUPPLY).hex())
 
 
-async def test_on_behalf_of_is_always_the_vault():
+async def test_on_behalf_of_is_always_the_vault(registered):
     """The whole trust model in one argument.
 
     Aave credits the aToken to `onBehalfOf`. Anything but the vault hands the
@@ -107,7 +134,7 @@ async def test_on_behalf_of_is_always_the_vault():
     assert _uint_arg(supply.calldata, 3) == 0, "referralCode"
 
 
-async def test_a_percentage_is_taken_of_the_vaults_actual_balance():
+async def test_a_percentage_is_taken_of_the_vaults_actual_balance(registered):
     plan = await AaveVenue().plan(
         SupplyIntent(asset="USDC", pct_of_holdings=0.25), _vault(usdc=8_000_000_000)
     )
@@ -124,7 +151,7 @@ async def test_a_supply_with_neither_amount_nor_percentage_is_refused():
         await AaveVenue().plan(SupplyIntent(asset="USDC"), _vault())
 
 
-async def test_a_supply_reports_zero_slippage_rather_than_none():
+async def test_a_supply_reports_zero_slippage_rather_than_none(registered):
     """A supply is not a trade — no route, no price impact, no counterparty.
 
     Zero says that positively. None would leave the mandate's slippage ceiling
@@ -164,7 +191,7 @@ async def test_an_asset_with_no_recorded_atoken_is_refused_by_name():
 # ── withdraw ──────────────────────────────────────────────────────────────
 
 
-async def test_a_full_withdrawal_uses_the_max_sentinel():
+async def test_a_full_withdrawal_uses_the_max_sentinel(registered):
     """An aToken balance grows every block.
 
     Any concrete amount computed off-chain is already stale by the time the
@@ -180,7 +207,7 @@ async def test_a_full_withdrawal_uses_the_max_sentinel():
     assert _uint_arg(step.calldata, 1) == UINT256_MAX
 
 
-async def test_a_withdrawal_returns_the_asset_to_the_vault():
+async def test_a_withdrawal_returns_the_asset_to_the_vault(registered):
     plan = await AaveVenue().plan(WithdrawIntent(asset="USDC", amount="500000"), _vault())
     step = plan.steps[0]
 
