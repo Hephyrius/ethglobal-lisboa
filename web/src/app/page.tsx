@@ -1,31 +1,38 @@
 import Link from 'next/link'
+import { SiegeMotif } from '@/components/hero/SiegeMotif'
 import { PortfolioStrip } from '@/components/portfolio/PortfolioStrip'
 import { VaultList } from '@/components/vault/VaultList'
 
 export default function HomePage() {
   return (
     <div className="space-y-14">
-      <section className="border-b border-line pb-12 pt-4">
-        <p className="label">ETHGlobal Lisbon 2026</p>
-        <h1 className="mt-4 max-w-3xl text-4xl leading-[1.15] tracking-tight text-ink sm:text-5xl">
-          {/* nowrap so the compound never splits across lines at its hyphen,
-              which at this size reads as "Agent-" hanging on the first line. */}
-          Curator: Design and Deploy <span className="whitespace-nowrap">Agent-Curated</span> Vaults
-        </h1>
-        <p className="mt-5 max-w-2xl text-[0.95rem] leading-relaxed text-muted">
-          You write the mandate. Your Curator Agent does the rest, reading live markets, forming a
-          thesis, and signing its own transactions out of an ERC-4626 vault. After genesis, no one
-          intervenes, including you. What replaces control is visibility: the data it consulted, the
-          reasoning it produced, and the transaction it sent, all in the open.
-        </p>
+      <section className="relative overflow-hidden border-b border-line pb-12 pt-4">
+        <SiegeMotif />
+        {/* Above the motif, and opaque to it: the figure sits behind the column
+            but the copy must never be read through a line. */}
+        <div className="relative">
+          <p className="label">ETHGlobal Lisbon 2026</p>
+          <h1 className="mt-4 max-w-3xl text-4xl leading-[1.15] tracking-tight text-ink sm:text-5xl">
+            {/* nowrap so the compound never splits across lines at its hyphen,
+                which at this size reads as "Agent-" hanging on the first line. */}
+            Curator: Design and Deploy <span className="whitespace-nowrap">Agent-Curated</span>{' '}
+            Vaults
+          </h1>
+          <p className="mt-5 max-w-2xl text-[0.95rem] leading-relaxed text-muted">
+            You write the mandate. Your Curator Agent does the rest, reading live markets, forming a
+            thesis, and signing its own transactions out of an ERC-4626 vault. After genesis, no one
+            intervenes, including you. What replaces control is visibility: the data it consulted,
+            the reasoning it produced, and the transaction it sent, all in the open.
+          </p>
 
-        <div className="mt-8 flex flex-wrap items-center gap-4">
-          <Link
-            href="/create"
-            className="inline-flex h-9 items-center rounded bg-agent px-5 text-sm font-medium text-white transition-colors hover:bg-agent/90"
-          >
-            Create a vault
-          </Link>
+          <div className="mt-8 flex flex-wrap items-center gap-4">
+            <Link
+              href="/create"
+              className="inline-flex h-9 items-center rounded bg-agent px-5 text-sm font-medium text-white transition-colors hover:bg-agent/90"
+            >
+              Create a vault
+            </Link>
+          </div>
         </div>
       </section>
 
