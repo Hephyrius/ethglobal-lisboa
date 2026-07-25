@@ -180,13 +180,54 @@ All optional. Defaults give a working fixture-mode server.
 | `AGENT_DATA_REGISTRY` | — | `module:attribute` for Lane C's registry, e.g. `data.registry:registry` |
 | `AGENT_VENUE_REGISTRY` | — | `module:attribute` for Lane D's venues |
 | `AGENT_CORS_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | Comma-separated dApp origins |
-| `MODEL_NAME` | `qwen2.5:14b-instruct` | Served model |
-| `AGENT_MODEL_BACKEND` | `ollama` | `ollama` \| `vllm` |
+| `XAI_API_KEY` | — | **Presence selects the Grok backend.** Unset ⇒ local Ollama, so a fresh clone still runs. |
+| `XAI_MODEL` | `grok-4.20-0309-non-reasoning` | Cheapest **per decision** — see below |
+| `XAI_BASE_URL` | `https://api.x.ai/v1` | xAI's OpenAI-compatible endpoint |
+| `MODEL_NAME` | `qwen2.5:3b-instruct-q4_K_M` | Ollama/vLLM model. **Not** used by Grok — the namespaces are disjoint. |
+| `AGENT_MODEL_BACKEND` | auto | `grok` \| `ollama` \| `vllm`. Explicit always wins over the credential heuristic. |
 | `OLLAMA_BASE_URL` | `http://localhost:11434/v1` | OpenAI-compatible endpoint |
 | `AGENT_MAX_VALIDATION_RETRIES` | `3` | Attempts before a cycle is recorded `rejected` |
 | `ANVIL_RPC_URL` | `http://localhost:8540` | Chain endpoint |
 | `AGENT_PRIVATE_KEY` | — | The curator's key. Required in live mode. |
 | `AGENT_STATE_DIR` | `.agent-state/` | Persisted mandates and action journals (gitignored) |
+
+### Which model, and what it costs
+
+**Grok when `XAI_API_KEY` is set, local Ollama when it is not.** Unset the key and everything
+still runs with no credential and no network — that path is not deprecated, it is the fallback.
+
+This reverses the master plan's local-first decision, for a measured reason. The 3B **cannot size
+a trade in the right direction under correction**: two reproducible three-attempt exhaustions on the
+demo vault, identical both times — wrong direction, the same wrong direction after being told
+explicitly to swap, then a 100% liquidation that three constraint layers had to catch. Grok returned
+a schema-valid `supply` into a lending venue on the first attempt, naming the idle capital it was
+deploying, in 2.1 seconds.
+
+`XAI_MODEL` is the cheapest **per decision**, which is *not* the cheapest per token. One real
+curator prompt through each, billed by xAI's own `cost_in_usd_ticks`:
+
+| model | $/decision | latency | reasoning tokens | facts cited |
+|---|---|---|---|---|
+| **`grok-4.20-0309-non-reasoning`** | **$0.0015** | **2.3s** | 0 | 5–6 |
+| `grok-build-0.1` | $0.0216 | 60.8s | 10,195 | 1 |
+| `grok-4.3` (`reasoning_effort: low`) | $0.0027 | 9.2s | 707 | 0 |
+
+`grok-build-0.1` has the **lower** per-token price ($1.00/M vs $1.25/M) and costs **14× more per
+decision**, because a reasoning model bills its reasoning as output — it spent 10,195 tokens
+thinking to emit 267. It also rejects `reasoning_effort` outright, so it cannot be turned down.
+No tradeoff was taken: the chosen model is simultaneously the cheapest, the fastest, and the one
+citing the most facts.
+
+At $0.0015 a decision, a thousand ticks costs $1.50. `$0.0015` is the cached steady state and the
+honest figure to quote; the first call on a cold cache was $0.0034, after which 2,112 of 2,133
+prompt tokens hit cache at a fifth of the input rate. **Caching is automatic but rewards a stable
+system prompt** — churning it re-prices every tick at the uncached rate.
+
+> Structured output on this backend is genuine `strict: true` JSON-Schema-guided decoding, verified
+> live rather than inferred from the OpenAI-compatibility claim. That puts it in vLLM's class rather
+> than Ollama's and removes most layer-1/2 failures. It removes **none** of layers 3–6 — a grammar
+> guarantees a well-formed decision and says nothing about whether the venue is granted or the trade
+> closes the gap it claims to.
 
 ---
 
@@ -379,7 +420,7 @@ clock.py             UTC-with-Z timestamps — the Python→TS format trap, in o
 fixtures.py          typed access to packages/schema/fixtures
 model/
   openai_compat.py   one HTTP client for every OpenAI-compatible endpoint
-  backends/          ollama · vllm · scripted (tests) — one line each in the table
+  backends/          grok · ollama · vllm · scripted (tests) — one line each in the table
   extraction.py      recovering JSON from fences, prose and <think> blocks
   validation.py      * six-layer validation + reject-and-retry
   prompts/           curator and genesis prompts, kept out of the calling code

@@ -13,17 +13,55 @@ from collections.abc import Callable
 from typing import Any
 
 from ...config import Settings
+from .grok import GrokBackend
 from .ollama import OllamaBackend
 from .scripted import ScriptedBackend
 from .vllm import VLLMBackend
 
-__all__ = ["BACKENDS", "build_backend", "OllamaBackend", "VLLMBackend", "ScriptedBackend"]
+__all__ = [
+    "BACKENDS",
+    "build_backend",
+    "GrokBackend",
+    "OllamaBackend",
+    "VLLMBackend",
+    "ScriptedBackend",
+]
 
 
 def _ollama(settings: Settings) -> OllamaBackend:
     return OllamaBackend(
         base_url=settings.ollama_base_url,
         model=settings.model_name,
+        timeout=settings.model_timeout_s,
+    )
+
+
+def _grok(settings: Settings) -> GrokBackend | OllamaBackend:
+    """xAI, or local Ollama when there is no key to reach it with.
+
+    The fallback is here rather than at the call site so that "Grok unless it is
+    unavailable" is expressed once. A missing key is the *expected* state on a
+    fresh clone and for anyone who never signed up — it is not a
+    misconfiguration, so it must not be an error.
+
+    It is logged at WARNING rather than INFO because the two backends are not
+    interchangeable: this one silently changes which model authored every
+    decision in the feed, and finding that out from a log line beats finding it
+    out from the results.
+    """
+    if not settings.xai_api_key:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "XAI_API_KEY is not set, so the grok backend cannot be built; "
+            "falling back to local ollama with %s.",
+            settings.model_name,
+        )
+        return _ollama(settings)
+    return GrokBackend(
+        base_url=settings.xai_base_url,
+        model=settings.xai_model,
+        api_key=settings.xai_api_key,
         timeout=settings.model_timeout_s,
     )
 
@@ -41,6 +79,7 @@ def _vllm(settings: Settings) -> VLLMBackend:
 #: by configuration. Nothing should be able to put a canned model in front of a
 #: live vault by setting an environment variable.
 BACKENDS: dict[str, Callable[[Settings], Any]] = {
+    "grok": _grok,
     "ollama": _ollama,
     "vllm": _vllm,
 }

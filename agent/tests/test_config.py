@@ -25,6 +25,8 @@ DEFAULTED_FIELDS = [
     "model_name",
     "ollama_base_url",
     "vllm_base_url",
+    "xai_base_url",
+    "xai_model",
     "model_timeout_s",
     "max_validation_retries",
     "rpc_url",
@@ -43,6 +45,14 @@ def clean_env(monkeypatch):
         "MODEL_NAME",
         "OLLAMA_BASE_URL",
         "VLLM_BASE_URL",
+        # `model_backend` is credential-driven: a key present means Grok. Without
+        # these three the fixture is not actually clean — `.env` is loaded at
+        # import, so the real key leaks in and `settings()` resolves to grok
+        # while `Settings()` still says ollama. That read as the drift bug this
+        # file exists to catch, when the fixture was simply incomplete.
+        "XAI_API_KEY",
+        "XAI_MODEL",
+        "XAI_BASE_URL",
         "AGENT_MODEL_TIMEOUT_S",
         "AGENT_MAX_VALIDATION_RETRIES",
         "ANVIL_RPC_URL",
@@ -70,6 +80,37 @@ def test_field_defaults_and_resolved_defaults_agree(clean_env, field):
 
 
 # ── the settings that decide whether a demo works ─────────────────────────
+
+
+def test_the_credential_selects_the_backend(clean_env, monkeypatch):
+    """Grok when there is a key, local Ollama when there is not.
+
+    Not covered by the drift test above, which asserts the *unset* case only.
+    This is the rule an operator stated, so it is worth pinning: the failure
+    mode is silent, and a run that quietly used a different model than you
+    believe is one whose decision feed you cannot interpret.
+    """
+    monkeypatch.setenv("XAI_API_KEY", "k")
+    settings.cache_clear()
+    assert settings().model_backend == "grok"
+    assert settings().resolved_model_name() == Settings().xai_model
+
+    monkeypatch.delenv("XAI_API_KEY")
+    settings.cache_clear()
+    assert settings().model_backend == "ollama"
+    assert settings().resolved_model_name() == Settings().model_name
+
+
+def test_an_explicit_backend_outranks_the_credential(clean_env, monkeypatch):
+    """Naming a backend wins even when a key is present.
+
+    Load-bearing for the model bake-off: comparing candidates requires that
+    asking for one gets you that one, never a substitution.
+    """
+    monkeypatch.setenv("XAI_API_KEY", "k")
+    monkeypatch.setenv("AGENT_MODEL_BACKEND", "ollama")
+    settings.cache_clear()
+    assert settings().model_backend == "ollama"
 
 
 def test_the_default_mode_is_fixture(clean_env):

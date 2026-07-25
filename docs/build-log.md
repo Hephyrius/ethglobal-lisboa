@@ -8,6 +8,81 @@ the hackathon window.
 
 ---
 
+## 2026-07-25 — Grok replaces the 3B, and the cheapest model is not the cheapest model
+
+**What changed.** A `grok` backend (`agent/model/backends/grok.py`), selected by default when
+`XAI_API_KEY` is present and falling back to local Ollama when it is not. Operator's instruction.
+948 tests pass; 13 new ones pin the selection rules.
+
+**Why, measured rather than argued.** The local 3B **cannot size a trade in the right direction
+under correction.** Observed live on the demo vault, twice, deterministically identical: attempt 1
+proposes selling the underweight asset; attempt 2 proposes the same trade *after* being told in
+plain language to swap the other way; attempt 3 over-corrects into a 100% single-asset liquidation
+that the cash floor, the position ceiling and the projected-outcome check all had to catch. Three
+retries exhausted, no trade, book unmoved — so the next tick saw the same snapshot and did it again.
+The vault sat in a stable failure loop and the feed showed an agent that only ever refuses.
+
+Grok, on the same fixture prompt, returned a schema-valid `enter`/`supply` into a lending venue on
+the **first** attempt, having identified the idle capital itself — *"~50% or 17.5k is above the 20%
+floor and idle, earning 0"* — and noting it was passing up Morpho at 5.87% because that venue was
+not permitted. That is the Wave 2 §B1 behaviour the plan allocates a whole lane to, obtained by
+changing one dependency.
+
+**The finding worth keeping: cheapest per token is not cheapest per decision.** The operator asked
+for the cheapest model, and the obvious reading is wrong. `GET /v1/language-models` carries
+per-model pricing, and `grok-build-0.1` is the floor at $1.00/M input against $1.25/M for
+everything else. Billed on one real curator prompt via xAI's own `cost_in_usd_ticks`:
+
+| model | $/decision | latency | reasoning tokens | facts cited |
+|---|---|---|---|---|
+| **grok-4.20-0309-non-reasoning** | **$0.0015** | **2.3s** | 0 | 5–6 |
+| grok-build-0.1 | $0.0216 | 60.8s | 10,195 | 1 |
+| grok-4.3 (`reasoning_effort: low`) | $0.0027 | 9.2s | 707 | 0 |
+
+The per-token-cheapest option costs **14× more per decision**, because a reasoning model bills its
+reasoning as output: it spent 10,195 tokens thinking in order to emit 267. It is also 26× slower,
+which disqualifies it independently of price — a 60-second tick cannot be demoed. Turning the
+reasoning down is not available: it answers `reasoning_effort` with *"Model grok-build-0.1 does not
+support parameter reasoning_effort"*, so that is a closed door rather than an untried one. No
+tradeoff was taken in the end — the chosen model is simultaneously the cheapest, the fastest, and
+the one citing the most facts.
+
+**Alternatives rejected.** Keeping the 3B and strengthening the prompt: tried in Wave 1 for the Aqua
+ship, three attempts, and the model wrote *"the current allocation of 50.0% USDC and 50.0% WETH does
+not match the target allocations of 50.0% USDC and 50.0% WETH"* — that is not a prompting problem. A
+larger local model: generation here is memory-bandwidth-bound, so a 14B is ~10 minutes a tick.
+Hosted-but-bigger (`grok-4.5`, $2.00/M): nothing measured suggests the decision quality needs it.
+
+**Three implementation details that are each a way to be quietly wrong.**
+
+**`XAI_MODEL` is a separate field from `MODEL_NAME`.** The namespaces are disjoint and `.env`
+already sets `MODEL_NAME` to an Ollama tag — one variable serving both backends would have sent
+`qwen2.5:3b-instruct-q4_K_M` to xAI and 404'd on the first tick.
+
+**An explicit `AGENT_MODEL_BACKEND` outranks the credential heuristic**, including when the named
+backend's credential is missing. Silently substituting a different model than the one someone named
+is how a bake-off reports the wrong winner.
+
+**`test_config.py`'s `clean_env` fixture was incomplete, not wrong.** It cleared `AGENT_*`/`MODEL_*`
+but not `XAI_API_KEY`, and `.env` loads at import — so the real key leaked in, `settings()` resolved
+to grok while `Settings()` still said ollama, and the drift test failed. That test exists because
+`MODEL_NAME` once sat on a 14B in `_build()` after the field default moved, so the fix was to
+complete the fixture rather than exempt the field: with a genuinely clean environment the invariant
+still holds, because no key means ollama means the declared default.
+
+**Also fixed in passing:** `agent/README.md` documented `MODEL_NAME` as `qwen2.5:14b-instruct` — a
+model that is not pulled and that nothing uses. Request #49(b) reported it and it was still open; a
+fresh clone following it downloads ~9 GB it does not need, then fails its first tick with
+`model not found`.
+
+**Caveat, stated plainly.** The quality comparison is n=1 per model on one fixture snapshot. Cost
+and latency are structural — a non-reasoning model emits zero reasoning tokens by construction — but
+"cites more facts" is suggestive, not established. Lane F's bake-off is still worth running, and it
+now has a reproducible hard case: the direction-and-magnitude failure above has an unambiguous right
+answer and the 3B fails it identically every time.
+
+---
+
 ## 2026-07-25 — Lane B: an FYI that turned out to be the most dangerous row in the table
 
 Lane C's #65 was marked *"(FYI — nothing needed)"* for this lane. It reported that wstETH, cbETH and

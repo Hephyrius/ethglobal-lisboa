@@ -67,6 +67,11 @@ class Settings:
     mode: str = "fixture"
 
     # ── model layer ───────────────────────────────────────────────────────
+    #: The dataclass default stays "ollama" so a directly-constructed
+    #: `Settings()` behaves exactly as it always has. **Auto-selection lives in
+    #: `_build()`**, which is the only place that can see the environment: with
+    #: `XAI_API_KEY` present the resolved backend is "grok", without it
+    #: "ollama". `AGENT_MODEL_BACKEND` overrides both.
     model_backend: str = "ollama"
     #: Measured on the build machine (i5-8265U, no GPU, DDR4-2400): this model
     #: produces a validated decision in ~40s with zero retries across repeated
@@ -76,6 +81,31 @@ class Settings:
     model_name: str = "qwen2.5:3b-instruct-q4_K_M"
     ollama_base_url: str = "http://localhost:11434/v1"
     vllm_base_url: str = "http://localhost:8000/v1"
+    #: xAI. Its model ids share no namespace with Ollama's, which is why this is
+    #: **not** `model_name`: `.env` already sets `MODEL_NAME` to an Ollama tag,
+    #: so a single variable serving both backends would send
+    #: `qwen2.5:3b-instruct-q4_K_M` to xAI and 404 on the first tick. Two
+    #: disjoint namespaces get two variables.
+    xai_base_url: str = "https://api.x.ai/v1"
+    #: The cheapest model **per decision**, which is not the cheapest per token.
+    #: Measured on one real curator prompt, billed by xAI's own
+    #: `cost_in_usd_ticks`:
+    #:
+    #:   grok-build-0.1                   $0.0216   60.8s   10,195 reasoning
+    #:   grok-4.20-0309-non-reasoning     $0.0015    2.3s        0
+    #:   grok-4.3 (reasoning_effort low)  $0.0027    9.2s      707
+    #:
+    #: `grok-build-0.1` has the lowest per-token price ($1.00/M vs $1.25/M) and
+    #: costs **14x more per decision**, because a reasoning model bills its
+    #: reasoning as output and spent 10,195 tokens thinking to emit 267 — and it
+    #: rejects `reasoning_effort`, so it cannot be turned down. The chosen model
+    #: is simultaneously the cheapest, the fastest and the one citing the most
+    #: facts. $0.0015 is the cached steady state; the cold first call was
+    #: $0.0034.
+    xai_model: str = "grok-4.20-0309-non-reasoning"
+    #: Presence of this key is what selects the Grok backend by default. Absent
+    #: means local Ollama, so a fresh clone with no credential still runs.
+    xai_api_key: str | None = None
     #: Generous on purpose. Ollama evicts an idle model after ~5 minutes, so the
     #: first tick after a quiet spell pays a ~2 GB reload from disk on top of
     #: inference. Measured: a warm decision is ~33s, a cold one blew through a
@@ -123,7 +153,19 @@ class Settings:
         return self.mode == "live"
 
     def model_base_url(self) -> str:
+        if self.model_backend == "grok":
+            return self.xai_base_url
         return self.vllm_base_url if self.model_backend == "vllm" else self.ollama_base_url
+
+    def resolved_model_name(self) -> str:
+        """The model id to send, for whichever backend resolved.
+
+        `model_name` is the Ollama/vLLM tag and `xai_model` is the xAI id; they
+        share no namespace. Callers that just want "what model will actually be
+        asked" — health output, the bench harness, log lines — use this rather
+        than picking the right field themselves and eventually picking wrong.
+        """
+        return self.xai_model if self.model_backend == "grok" else self.model_name
 
 
 def _build() -> Settings:
@@ -139,12 +181,31 @@ def _build() -> Settings:
     mode = _env("AGENT_MODE", d.mode).lower()
     if mode not in {"fixture", "live"}:
         mode = "fixture"
+
+    # Backend selection, in precedence order. An explicit AGENT_MODEL_BACKEND
+    # always wins — including when it names a backend whose credential is
+    # missing, because silently substituting a different model than the one
+    # someone named is how a benchmark run reports the wrong winner.
+    # Otherwise the credential decides: a key means Grok, no key means local
+    # Ollama, so a fresh clone with no credentials still runs end to end.
+    xai_api_key = _env_or_none("XAI_API_KEY")
+    explicit_backend = _env_or_none("AGENT_MODEL_BACKEND")
+    if explicit_backend:
+        model_backend = explicit_backend.lower()
+    elif xai_api_key:
+        model_backend = "grok"
+    else:
+        model_backend = d.model_backend
+
     return Settings(
         mode=mode,
-        model_backend=_env("AGENT_MODEL_BACKEND", d.model_backend).lower(),
+        model_backend=model_backend,
         model_name=_env("MODEL_NAME", d.model_name),
         ollama_base_url=_env("OLLAMA_BASE_URL", d.ollama_base_url),
         vllm_base_url=_env("VLLM_BASE_URL", d.vllm_base_url),
+        xai_base_url=_env("XAI_BASE_URL", d.xai_base_url),
+        xai_model=_env("XAI_MODEL", d.xai_model),
+        xai_api_key=xai_api_key,
         model_timeout_s=_env_float("AGENT_MODEL_TIMEOUT_S", d.model_timeout_s),
         max_validation_retries=_env_int("AGENT_MAX_VALIDATION_RETRIES", d.max_validation_retries),
         data_registry_ref=_env_or_none("AGENT_DATA_REGISTRY"),
