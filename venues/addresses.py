@@ -64,6 +64,17 @@ CBBTC: Final[str] = "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf"
 DAI: Final[str] = "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb"
 AERO: Final[str] = "0x940181a94A35A4569E4529A3CDfB74e38FD98631"
 
+# ── Aave v3 ───────────────────────────────────────────────────────────────
+#
+# Mirrored here (rather than only in `aave/markets.py`) because the fallback
+# allowlist below has to name them, and importing a venue submodule from the
+# lane's shared address table would invert the dependency. `markets.py` remains
+# the place they are documented and verified; these must agree, and
+# `test_aave.py` checks that they do.
+AAVE_V3_POOL: Final[str] = "0xA238Dd80C259a72e81d7e4664a9801593F98d1c5"
+ABAS_USDC: Final[str] = "0x4e65fE4DbA92790696d040ac24Aa414708F5c0AB"
+ABAS_WETH: Final[str] = "0xD4a0e0b9149BCee3C920d2E00b5dE09138fd8bb7"
+
 #: Symbol → address, for resolving the symbols a mandate and an LLM speak in.
 #: VenueIntent carries symbols ("USDC"), not addresses, because that is what a
 #: model reliably produces; resolution to an address happens here and nowhere
@@ -135,6 +146,15 @@ FALLBACK_ALLOWLIST: Final[frozenset[str]] = frozenset(
         CBBTC,
         DAI,
         AERO,
+        # Aave v3: the pool, plus the aTokens the vault receives and must be
+        # able to approve. Kept in step with the factory defaults that
+        # `scripts/expand-universe.sh` registers — `test_addresses.py`
+        # reconciles the two and fails if this list falls behind the deployed
+        # manifest, because a fresh clone would then refuse a plan the real
+        # vault would have accepted.
+        AAVE_V3_POOL,
+        ABAS_USDC,
+        ABAS_WETH,
     )
 )
 
