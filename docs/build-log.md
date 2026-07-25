@@ -1101,6 +1101,92 @@ one file.
 
 ---
 
+## 2026-07-25 — Lane B: the autonomous loop traded twice, was wrong twice, and every layer passed it
+
+**What changed.** Two new validation layers and a rewrite of how schema errors are reported. All
+three came from watching the loop execute real transactions rather than from reasoning about it.
+238 tests green.
+
+### The loop works. That is how the gaps were found.
+
+Two consecutive live ticks decided, planned and executed entirely autonomously, **zero validation
+retries on either**. Both were bad trades.
+
+| tx | diagnosis | direction | size | result |
+|---|---|---|---|---|
+| `0x129da1a0…` | right | **wrong** | — | 70/30 → 79/21, away from its own 50/50 target |
+| `0x704f54a2…` | right | right | **`pct_of_holdings: 1.0`** | 79/21 → **0/100**, breaching two mandate limits at once |
+
+Every existing layer passed both, and **each was right to**. In the first: well-formed JSON, valid
+schema, permitted assets, weights summing to 1, the action label agreeing with the intents, every
+cited fact real. The model even *said the right thing* — *"deviates from the target allocations by
+more than the tolerance of 5 percentage points"* — and then sold the underweighted asset. The
+decisions were internally consistent in every respect except the one that decides whether they make
+money.
+
+**The structural cause, which is the finding worth keeping: the mandate limits were being checked
+against what the model *declared it wanted*, never against what its trade would actually *do*.**
+`target_allocations` of 50/50 is legal on its face; a swap that lands the vault at 0/100 is not.
+Declared intent and realised effect are different objects, and only the second one spends money.
+
+- **Layer 5 — direction.** You may not sell an asset already below its target, nor buy one already
+  above it.
+- **Layer 6 — projected outcome.** The swaps are projected forward at current valuations and the
+  *result* is validated: the cash floor and position ceiling must survive, and a book that was
+  materially off target must end closer to it.
+
+Both compare the decision against reality rather than against the mandate's text, so they hold
+whatever a mandate says. Weights come from the vault's own `value_in_asset` — the Chainlink figure
+`totalAssets()` is built from — so the checks agree with the contract instead of forming a second
+opinion. Both stay silent where they cannot know honestly: no targets, an unpriced holding, an empty
+vault, an Aqua ship (which posts liquidity rather than changing composition), or a swap sized in
+token units, which cannot be projected without a price. Inventing a weight would be worse than
+declining to judge.
+
+**A judgement call worth recording.** The first draft of layer 6 rejected the **frozen golden
+fixture**: it declares a 70/30 target on a book already at 70/30 and then trades, which the overshoot
+rule read as moving away from target. Rather than override the shared contract, the rule was narrowed
+to assets *already materially off target*, matching layer 5's threshold — "if you claim to be closing
+a gap, close it". Where there is no gap the model is expressing a view rather than correcting a
+drift, and the floor and ceiling still bound where it can land. Both real bad trades are still
+caught. A check that fails the shared fixture needed a better reason than I had.
+
+### The retry hint was the bug, not the model
+
+The next tick was rejected after three attempts and 260 seconds. The model had omitted `token_out` on
+a swap — one field. But `VenueIntent` is a union of three shapes, so pydantic reported failures for
+**all three**: twelve errors, truncated to six, with the real cause buried under complaints that the
+swap was not a valid `AquaShipIntent`.
+
+```
+SwapIntent.token_out: Field required; AquaShipIntent.venue: Input should be 'aqua';
+AquaShipIntent.kind: ...; AquaShipIntent.tokens: ...  (and 6 more)
+```
+
+Three attempts, each given all the information needed to fail again. **Layer 2 exists to teach the
+model what to fix; a message describing two shapes it never attempted is worse than no message.**
+Errors are now grouped per union location and only the variant with the fewest errors is kept — the
+one it plainly meant — with the variant name stripped from the path, since the model wrote
+`venue_intents[0]`, not `venue_intents[0].SwapIntent`. Pointing at a path it never wrote is one more
+thing to be confused by.
+
+```
+after: venue_intents.0.token_out: Field required
+```
+
+This is the third time this lane has found that **the quality of the correction determines whether
+retries work at all**, and the first time the harness itself was the one being unclear.
+
+### The meta-lesson across all of it
+
+Every defect this lane found tonight came from the same place: **running the real thing, and reading
+what it actually said.** Not one of them — the fabricated APY, the cross-unit arithmetic, the wrong
+direction, the oversized swap, the union-error noise — was visible in a passing test suite, and
+several were in code that had tests. The suite proves the harness agrees with itself. Only the live
+loop shows whether it agrees with reality.
+
+---
+
 ## 2026-07-25 — Lane B phase 2: the first on-chain write, and two more model confabulations
 
 **What changed.** Phase 2 §2.1 closed — the agent signed and landed a real `executeBatch`. Lane D's
