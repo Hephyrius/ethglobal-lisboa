@@ -252,16 +252,22 @@ class TestAgainstAnvil:
         program = await ProgramBuilder(anvil_rpc).build_program(fee_bps=30, salt=42)
         # `opcode ‖ argLen ‖ args`, three times over.
         #
-        # The opcode numbers are POSITIONS in AquaOpcodes._opcodes() at swap-vm
-        # v1.0.1 — 21 = FlatFeeAmountIn, 17 = XYCSwap, 20 = Salt. They are
-        # derived by the Solidity builder from 1inch's own instruction table and
-        # never hardcoded there; pinned here so a dependency bump that renumbers
-        # the table fails in CI. See venues/aqua/solidity/package.json for why
-        # the version is pinned, and AquaTakerFillFork.t.sol for the open
-        # question about the deployed table.
-        assert program.startswith("0x15" "04"), "expected FlatFeeAmountIn (21) with a uint32 arg"
+        # The opcode numbers are POSITIONS in the instruction table of the
+        # SwapVM **deployed on Base** — 22 = FlatFeeAmountIn, 17 = XYCSwap,
+        # 21 = Salt. The Solidity builder derives them from function pointers
+        # and never hardcodes them; they are pinned here so a change to the
+        # table fails in CI rather than at a live fill.
+        #
+        # These were 21 / 17 / 20 until #29 was closed, taken from swap-vm
+        # v1.0.1 on the belief that it was what is deployed. It is not, and no
+        # published tag is: the deployed table has one extra XYCConcentrate
+        # entry, so salt and the fee each sit one opcode higher. **This
+        # assertion did not catch it**, because it is a `live` test and it was
+        # skipping for want of an RPC — which is why the durable guard is
+        # `SwapVMOpcodeTable.t.sol`, running against the chain, and not this.
+        assert program.startswith("0x16" "04"), "expected FlatFeeAmountIn (22) with a uint32 arg"
         assert program[14:18] == "1100", "expected XYCSwap (17) with no args"
-        assert program[18:22] == "1420", "expected Salt (20) with a 32-byte arg"
+        assert program[18:22] == "1520", "expected Salt (21) with a 32-byte arg"
 
     async def test_builder_returns_a_real_strategy_and_hash(self, anvil_rpc):
         from venues.aqua.program import ProgramBuilder

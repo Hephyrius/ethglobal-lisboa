@@ -6,9 +6,8 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import { IAqua } from "@1inch/aqua/src/interfaces/IAqua.sol";
 import { ISwapVM } from "@1inch/swap-vm/src/interfaces/ISwapVM.sol";
-import { TakerTraitsLib } from "@1inch/swap-vm/src/libs/TakerTraits.sol";
-
 import { SwapVMProgramBuilder } from "../src/SwapVMProgramBuilder.sol";
+import { DeployedTakerTraits } from "./DeployedTakerTraits.sol";
 import { MockAgentVault } from "./VaultRelayFork.t.sol";
 
 /**
@@ -100,12 +99,6 @@ contract AquaTakerFillForkTest is Test {
             vm.skip(true);
         }
 
-        // See the contract-level note: the deployed opcode table does not match
-        // any published source, so the program cannot yet be priced correctly by
-        // the real VM. Skipping keeps the suite honest — this is a known open
-        // question, not a passing claim.
-        vm.skip(true);
-
         builder = new SwapVMProgramBuilder(address(AQUA));
 
         address[] memory targets = new address[](3);
@@ -159,32 +152,14 @@ contract AquaTakerFillForkTest is Test {
     }
 
     /// @dev Taker sells USDC (tokenB) for WETH (tokenA), so the swap runs B→A.
-    function _takerData() internal view returns (bytes memory) {
-        return TakerTraitsLib.build(
-            TakerTraitsLib.Args({
-                taker: taker,
-                isExactIn: true,
-                shouldUnwrapWeth: false,
-                isStrictThresholdAmount: false,
-                isFirstTransferFromTaker: true,
-                // Taker has no Aqua balance of its own, so SwapVM pulls with
-                // transferFrom and pushes into the maker's Aqua balance.
-                useTransferFromAndAquaPush: true,
-                threshold: "",
-                to: address(0),
-                deadline: 0,
-                hasPreTransferInCallback: false,
-                hasPreTransferOutCallback: false,
-                preTransferInHookData: "",
-                postTransferInHookData: "",
-                preTransferOutHookData: "",
-                postTransferOutHookData: "",
-                preTransferInCallbackData: "",
-                preTransferOutCallbackData: "",
-                instructionsArgs: "",
-                signature: ""
-            })
-        );
+    ///
+    ///      Encoded by `DeployedTakerTraits` rather than the package's
+    ///      `TakerTraitsLib`: v1.0.1 packs one more slice index than the
+    ///      deployed contract parses, which silently clears `isExactIn` and
+    ///      turns this into an exact-output trade. See that file for why the
+    ///      symptom was a plausible number rather than a revert.
+    function _takerData() internal pure returns (bytes memory) {
+        return DeployedTakerTraits.simpleFill({ isExactIn: true });
     }
 
     function test_quoteAgainstTheShippedPositionIsNonZero() public view {

@@ -22,19 +22,32 @@ contract SwapVMProgramBuilderTest is Test {
     uint256 internal constant SALT = 42;
 
     // ── Expected opcode numbers ───────────────────────────────────────────
-    // These are POSITIONS in AquaOpcodes._opcodes() at swap-vm v1.0.1, which
-    // is what is deployed on Base. The builder derives them from 1inch's own
-    // instruction table via function pointers and never hardcodes them; this
-    // test hardcodes them deliberately, so that a dependency bump which
-    // reorders or renumbers the table fails HERE rather than at a live fill.
+    // POSITIONS in the instruction table of the SwapVM DEPLOYED ON BASE, taken
+    // from that contract's own verified source. The builder derives them from
+    // function pointers and never hardcodes them; this test hardcodes them
+    // deliberately, so a change to the table fails HERE rather than at a live
+    // fill.
     //
-    // Getting this wrong is not hypothetical: compiled against swap-vm `main`
-    // these were 0x50 / 0x02 / 0x70, from a banked hex enum that replaced the
-    // positional scheme. Those programs shipped into Aqua without complaint
-    // and would have executed as garbage.
+    // ⚠️ The comment that used to sit here said these were v1.0.1's positions
+    // "which is what is deployed on Base". That was wrong, and the wrongness is
+    // the whole of request #29: NO published swap-vm tag matches the deployed
+    // contract. Its table carries an extra XYCConcentrate entry that v1.0.1
+    // lacks, which pushes salt and the flat fee up by one. Compiled against the
+    // package, salt resolved to 20 — and the deployed VM reads 20 as DECAY.
+    //
+    // Getting this wrong is never hypothetical and never loud. Compiled against
+    // swap-vm `main` these were 0x50 / 0x02 / 0x70, from a banked hex enum that
+    // replaced the positional scheme entirely. Every one of those variants
+    // ships into Aqua without complaint, because `ship()` does not execute the
+    // program. The first thing that runs it is a taker's fill.
     uint8 internal constant OP_XYC_SWAP = 17;
-    uint8 internal constant OP_SALT = 20;
-    uint8 internal constant OP_FLAT_FEE_IN = 21;
+    uint8 internal constant OP_SALT = 21;
+    uint8 internal constant OP_FLAT_FEE_IN = 22;
+
+    /// @dev The deployed table's length. 28, not v1.0.1's 34 — confirmed
+    ///      independently of the source by `SwapVMOpcodeTable.t.sol`, where
+    ///      opcode 28 panics with array out-of-bounds on the live contract.
+    uint8 internal constant DEPLOYED_TABLE_LENGTH = 28;
 
     function setUp() public {
         builder = new SwapVMProgramBuilder(AQUA);
@@ -65,13 +78,18 @@ contract SwapVMProgramBuilderTest is Test {
     /// @dev Every opcode must be inside the deployed instruction table. A
     ///      number past its end is exactly the failure mode the `main`-branch
     ///      mismatch produced.
+    ///
+    ///      The bound used to be 35 — v1.0.1's length — which is loose enough
+    ///      to admit every opcode the deployed VM can panic on. It passed
+    ///      throughout #29 while the fee and salt were both wrong, so it is
+    ///      pinned to the deployed length now.
     function test_everyOpcodeIsWithinTheDeployedInstructionTable() public view {
         bytes memory program = builder.buildXYCProgram(FEE_BPS, SALT);
         uint256 i = 0;
         while (i < program.length) {
             uint8 opcode = uint8(program[i]);
             uint8 argLen = uint8(program[i + 1]);
-            assertLt(opcode, 35, "opcode past the end of AquaOpcodes._opcodes()");
+            assertLt(opcode, DEPLOYED_TABLE_LENGTH, "opcode past the end of the deployed instruction table");
             i += 2 + argLen;
         }
         assertEq(i, program.length, "program is not a clean opcode/length/args sequence");

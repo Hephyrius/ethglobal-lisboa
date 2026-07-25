@@ -6,8 +6,8 @@ import { MakerTraitsLib } from "@1inch/swap-vm/src/libs/MakerTraits.sol";
 import { Fee, FeeArgsBuilder } from "@1inch/swap-vm/src/instructions/Fee.sol";
 import { Controls } from "@1inch/swap-vm/src/instructions/Controls.sol";
 import { XYCSwap } from "@1inch/swap-vm/src/instructions/XYCSwap.sol";
-import { AquaOpcodes } from "@1inch/swap-vm/src/opcodes/AquaOpcodes.sol";
 import { Program, ProgramBuilder } from "@1inch/swap-vm/test/utils/ProgramBuilder.sol";
+import { DeployedAquaOpcodes } from "./DeployedAquaOpcodes.sol";
 
 /**
  * @title SwapVMProgramBuilder
@@ -16,7 +16,7 @@ import { Program, ProgramBuilder } from "@1inch/swap-vm/test/utils/ProgramBuilde
  *         by the vault.** Deployed once (or run via an `eth_call` state
  *         override) and read off-chain.
  *
- * @dev Why this contract exists, and why it inherits `AquaOpcodes`.
+ * @dev Why this contract exists, and why it inherits `DeployedAquaOpcodes`.
  *
  *      SwapVM programs are packed bytecode: `opcode ‖ argLength ‖ args`. The
  *      opcode numbers are **not** constants — in the deployed SwapVM they are
@@ -24,21 +24,28 @@ import { Program, ProgramBuilder } from "@1inch/swap-vm/test/utils/ProgramBuilde
  *      pointers. `ProgramBuilder.build` takes the instruction itself and
  *      resolves its index by searching that array.
  *
- *      So this contract inherits `AquaOpcodes` and passes real function
+ *      So this contract inherits an opcode table and passes real function
  *      pointers (`XYCSwap._xycSwapXD`, `Fee._flatFeeAmountInXD`,
- *      `Controls._salt`). Nothing here hardcodes an opcode number; they are
- *      derived from 1inch's own instruction table at compile time. If they
- *      reorder the table, we recompile and the numbers follow.
+ *      `Controls._salt`). Nothing here hardcodes an opcode number; every one is
+ *      derived at compile time from the position of its instruction.
  *
- *      **This was not a theoretical concern.** An earlier version compiled
+ *      **Which table, though, is the entire question.** It inherits
+ *      `DeployedAquaOpcodes` — a transcription of the table in the *deployed*
+ *      contract's own verified source — and not the npm package's
+ *      `AquaOpcodes`, because **no published swap-vm tag matches what is
+ *      deployed on Base.** The deployed table carries one instruction v1.0.1
+ *      does not have, which pushed `Controls._salt` and
+ *      `Fee._flatFeeAmountInXD` each one opcode higher than the package
+ *      resolves them to. That was request #29, and it is now closed.
+ *
+ *      **Neither failure here was theoretical.** An earlier version compiled
  *      against swap-vm `main`, which replaced the positional scheme with a
  *      banked hex enum (`XYCSwap = 0x50`). Those programs encoded cleanly,
  *      shipped into Aqua successfully, and would have been executed by the
- *      deployed VM as completely different instructions — `0x50` is far past
- *      the end of a 35-entry array. `ship()` never runs the program, so
- *      nothing failed until a taker tried to fill. The dependency is now
- *      pinned to **v1.0.1**, matching what is deployed on Base; see
- *      `package.json`.
+ *      deployed VM as completely different instructions. The v1.0.1 pin fixed
+ *      the enum but not the off-by-one, and the symptom of both is identical:
+ *      `ship()` never runs the program, so **nothing fails until a taker
+ *      fills.** That is why the fill is a test and not a demo step.
  *
  * @dev The custody property that makes Aqua the right venue.
  *
@@ -49,7 +56,7 @@ import { Program, ProgramBuilder } from "@1inch/swap-vm/test/utils/ProgramBuilde
  *      conventional AMM LP position would transfer tokens out to a pool and
  *      break that invariant.
  */
-contract SwapVMProgramBuilder is AquaOpcodes {
+contract SwapVMProgramBuilder is DeployedAquaOpcodes {
     using ProgramBuilder for Program;
 
     /// @notice Thrown for a fee outside 0–10000 bps.
@@ -60,7 +67,7 @@ contract SwapVMProgramBuilder is AquaOpcodes {
     /// @param aqua The Aqua registry, required by the inherited `Fee` module.
     ///        Only used for protocol-fee instructions, which we do not emit —
     ///        but the constructor demands it, so pass the real address.
-    constructor(address aqua) AquaOpcodes(aqua) { }
+    constructor(address aqua) DeployedAquaOpcodes(aqua) { }
 
     /**
      * @notice Build the SwapVM program bytecode for a constant-product position.

@@ -4303,3 +4303,72 @@ is surfaced for the same reason.
 - Reimplementing SwapVM program encoding in Python — rejected in favour of 1inch's official Solidity
   `ProgramBuilder` read via `eth_call`. Their rules require the official contracts, and hand-rolling
   bytecode encoding under time pressure is how you lose a track.
+
+---
+
+## Lane D · Wave 3 — closing #29: reading the deployed SwapVM instead of trusting a version pin
+
+**The claim we could not make.** For two waves the honest wording was *"the vault ships and docks
+real Aqua positions"* — never *"the vault market-makes"*. `AquaTakerFillFork.t.sol` was written in
+full and then `vm.skip`ped, because a program built by our own builder reverted with
+`DecayShouldBeCalledBeforeSwapAmountsComputation`. The note left behind said the deployed
+instruction table "matches no published swap-vm source" and recommended asking 1inch at the venue.
+
+That recommendation was wrong, in a way worth recording: **the contract is verified on Blockscout
+and ships its own `AquaOpcodes.sol`.** The answer was one HTTP request away for a whole wave. When a
+deployed contract disagrees with its documentation, ask the chain before asking a human.
+
+**Why the numbers were wrong.** SwapVM opcodes are not constants — they are *positions* in
+`AquaOpcodes._opcodes()`, and that array is built by writing its length over element `[0]`, so every
+opcode is its source position **minus one**. Our builder therefore never hardcoded a number; it
+passed function pointers and let 1inch's table resolve them, which is the right design and was not
+the bug.
+
+The bug was **which table**. We pinned swap-vm to v1.0.1 believing that was what is deployed. It is
+not, and *no published tag is*: only `0.0.1`–`0.0.6`, `v1.0.0` and `v1.0.1` exist, and the deployed
+table matches none of them. It carries an extra `XYCConcentrate._xycConcentrateGrowLiquidityXD`
+entry that v1.0.1 does not have at all, which pushes everything below it up by one:
+
+| instruction | v1.0.1 | **deployed** |
+|---|---|---|
+| `XYCSwap._xycSwapXD` | 17 | **17** |
+| `Decay._decayXD` | 19 | **20** |
+| `Controls._salt` | 20 | **21** |
+| `Fee._flatFeeAmountInXD` | 21 | **22** |
+
+So the swap was right and the fee and salt were each one too low — we were asking the deployed VM to
+run **Decay where we meant Salt**.
+
+**How the table was read, and why not by inference.** One revert selector is enough to guess an
+offset and a guess is exactly what must not happen here, because a wrong opcode is a *silently
+mispriced* position — strictly worse than no position. So the table was read rather than inferred:
+almost every SwapVM instruction parses its arguments before doing anything else and reverts with an
+error naming itself, so shipping a one-instruction program `[i, 0]` for each `i` and recording the
+revert selector *names* the instruction at every index. `venues/scripts/decode_swapvm_opcodes.py`
+resolves those selectors by computing them from source rather than from a hand-typed list.
+
+Two independent methods — the empirical probe and the deployed contract's verified source — agree on
+**all 28 entries**. `SwapVMOpcodeTable.t.sol` keeps re-reading the table off the chain, so a redeploy
+by 1inch fails a test naming the index instead of quietly mispricing a live maker position.
+
+**A second bug was hiding behind the first**, and it is the more instructive one. With the opcodes
+fixed the fill still failed, now with `amountIn = 4`. That is exactly
+`ceil(1e9 · 1e10 / (3e18 − 1e9))` — the **exact-output** answer to a trade we asked for exact-input.
+v1.0.1 added a `Deadline` slice to `TakerDataSlices`, taking the packed index word from `uint144` to
+`uint160`; the flag bits are identical in both versions but sit *after* that word, so two extra bytes
+ahead of them silently cleared `isExactIn`. Not a revert — a quote that was arithmetically perfect
+for a question nobody asked. `test/DeployedTakerTraits.sol` encodes the deployed layout; it lives in
+`test/` because our vault is only ever the maker, and taker traits are the filler's business.
+
+**What this changes.** `#29` is closed and the five skipped tests pass against the real deployed Aqua
+and SwapVM on a Base fork: a third-party taker fills the vault's position, **real ERC-20 transfers
+move out of and into the vault**, and the vault earns its maker fee. The submission may now say the
+vault market-makes.
+
+**The uncomfortable part, kept.** A Python test *did* pin the old opcodes — and passed throughout,
+because it is a `live` test that was skipping for want of a local RPC. A skipped assertion is not a
+weaker assertion, it is **no assertion**, and it read as green for two waves. Its replacement is
+still there, but the load-bearing guard is now the Foundry test that runs against the chain. The
+Solidity bound test failed the same way for a different reason: it asserted `opcode < 35`, v1.0.1's
+length, which is loose enough to admit every wrong number this bug produced. It is pinned to the
+deployed table's 28 now.
