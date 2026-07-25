@@ -62,6 +62,7 @@ class LlmDecisionEngine:
             decision_messages(mandate, snapshot, vault),
             mandate=mandate,
             snapshot=snapshot,
+            vault=vault,
             max_attempts=self._max_attempts,
             json_schema=decision_schema(),
         )

@@ -30,9 +30,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from curator_schema import AllocationDecision, ExecutionPlan, Mandate
+from curator_schema import AllocationDecision, ExecutionPlan, Mandate, VaultState
 
-__all__ = ["Violation", "check_decision", "check_plan", "describe"]
+__all__ = [
+    "Violation",
+    "check_decision",
+    "check_rebalance_direction",
+    "check_plan",
+    "describe",
+]
 
 #: Weights are model-generated decimals, so an exact sum to 1.0 is not a fair
 #: requirement — three-way splits of 0.33 are correct in intent and 0.01 short in
@@ -229,6 +235,91 @@ def _check_action_coherence(decision: AllocationDecision) -> list[Violation]:
             )
         ]
     return []
+
+
+#: Weights are noisy — a swap that closes a sub-percentage gap is not worth
+#: rejecting, and rounding alone can flip the sign of a tiny difference.
+_DIRECTION_TOLERANCE = 0.01
+
+
+def _current_weights(vault: VaultState) -> dict[str, float]:
+    """Each asset's share of the vault, by the vault's own valuation.
+
+    Uses `value_in_asset` — the Chainlink figure `totalAssets()` is built from —
+    so this agrees with the contract rather than with a second opinion. Holdings
+    the vault could not price are omitted rather than counted as zero.
+    """
+    total = int(vault.total_assets or 0)
+    if total <= 0:
+        return {}
+    return {
+        h.symbol: int(h.value_in_asset) / total
+        for h in vault.holdings
+        if h.value_in_asset is not None
+    }
+
+
+def check_rebalance_direction(
+    decision: AllocationDecision, vault: VaultState | None
+) -> list[Violation]:
+    """Every swap must move the vault *toward* its stated targets.
+
+    Observed against the real model, and the reason this exists: shown a 70/30
+    USDC/WETH book against a 50/50 target, it correctly wrote *"deviates from the
+    target by more than the tolerance of 5 percentage points"* — and then swapped
+    **WETH into USDC**, taking the book to 79/21. Right diagnosis, wrong
+    direction, real money.
+
+    Nothing else catches it. The intent is schema-valid, both assets are
+    permitted, the weights sum to 1 and the action label matches the intent; the
+    decision is internally consistent in every way except the one that matters.
+    So this checks the sign: you may not sell an asset that is already below its
+    target, nor buy one already above it.
+
+    This is a property of the decision against reality, not of the mandate, so it
+    holds whatever the mandate says.
+    """
+    intents = decision.venue_intents or []
+    targets = {a.asset: a.weight for a in decision.target_allocations or []}
+    if not intents or not targets or vault is None:
+        return []
+
+    current = _current_weights(vault)
+    if not current:
+        return []
+
+    problems: list[Violation] = []
+    for position, intent in enumerate(intents):
+        if intent.kind != "swap":
+            continue
+
+        for symbol, side in ((intent.token_in, "sell"), (intent.token_out, "buy")):
+            if symbol not in targets or symbol not in current:
+                continue
+            gap = targets[symbol] - current[symbol]  # positive => under target
+            if abs(gap) <= _DIRECTION_TOLERANCE:
+                continue
+
+            if side == "sell" and gap > 0:
+                problems.append(
+                    Violation(
+                        f"venue_intents[{position}]",
+                        f"selling {symbol}, which is already at {current[symbol]:.1%} "
+                        f"against a {targets[symbol]:.1%} target. Selling it moves the "
+                        "vault further from your own target; swap the other way",
+                    )
+                )
+            elif side == "buy" and gap < 0:
+                problems.append(
+                    Violation(
+                        f"venue_intents[{position}]",
+                        f"buying {symbol}, which is already at {current[symbol]:.1%} "
+                        f"against a {targets[symbol]:.1%} target. Buying more moves the "
+                        "vault further from your own target; swap the other way",
+                    )
+                )
+
+    return problems
 
 
 def check_plan(plan: ExecutionPlan, mandate: Mandate) -> list[Violation]:

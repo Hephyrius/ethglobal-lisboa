@@ -7,7 +7,7 @@ between a 14B open-weight model's output and a signed transaction is this file.
 It fails closed: anything it cannot fully validate is rejected and recorded, and
 nothing unvalidated reaches a venue or the chain.
 
-## Four layers, four different retry hints
+## Five layers, five different retry hints
 
 | Layer | Catches | What the model is told |
 |---|---|---|
@@ -15,10 +15,18 @@ nothing unvalidated reaches a venue or the chain.
 | 2 schema | wrong types, unknown fields, bad enums | the pydantic error, compacted |
 | 3 mandate | forbidden asset, weights ≠ 1, too many actions | the breach *and the limit* |
 | 4 grounding | citing facts that were never in the snapshot | the invented ids and the real ones |
+| 5 direction | trades moving *away* from the decision's own targets | which side is past target |
 
 The layering is what makes retries work. A single "invalid output, try again"
 teaches the model nothing and burns the tick; a message naming the breach and the
 limit it violated is usually fixed on the next attempt.
+
+Layer 5 was added after the loop executed a real transaction in the wrong
+direction: the model read a 70/30 book against a 50/50 target, said so correctly,
+and then sold the *under*-weighted asset. Layers 1–4 all passed it, because the
+decision was internally consistent in every respect except the sign. It needs the
+vault state, so it only runs when one is supplied — but every live tick supplies
+one.
 
 ## Why grounding is a validation layer and not a nicety
 
@@ -37,11 +45,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from curator_schema import AllocationDecision, Mandate, MarketSnapshot
+from curator_schema import AllocationDecision, Mandate, MarketSnapshot, VaultState
 from curator_schema.ports import ModelBackend
 from pydantic import ValidationError
 
-from ..mandate.constraints import check_decision, describe
+from ..mandate.constraints import check_decision, check_rebalance_direction, describe
 from .extraction import ExtractionError, extract_json_object
 
 __all__ = [
@@ -130,13 +138,17 @@ def _check_grounding(decision: AllocationDecision, snapshot: MarketSnapshot) -> 
 
 
 def validate_decision(
-    raw: str, mandate: Mandate, snapshot: MarketSnapshot
+    raw: str,
+    mandate: Mandate,
+    snapshot: MarketSnapshot,
+    vault: VaultState | None = None,
 ) -> AllocationDecision:
-    """Run all four layers over one raw model response.
+    """Run every layer over one raw model response.
 
     Raises `ValueError` whose message is written to be fed straight back to the
     model as a correction. Returns only a decision that is well-formed, legal
-    under the mandate, and grounded in the snapshot it was given.
+    under the mandate, grounded in the snapshot it was given, and — when `vault`
+    is supplied — actually moving the portfolio toward its own stated targets.
     """
     # 1 — extract
     payload: dict[str, Any] = extract_json_object(raw)
@@ -161,6 +173,13 @@ def validate_decision(
     if problem := _check_grounding(decision, snapshot):
         raise ValueError(problem)
 
+    # 5 — direction. Needs the vault, so it only runs when one was supplied.
+    if violations := check_rebalance_direction(decision, vault):
+        raise ValueError(
+            f"your trades move the vault away from your own targets — {describe(violations)}. "
+            "Return a corrected decision whose swaps close the gap."
+        )
+
     return decision
 
 
@@ -170,6 +189,7 @@ async def generate_validated_decision(
     *,
     mandate: Mandate,
     snapshot: MarketSnapshot,
+    vault: VaultState | None = None,
     max_attempts: int = 3,
     json_schema: dict[str, Any] | None = None,
     temperature: float = 0.0,
@@ -195,7 +215,7 @@ async def generate_validated_decision(
             conversation, json_schema=json_schema, temperature=temperature
         )
         try:
-            decision = validate_decision(raw, mandate, snapshot)
+            decision = validate_decision(raw, mandate, snapshot, vault)
         except (ValueError, ExtractionError) as exc:
             failure = str(exc)
             failures.append(failure)
