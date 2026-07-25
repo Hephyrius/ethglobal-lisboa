@@ -6,8 +6,10 @@ import {console2} from "forge-std/console2.sol";
 
 import {CuratedVault} from "../src/CuratedVault.sol";
 import {VaultFactory} from "../src/VaultFactory.sol";
+import {IAggregatorV3} from "../src/interfaces/IAggregatorV3.sol";
 import {ICuratedVault} from "../src/interfaces/ICuratedVault.sol";
 import {IVaultFactory} from "../src/interfaces/IVaultFactory.sol";
+import {ChainlinkPriceLib} from "../src/libraries/ChainlinkPriceLib.sol";
 
 /// @title Deploy — factory, implementation and one demo vault, then publish the addresses.
 ///
@@ -55,6 +57,8 @@ contract Deploy is Script {
     /// @dev The only network name that gets fork defaults. Anything unrecognised is treated as real,
     ///      so a typo fails safe rather than shipping a vault with its safety checks off.
     string internal constant FORK_NETWORK = "base-fork";
+    string internal constant MAINNET_NETWORK = "base-mainnet";
+    uint256 internal constant BASE_CHAIN_ID = 8453;
 
     /// @dev A sanity floor, not a precise estimate. The deploy costs ~6.9M gas, which on Base is
     ///      well under 0.0001 ETH — this is set far above that so it only ever catches an
@@ -64,6 +68,10 @@ contract Deploy is Script {
     error UnsafeAnvilKeyOnRealNetwork(string what, address account);
     error StalenessCheckDisabledOnRealNetwork(string network);
     error DeployerCannotPayGas(address deployer, uint256 balance, uint256 minimum);
+    error WrongChainForNetwork(string network, uint256 expected, uint256 actual);
+    error AgentAndGuardianAreTheSameAccount(address account);
+    error AllowlistedTargetHasNoCode(address target);
+    error PriceFeedHasNoCode(address feed);
 
     function run() external {
         string memory network = vm.envOr("DEPLOY_NETWORK", string("base-fork"));
@@ -83,7 +91,16 @@ contract Deploy is Script {
 
         bytes32 mandateHash = vm.envOr("MANDATE_HASH", keccak256("demo-mandate-v1"));
 
-        if (!isFork) _assertSafeForRealNetwork(network, deployer, agent, guardian, priceMaxAge);
+        if (!isFork) {
+            _assertSafeForRealNetwork(network, deployer, agent, guardian, priceMaxAge);
+            _assertExpectedChain(network, block.chainid);
+        }
+
+        // Runs on every network, fork included. These check the *world* rather than the arguments:
+        // that the addresses hardcoded above are contracts here, and that the feed this vault is
+        // about to be permanently bound to actually answers. A fork is the cheapest place to catch a
+        // typo in a constant, so there is no reason to skip them there.
+        _assertConfiguredAddressesAreLive(priceMaxAge);
 
         // Before anything is broadcast *or published*. `forge script` runs the whole script in
         // simulation first, so without this an unfunded deployer gets as far as writing
@@ -222,6 +239,64 @@ contract Deploy is Script {
             revert UnsafeAnvilKeyOnRealNetwork("GUARDIAN_ADDRESS", guardian);
         }
         if (priceMaxAge == 0) revert StalenessCheckDisabledOnRealNetwork(network);
+
+        // Collapsing the two roles collapses the security model. `SECURITY.md` §12 says the guardian
+        // may halt trading but never name a trade, and the agent may trade but never halt itself —
+        // one key holding both is neither, and the role graph is frozen at genesis so it cannot be
+        // separated afterwards. Deliberately not enforced on a fork, where a single operator holding
+        // everything is the normal and harmless case.
+        if (agent == guardian) revert AgentAndGuardianAreTheSameAccount(agent);
+    }
+
+    /// @notice Refuse to deploy a named network's configuration onto a different chain.
+    ///
+    /// @dev The mistake this catches is one wrong `--rpc-url`. Every address in this file is a **Base
+    ///      mainnet** address; pointed at any other chain they are empty accounts, and the vault
+    ///      would deploy with an allowlist of seven addresses that hold no code and a "price feed"
+    ///      that is nothing at all — immutably. `_assertConfiguredAddressesAreLive` would also catch
+    ///      it, but this fails first and says *why* rather than naming one arbitrary address.
+    ///
+    ///      Only networks whose chain is actually known are checked. An unrecognised name still
+    ///      passes here and is still caught by the code checks, so adding a network does not require
+    ///      remembering to extend this.
+    function _assertExpectedChain(string memory network, uint256 actual) internal pure {
+        uint256 expected = _expectedChainId(network);
+        if (expected != 0 && expected != actual) revert WrongChainForNetwork(network, expected, actual);
+    }
+
+    /// @notice Chain this network's addresses belong to, or 0 when we cannot know.
+    function _expectedChainId(string memory network) internal pure returns (uint256) {
+        return keccak256(bytes(network)) == keccak256(bytes(MAINNET_NETWORK)) ? BASE_CHAIN_ID : 0;
+    }
+
+    /// @notice Refuse to deploy against addresses that are not what this script thinks they are.
+    ///
+    /// @dev Two immutable-at-genesis mistakes, both invisible until a user's money is already in:
+    ///
+    ///      **A mistyped allowlist entry.** An address with no code is not a venue. Every plan
+    ///      targeting it would revert, and the guardian would have to add the real one by hand — but
+    ///      only after someone worked out that was the problem.
+    ///
+    ///      **A feed the vault cannot read.** This is the sharper one, and it is checked by calling
+    ///      `ChainlinkPriceLib.readPrice` — **the exact function `totalAssets()` will call**, with
+    ///      the exact `priceMaxAge` this vault is about to freeze. So the deploy cannot produce a
+    ///      vault whose accounting reverts on first use: a wrong address, a feed reporting zero or
+    ///      negative, an incomplete round, or an answer already older than the bound all abort here,
+    ///      with the library's own named error rather than a generic one. On a fork `priceMaxAge` is
+    ///      0, which disables the staleness leg exactly as it does in the vault — the check is as
+    ///      strict as the vault will be, and no stricter.
+    function _assertConfiguredAddressesAreLive(uint256 priceMaxAge) internal view {
+        address[] memory targets = _allowlist();
+        for (uint256 i; i < targets.length; ++i) {
+            if (targets[i].code.length == 0) revert AllowlistedTargetHasNoCode(targets[i]);
+        }
+
+        ICuratedVault.TokenValuation[] memory valuations = _valuations();
+        for (uint256 i; i < valuations.length; ++i) {
+            address feed = valuations[i].feed;
+            if (feed.code.length == 0) revert PriceFeedHasNoCode(feed);
+            ChainlinkPriceLib.readPrice(IAggregatorV3(feed), priceMaxAge);
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────

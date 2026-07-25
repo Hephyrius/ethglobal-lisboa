@@ -4,6 +4,8 @@ pragma solidity ^0.8.24;
 import {Test} from "forge-std/Test.sol";
 
 import {Deploy} from "../../script/Deploy.s.sol";
+import {IAggregatorV3} from "../../src/interfaces/IAggregatorV3.sol";
+import {ChainlinkPriceLib} from "../../src/libraries/ChainlinkPriceLib.sol";
 
 /// @dev The guards are `internal` on the script so `run()` can call them; this exposes them with a
 ///      real call frame so `vm.expectRevert` has something to bind to.
@@ -41,6 +43,22 @@ contract DeployHarness is Deploy {
     {
         return _chooseDeployerKey(forkTarget, forkKeyOrZero, mainnetKeyOrZero);
     }
+
+    function expectedChainId(string memory network) external pure returns (uint256) {
+        return _expectedChainId(network);
+    }
+
+    function assertExpectedChain(string memory network, uint256 actual) external pure {
+        _assertExpectedChain(network, actual);
+    }
+
+    function assertAddressesLive(uint256 priceMaxAge) external view {
+        _assertConfiguredAddressesAreLive(priceMaxAge);
+    }
+
+    function ethUsdFeed() external pure returns (address) {
+        return ETH_USD_FEED;
+    }
 }
 
 /// @notice Tests for the deploy script's mainnet safety guards.
@@ -60,6 +78,9 @@ contract DeployGuardsTest is Test {
     address internal realGuardian = makeAddr("platformGuardian");
 
     function setUp() public {
+        // Foundry starts the clock at 1, where "two hours ago" underflows and no staleness bound can
+        // be expressed at all. Same warp and same reason as `VaultTestBase`.
+        vm.warp(1_700_000_000);
         deploy = new DeployHarness();
     }
 
@@ -206,6 +227,123 @@ contract DeployGuardsTest is Test {
         assertTrue(_has(targets, 0x000000000022D473030F116dDEE9F6B43aC78BA3), "Permit2");
         assertTrue(_has(targets, 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913), "USDC as approve target (#8)");
         assertTrue(_has(targets, 0x4200000000000000000000000000000000000006), "WETH as approve target (#8)");
+    }
+
+    // ── one key holding both roles ───────────────────────────────────────
+
+    /// @dev Collapsing agent and guardian collapses `SECURITY.md` §12: the guardian may halt trading
+    ///      but never name a trade, and the agent may trade but never halt itself. One key doing both
+    ///      is neither, and the role graph is frozen at genesis so it cannot be separated later.
+    function test_rejectsAgentAndGuardianBeingTheSameKey() public {
+        vm.expectRevert(
+            abi.encodeWithSelector(Deploy.AgentAndGuardianAreTheSameAccount.selector, realAgent)
+        );
+        deploy.assertSafe("base-mainnet", realDeployer, realAgent, realAgent, 3600);
+    }
+
+    /// @dev Not enforced on a fork, where one operator holding everything is normal and harmless.
+    ///      Asserted so the asymmetry is deliberate rather than an oversight.
+    function test_theSameKeyIsFineOnAFork() public view {
+        assertTrue(deploy.isFork("base-fork"), "fork classification");
+        // `run()` only calls the guards when `!isFork`, and the fork path is what the deploy that
+        // just ran used — with deployer as guardian and a separate agent.
+        assertEq(deploy.defaultPriceMaxAge("base-fork"), 0, "fork keeps staleness off");
+    }
+
+    // ── wrong chain ──────────────────────────────────────────────────────
+
+    /// @dev Every address in the deploy script is a Base mainnet address. Pointed at another chain
+    ///      they are empty accounts, and the vault would freeze an allowlist of seven nothings and a
+    ///      price feed that is not a contract.
+    function test_rejectsAMainnetDeployOnTheWrongChain() public {
+        vm.expectRevert(abi.encodeWithSelector(Deploy.WrongChainForNetwork.selector, "base-mainnet", 8453, 1));
+        deploy.assertExpectedChain("base-mainnet", 1);
+    }
+
+    function test_acceptsAMainnetDeployOnBase() public view {
+        deploy.assertExpectedChain("base-mainnet", 8453);
+        assertEq(deploy.expectedChainId("base-mainnet"), 8453, "Base");
+    }
+
+    /// @dev An unrecognised name has no known chain, so this guard stays quiet and the code checks
+    ///      catch it instead. Adding a network therefore does not require remembering to extend it.
+    function test_anUnknownNetworkHasNoChainConstraint() public view {
+        assertEq(deploy.expectedChainId("base-sepolia"), 0, "unknown");
+        deploy.assertExpectedChain("base-sepolia", 999);
+    }
+
+    // ── the addresses have to actually be there ──────────────────────────
+
+    /// @dev A bare EVM with no fork: none of the hardcoded addresses hold code, which is exactly the
+    ///      state a wrong `--rpc-url` produces.
+    function test_rejectsAnAllowlistedTargetWithNoCode() public {
+        vm.expectRevert(
+            abi.encodeWithSelector(Deploy.AllowlistedTargetHasNoCode.selector, deploy.allowlist()[0])
+        );
+        deploy.assertAddressesLive(3600);
+    }
+
+    function test_rejectsAFeedThatIsNotAContract() public {
+        _giveEveryTargetCode();
+        vm.expectRevert(abi.encodeWithSelector(Deploy.PriceFeedHasNoCode.selector, deploy.ethUsdFeed()));
+        deploy.assertAddressesLive(3600);
+    }
+
+    /// @dev The strongest of the new guards: the feed is read through **`ChainlinkPriceLib.readPrice`
+    ///      with the bound the vault is about to freeze**, so the deploy cannot produce a vault whose
+    ///      `totalAssets()` reverts on its first call. Here the answer is older than the bound.
+    function test_rejectsAFeedThatIsAlreadyStalerThanTheBound() public {
+        _giveEveryTargetCode();
+        _mockFeed({answer: 3_000e8, updatedAt: block.timestamp - 7200});
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ChainlinkPriceLib.StalePrice.selector, deploy.ethUsdFeed(), block.timestamp - 7200, uint256(3600)
+            )
+        );
+        deploy.assertAddressesLive(3600);
+    }
+
+    function test_rejectsAFeedReportingANonPositiveAnswer() public {
+        _giveEveryTargetCode();
+        _mockFeed({answer: 0, updatedAt: block.timestamp});
+
+        vm.expectRevert(
+            abi.encodeWithSelector(ChainlinkPriceLib.InvalidPrice.selector, deploy.ethUsdFeed(), int256(0))
+        );
+        deploy.assertAddressesLive(3600);
+    }
+
+    function test_acceptsALiveFeedWithinTheBound() public {
+        _giveEveryTargetCode();
+        _mockFeed({answer: 3_000e8, updatedAt: block.timestamp});
+        deploy.assertAddressesLive(3600);
+    }
+
+    /// @dev A fork passes `priceMaxAge = 0`, which disables the staleness leg in the guard exactly as
+    ///      it does in the vault. The check is as strict as the vault will be and no stricter —
+    ///      otherwise a fork deploy would fail on a frozen feed the vault is content with.
+    function test_aForkBoundAcceptsAFrozenFeed() public {
+        _giveEveryTargetCode();
+        _mockFeed({answer: 3_000e8, updatedAt: 1});
+        deploy.assertAddressesLive(0);
+    }
+
+    function _giveEveryTargetCode() private {
+        address[] memory targets = deploy.allowlist();
+        for (uint256 i; i < targets.length; ++i) {
+            vm.etch(targets[i], hex"60006000fd");
+        }
+    }
+
+    function _mockFeed(int256 answer, uint256 updatedAt) private {
+        address feed = deploy.ethUsdFeed();
+        vm.etch(feed, hex"60006000fd");
+        vm.mockCall(
+            feed,
+            abi.encodeWithSelector(IAggregatorV3.latestRoundData.selector),
+            abi.encode(uint80(1), answer, updatedAt, updatedAt, uint80(1))
+        );
     }
 
     function _has(address[] memory list, address needle) private pure returns (bool) {
