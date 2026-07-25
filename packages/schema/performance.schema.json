@@ -27,7 +27,7 @@
         "block_number": { "type": "integer", "minimum": 0 },
         "share_price": {
           "$ref": "#/$defs/uint256Str",
-          "description": "convertToAssets(1e18): assets per whole share, in BASE-ASSET decimals. For a 6-decimal asset a price of 1.0025 is the string '1002506', NOT 1e18. Absent while total_supply is 0."
+          "description": "convertToAssets(1e18): assets per whole share, in BASE-ASSET decimals. For a 6-decimal asset a price of 1.0025 is the string '1002506', NOT 1e18. Absent while total_supply is 0. ⚠️ `VaultState.share_price` is the same quantity scaled by 1e18 instead — multiply this by 1e12 to compare. The two scales are deliberate and are documented at both ends; what is NOT acceptable is a reader assuming, since the field name is identical."
         },
         "total_assets": { "$ref": "#/$defs/uint256Str" },
         "total_supply": { "$ref": "#/$defs/uint256Str" },

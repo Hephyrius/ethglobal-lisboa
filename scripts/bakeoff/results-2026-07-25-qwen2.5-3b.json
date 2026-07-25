@@ -1,0 +1,190 @@
+{
+  "trials": [
+    {
+      "model": "qwen2.5:3b-instruct-q4_K_M",
+      "scenario": "idle-cash",
+      "valid_first_attempt": false,
+      "violations": [],
+      "authored_wanted_intent": false,
+      "intents": [],
+      "action": null,
+      "facts_cited": 0,
+      "facts_invented": [],
+      "latency_s": 211.52,
+      "error": "ValueError: your decision breaches the mandate \u2014 target_allocations: weights sum to 0.2500, but must sum to 1.0. Return a corrected decision that respects these limits.",
+      "reasoning": null
+    },
+    {
+      "model": "qwen2.5:3b-instruct-q4_K_M",
+      "scenario": "idle-cash",
+      "valid_first_attempt": true,
+      "violations": [],
+      "authored_wanted_intent": true,
+      "intents": [
+        "supply"
+      ],
+      "action": "rebalance",
+      "facts_cited": 3,
+      "facts_invented": [],
+      "latency_s": 179.05,
+      "error": null,
+      "reasoning": "The current allocation is 100% in USDC, which aligns with the mandate's objective of holding only USDC and deploying any excess into a lending market that pays the highest yield. The available yields from Aave-v3 (4.32%) and Morpho-blue (5.87%) are both per year rates, indicating they are not APYs but rather annualized returns. Given the current allocation is already at 100%, there is no need to rotate or rebalance further. The idle cash amount of $84.2M from Morpho-blue USDC represents a significant opportunity for earning yield by deploying it into the higher yielding market, which would be "
+    },
+    {
+      "model": "qwen2.5:3b-instruct-q4_K_M",
+      "scenario": "idle-cash",
+      "valid_first_attempt": true,
+      "violations": [],
+      "authored_wanted_intent": true,
+      "intents": [
+        "supply"
+      ],
+      "action": "rebalance",
+      "facts_cited": 3,
+      "facts_invented": [],
+      "latency_s": 200.86,
+      "error": null,
+      "reasoning": "The current allocation is 100% in USDC, which aligns with the mandate's objective of holding only USDC and deploying any excess into a lending market that pays the highest yield. The available yields from Aave-v3 (4.32%) and Morpho-blue (5.87%) are both per year rates, indicating they are not APYs but rather annualized returns. Given the current allocation is already at 100%, there is no need to rotate or rebalance further. The idle cash amount of $84.2M from Morpho-blue USDC represents a significant opportunity for earning yield by deploying it into the higher yielding market, which would be "
+    },
+    {
+      "model": "qwen2.5:3b-instruct-q4_K_M",
+      "scenario": "balanced-ship",
+      "valid_first_attempt": false,
+      "violations": [],
+      "authored_wanted_intent": false,
+      "intents": [],
+      "action": null,
+      "facts_cited": 0,
+      "facts_invented": [],
+      "latency_s": 55.3,
+      "error": "ValueError: your decision breaches the mandate \u2014 action: action is 'rebalance' but no venue_intents were supplied, so nothing would happen; supply intents or use 'hold'. Return a corrected decision that respects these limits.",
+      "reasoning": null
+    },
+    {
+      "model": "qwen2.5:3b-instruct-q4_K_M",
+      "scenario": "balanced-ship",
+      "valid_first_attempt": false,
+      "violations": [],
+      "authored_wanted_intent": false,
+      "intents": [],
+      "action": null,
+      "facts_cited": 0,
+      "facts_invented": [],
+      "latency_s": 51.67,
+      "error": "ValueError: your decision breaches the mandate \u2014 action: action is 'rebalance' but no venue_intents were supplied, so nothing would happen; supply intents or use 'hold'. Return a corrected decision that respects these limits.",
+      "reasoning": null
+    },
+    {
+      "model": "qwen2.5:3b-instruct-q4_K_M",
+      "scenario": "balanced-ship",
+      "valid_first_attempt": false,
+      "violations": [],
+      "authored_wanted_intent": false,
+      "intents": [],
+      "action": null,
+      "facts_cited": 0,
+      "facts_invented": [],
+      "latency_s": 45.08,
+      "error": "ValueError: your decision breaches the mandate \u2014 action: action is 'rebalance' but no venue_intents were supplied, so nothing would happen; supply intents or use 'hold'. Return a corrected decision that respects these limits.",
+      "reasoning": null
+    },
+    {
+      "model": "qwen2.5:3b-instruct-q4_K_M",
+      "scenario": "drifted",
+      "valid_first_attempt": true,
+      "violations": [],
+      "authored_wanted_intent": true,
+      "intents": [
+        "swap"
+      ],
+      "action": "rebalance",
+      "facts_cited": 2,
+      "facts_invented": [],
+      "latency_s": 123.03,
+      "error": null,
+      "reasoning": "The vault currently holds 20% USDC and 80% WETH, which deviates from the target allocation of 50/50 between USDC and WETH. The yields available (f1 and f2) are not sufficient to cover the cost of moving funds between these assets without breaching the slippage limit of 50 bps. Therefore, I will rotate the holdings to bring them closer to the target allocation."
+    },
+    {
+      "model": "qwen2.5:3b-instruct-q4_K_M",
+      "scenario": "drifted",
+      "valid_first_attempt": true,
+      "violations": [],
+      "authored_wanted_intent": true,
+      "intents": [
+        "swap"
+      ],
+      "action": "rebalance",
+      "facts_cited": 3,
+      "facts_invented": [],
+      "latency_s": 52.22,
+      "error": null,
+      "reasoning": "The vault's current allocation is 20% USDC and 80% WETH, which deviates from the target of 50/50. The yields available (f1 and f2) are both lower than the utilization rate of 91%, indicating that moving funds to a higher yielding venue would incur significant slippage costs. Therefore, rebalancing is necessary to bring the allocation closer to the target without incurring excessive slippage."
+    },
+    {
+      "model": "qwen2.5:3b-instruct-q4_K_M",
+      "scenario": "drifted",
+      "valid_first_attempt": true,
+      "violations": [],
+      "authored_wanted_intent": true,
+      "intents": [
+        "swap"
+      ],
+      "action": "rebalance",
+      "facts_cited": 3,
+      "facts_invented": [],
+      "latency_s": 56.02,
+      "error": null,
+      "reasoning": "The vault's current allocation is 20% USDC and 80% WETH, which deviates from the target of 50/50. The yields available (f1 and f2) are both lower than the utilization rate of 91%, indicating that moving funds to a higher yielding venue would incur significant slippage costs. Therefore, rebalancing is necessary to bring the allocation closer to the target without incurring excessive slippage."
+    },
+    {
+      "model": "qwen2.5:3b-instruct-q4_K_M",
+      "scenario": "already-deployed",
+      "valid_first_attempt": true,
+      "violations": [],
+      "authored_wanted_intent": false,
+      "intents": [
+        "swap"
+      ],
+      "action": "rebalance",
+      "facts_cited": 2,
+      "facts_invented": [],
+      "latency_s": 108.09,
+      "error": null,
+      "reasoning": "The current allocation is 20% USDC and 80% WETH, which deviates from the target of 50/50. The lending yield for aave-v3 USDC (f1) is higher than that for morpho-blue USDC (f2), indicating better yields available in the market. Given the hard limit on no single non-cash position above 60% and the need to rotate, I intend to swap some WETH from the vault into aave-v3 USDC to align with the target allocation."
+    },
+    {
+      "model": "qwen2.5:3b-instruct-q4_K_M",
+      "scenario": "already-deployed",
+      "valid_first_attempt": true,
+      "violations": [],
+      "authored_wanted_intent": false,
+      "intents": [
+        "swap"
+      ],
+      "action": "rebalance",
+      "facts_cited": 2,
+      "facts_invented": [],
+      "latency_s": 42.86,
+      "error": null,
+      "reasoning": "The vault currently holds 20% USDC and 80% WETH, which deviates from the target allocation of 50/50 between USDC and WETH. The current weights are outside the acceptable range as defined by the mandate's balanced risk posture. To rebalance towards the target allocations, I will rotate some WETH to USDC using Uniswap. This action is justified because the yields available (f1 and f2) cover the cost of moving funds between the two assets without breaching any hard limits."
+    },
+    {
+      "model": "qwen2.5:3b-instruct-q4_K_M",
+      "scenario": "already-deployed",
+      "valid_first_attempt": true,
+      "violations": [],
+      "authored_wanted_intent": false,
+      "intents": [
+        "swap"
+      ],
+      "action": "rebalance",
+      "facts_cited": 2,
+      "facts_invented": [],
+      "latency_s": 43.22,
+      "error": null,
+      "reasoning": "The vault currently holds 20% USDC and 80% WETH, which deviates from the target allocation of 50/50 between USDC and WETH. The current weights are outside the acceptable range as defined by the mandate's balanced risk posture. To rebalance towards the target allocations, I will rotate some WETH to USDC using Uniswap. This action is justified because the yields available (f1 and f2) cover the cost of moving funds between the two assets without breaching any hard limits."
+    }
+  ],
+  "available_ram_gb": 0.4426918029785156,
+  "temperature": 0.0
+}

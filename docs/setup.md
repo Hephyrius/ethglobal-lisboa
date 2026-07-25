@@ -106,18 +106,36 @@ Four processes. Start the fork first; everything else depends on it.
 ```bash
 # 2 — local model (any OpenAI-compatible server works)
 ollama serve
-ollama pull qwen2.5:14b-instruct
+ollama pull qwen2.5:3b-instruct-q4_K_M     # ~2GB. This is what the stack is configured for.
 ```
+
+> ⚠️ **Pull the 3B, not a 14B.** This block used to say `qwen2.5:14b-instruct`, which is a ~9GB
+> download that **nothing here uses** — `.env` sets the 3B, and a fresh clone that took the old
+> advice *and* the old documented default died on its first tick with `model not found`
+> (active-work #49). The 3B is also the only size this machine can hold: measured 1.1 GB free
+> against 33.5 of 37.9 GB committed, so a 7B would page rather than run (see
+> `uv run python -m scripts.bakeoff --check`). It is a real limitation of the model, not of the
+> plumbing — the measurements are in the build log.
 
 ```bash
 # 3 — agent API (Lane B)
-uv run uvicorn agent.api.main:app --reload --port 8000
+uv run uvicorn agent.api.app:app --port 8000
 ```
 
 ```bash
 # 4 — dApp (Lane E).  Windows: on the host, not WSL
-pnpm install && pnpm --filter web dev
+pnpm install && pnpm --filter @curator/web dev
 ```
+
+Then check the whole thing rather than trusting it:
+
+```bash
+./scripts/preflight.sh      # 6 checks; names the fix for each failure
+```
+
+`preflight.sh` is the single source of truth on demo-readiness. Run it **from the host side** where
+ollama and the API live — run inside WSL it can only reach the model indirectly, and it will say so
+rather than claim a blocker.
 
 Open http://localhost:3000.
 

@@ -1,6 +1,12 @@
 [project]
 name = "curator-schema"
-version = "0.1.0"
+# 0.2.0: Wave 1 added SourceNote and MarketSnapshot.notes; Wave 2 added
+# tolerance_band_pct, Persona and the probability FactKind/FactUnit. All of
+# that shipped while the version stayed 0.1.0, so PyPI served pre-Wave-1
+# bytes under a number the repo had already reused - and curator-data, which
+# imports SourceNote, could not import against it. A version number is a
+# promise about bytes; bump it whenever the content moves.
+version = "0.2.0"
 description = "Frozen cross-lane interface: models and ports shared by every Python component"
 requires-python = ">=3.10"
 dependencies = ["pydantic>=2.7"]

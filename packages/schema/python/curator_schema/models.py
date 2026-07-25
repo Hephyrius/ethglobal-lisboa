@@ -447,6 +447,17 @@ class VaultState(Frozen):
     total_supply: Uint256Str
     holdings: list[Holding] = Field(default_factory=list)
     asset_decimals: int = Field(default=6, ge=0, le=36)
+    #: Assets per whole share, SCALED BY 1e18 — a dimensionless ratio, not the
+    #: base-asset-decimal number `convertToAssets(1e18)` returns on-chain.
+    #: Divide by 1e12 to compare: `1000644584000000000` here is `1000644` there.
+    #:
+    #: ⚠️ `PerformancePoint.share_price` is the same quantity in the OTHER
+    #: scale, deliberately. Measured on one vault at one moment, this field read
+    #: 1000644584000000000 while the performance summary read 1000644. The split
+    #: exists because at 6 decimals a USDC vault's share price cannot move until
+    #: it has gained 0.0001%, so a *series* in that scale renders early
+    #: performance as a flat line — while a point-in-time reading is compared
+    #: against the chain and has to match what the chain says.
     share_price: str | None = None
     #: Holder of AGENT_ROLE. Executes directly with no human override — that
     #: is the trust model, stated plainly.
@@ -485,6 +496,11 @@ class PerformancePoint(Frozen):
     #: `convertToAssets(1e18)` in BASE-ASSET decimals — for a 6-decimal asset a
     #: price of 1.0025 is "1002506", not 1e18 (request #27). None while supply
     #: is zero, because a share of nothing has no price.
+    #:
+    #: ⚠️ `VaultState.share_price` is the same quantity scaled by 1e18 instead;
+    #: multiply this by 1e12 to compare. Both scales are documented at both
+    #: ends — what is not acceptable is a reader assuming, given the identical
+    #: field name.
     share_price: str | None = None
     allocation: list[AllocationSlice] = Field(default_factory=list)
     source: Literal["tick", "sampler", "backfill"] = "tick"

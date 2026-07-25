@@ -20,7 +20,7 @@
     "total_supply": { "$ref": "#/$defs/uint256String" },
     "share_price": {
       "type": "string",
-      "description": "convertToAssets(1e18) as a decimal string. Decimal, not float — precision matters here."
+      "description": "Assets per whole share as a decimal string, SCALED BY 1e18 — a dimensionless ratio, NOT the base-asset-decimal number `convertToAssets(1e18)` returns on-chain. Divide by 1e12 to compare against a 6-decimal asset: 1000644584000000000 here is 1000644 there. ⚠️ `VaultPerformance.points[].share_price` is the SAME quantity in the OTHER scale, on purpose — measured on one vault at one moment, this field read 1000644584000000000 while the performance summary read 1000644. The reason for the split: at 6 decimals a USDC vault's share price cannot move until it has gained 0.0001%, so a series in that scale renders early performance as a flat line, while a point-in-time reading is compared against the chain and must match what the chain says. Decimal string, not float — precision is the whole point."
     },
     "holdings": {
       "type": "array",

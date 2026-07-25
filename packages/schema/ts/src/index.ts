@@ -382,6 +382,15 @@ export const VaultState = z
     total_supply: Uint256Str,
     holdings: z.array(Holding).default([]),
     asset_decimals: z.number().int().min(0).max(36).default(6),
+    /** Assets per whole share, SCALED BY 1e18 — a dimensionless ratio, not the
+     *  base-asset-decimal number convertToAssets(1e18) returns on-chain. Divide
+     *  by 1e12 to compare: 1000644584000000000 here is 1000644 there.
+     *
+     *  ⚠️ VaultPerformance points carry the SAME quantity in the OTHER scale,
+     *  deliberately — one vault at one moment read 1000644584000000000 here and
+     *  1000644 there. Deriving share price from total_assets/total_supply, as
+     *  this dApp already does, sidesteps the question entirely and is still the
+     *  recommended path. */
     share_price: z.string().optional(),
     /** Holder of AGENT_ROLE — executes directly, no human override. */
     agent: Address.optional(),
@@ -415,7 +424,9 @@ export const PerformancePoint = z
     total_supply: Uint256Str,
     block_number: z.number().int().min(0).optional(),
     /** convertToAssets(1e18) in BASE-ASSET decimals — for a 6-decimal asset,
-     *  1.0025 is "1002506", not 1e18. Absent while total_supply is 0. */
+     *  1.0025 is "1002506", not 1e18. Absent while total_supply is 0.
+     *  ⚠️ VaultState.share_price is the same quantity scaled by 1e18; multiply
+     *  this by 1e12 to compare. Same name, two scales, both deliberate. */
     share_price: z.string().optional(),
     allocation: z.array(AllocationSlice).default([]),
     source: z.enum(['tick', 'sampler', 'backfill']).default('tick'),

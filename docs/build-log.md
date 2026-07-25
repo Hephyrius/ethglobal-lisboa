@@ -224,6 +224,78 @@ which should require a conversation rather than a commit.
 
 ---
 
+## 2026-07-25 — Lane F: the bake-off, and what the 3B can and cannot do
+
+**What changed.** `scripts/bakeoff/` — a parameterised harness that replays four fixed scenarios
+through N candidate models and scores five things, plus the first measured results. Full write-up
+and the per-scenario table in [scripts/bakeoff/README.md](../scripts/bakeoff/README.md).
+
+**Why it measures the production path rather than an approximation.** The prompt comes from Lane
+B's `decision_messages`, the structured-output schema from their `decision_schema`, validation from
+`validate_decision`, constraints from `check_decision`. A bake-off that builds its own prompt and
+its own validator measures the bake-off. Rule 7 forbids editing another lane, not integrating with
+one, and this is the same seam `tests/e2e/` already uses.
+
+**The headline result:**
+
+| Model | Valid 1st attempt | Mandate-compliant | Right shape | Authored a ship | Invented facts | Median latency |
+|---|---|---|---|---|---|---|
+| `qwen2.5:3b-instruct-q4_K_M` | 67% | 100% | 42% | ❌ | 0 | 56s |
+
+**Three findings, and the second was not what I went looking for.**
+
+1. **The Aqua ship gap is real and is now measured.** 0/3 on a scenario built specifically to invite
+   that answer, with the intent shape in the prompt — every attempt returned `rebalance` with an
+   empty `venue_intents`. Wave 1's three failures were an anecdote; this is a finding. But the
+   scope of the caveat is narrower than feared: the same model authored a **`supply` 2/3** on an
+   all-cash book and a **correctly-directed `swap` 3/3** on a drifted one. It cannot market-make. It
+   can lend and rebalance.
+2. **It never holds, and that is not a constraint violation.** On the control scenario — floor met,
+   capital already deployed, holding correct — it proposed a trade 3/3 times while scoring **100%
+   mandate-compliant**, because churn breaks no numeric limit. This is the strongest argument yet
+   for `hold` living in the prompt and the scoreboard rather than in the gate: the gate cannot see
+   this, and did not. It is also why the control scenario exists at all; without it the harness
+   rewards action and a model that always trades looks good.
+3. **Zero invented facts across twelve trials.** The `facts_used` → snapshot chain the dApp draws
+   holds even where the decisions do not.
+
+**Why no larger candidate was benchmarked, measured rather than assumed.** 1.1 GB free against 33.5
+of 37.9 GB committed; a 7B q4 needs ~5.5 GB resident. Loading one pages, and the same memory holds
+anvil's fork state and the API four lanes read. A latency number measured against the swap file is
+worse than no number. `--check` reports this and distinguishes an already-resident model (free to
+benchmark) from one that must be loaded, so on a machine with 8 GB free the question is one
+command — which is the whole reason this is a harness and not a script that answered one question
+once (Rule 6).
+
+**Two bugs, both silent, both now carrying comments.** `ModelBackend` is an async port and an
+un-awaited coroutine is truthy, so the first run scored twelve trials as invalid output in 0.0
+seconds each — a harness reporting a perfect failure is indistinguishable from a model that failed.
+And Windows `cp1252` cannot encode the tick in the results table, which crashed at the *end* of a
+run after every trial had been paid for.
+
+## 2026-07-25 — Lane F: `share_price` is one name with two scales, and both are deliberate
+
+**What changed.** Descriptions only, in all three mirrors, plus both ends of the pair now naming
+the other. `VaultState.share_price` is documented as the **1e18-scaled dimensionless ratio** it
+actually is, rather than as `convertToAssets(1e18)`, which it is not.
+
+**Why the description moved and not the fixture.** Lane B asked for this (#77) and the argument is
+right: at 6 decimals a USDC vault's share price cannot move until it has gained 0.0001%, so a
+*series* in that scale renders early performance as a flat line. Changing the fixture would also
+ripple through four lanes' tests to make the documentation true, which is the wrong direction.
+
+**The measurement that settled it, and it is sharper than either request.** On one vault at one
+moment, the live API emitted **`1000644584000000000`** from `/vault/{addr}/state` and **`1000644`**
+from `/vault/{addr}/performance`. The same quantity, the same field name, two scales, simultaneously.
+That is not a bug in either — a point-in-time reading is compared against the chain and must match
+what the chain says, while a series needs the precision — but nothing anywhere said so, which is
+how Lane A came to cross-check the API against the prose and correctly conclude the two disagreed
+(#50), and how the trap table hardened the wrong half into *"1e18 is the error"*.
+
+**So both descriptions now state their own scale and name the other**, with the conversion in each
+direction. The defect was never the scales; it was one name meaning two things and nothing
+admitting it.
+
 ## 2026-07-25 — Lane F: the Wave 2 schema delta, and the field the plan did not name
 
 **What changed.** `packages/schema/` gained, in all three mirrors at once:
