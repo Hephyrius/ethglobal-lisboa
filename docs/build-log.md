@@ -413,6 +413,38 @@ path shapes and remembers the first that answers.
 
 ---
 
+## 2026-07-25 — Lane D: allowlist is now read from Lane A's manifest, not hardcoded
+
+**What changed.** `addresses.EXPECTED_ALLOWLIST` (a compiled-in constant) became
+`addresses.allowlist()`, which reads `deployments/base-fork.json` →
+`executeAllowlist.targets`. `FALLBACK_ALLOWLIST` remains for when no manifest exists.
+`BASE_RPC_URL=https://mainnet.base.org` added to `.env`. 59 Python + 18 Foundry tests green.
+
+**Why, beyond Lane A asking for it.** Their answer to request 1 said "read it from there, never
+hardcode", and their build log explains what I could not have known from outside: the vault's
+`allowedTargets()` is **mutable** — a `GUARDIAN_ROLE` can widen or narrow it after deploy. A constant
+in this lane is therefore not merely duplicated, it is *guaranteed to go stale eventually*, and the
+symptom would be an on-chain revert rather than the clear, seam-naming failure this lane tries hard
+to produce. Reading it means a guardian narrowing the list narrows ours in the same breath.
+
+Their published list turned out to be exactly the seven addresses I had, with the checksums I had
+just fixed. That is a good outcome and also exactly why the reconciliation test exists rather than a
+shrug: `test_our_fallback_agrees_with_what_lane_a_actually_deployed` fails if this lane could ever
+emit a target the deployed vault would reject. Agreement today is not a reason to stop checking.
+
+Cache is keyed on the file's mtime, so a redeploy is picked up without a restart. A missing or
+malformed manifest falls back rather than raising — a venue adapter should not be the reason a fresh
+clone cannot import.
+
+**The credential answer that mattered more than expected.** With `BASE_RPC_URL` now set to the
+public endpoint, I checked the thing the whole Aqua path depends on: **`https://mainnet.base.org`
+supports `eth_call` state overrides.** It returns byte-identical program bytes to anvil. So the
+maker path needs no archive node, no deployed builder and no funded key — on the public endpoint,
+today. That closes the last "will this work on the demo machine?" question in the lane, and it is
+why `AQUA_PROGRAM_BUILDER_ADDRESS` stays an escape hatch rather than a requirement.
+
+---
+
 ## 2026-07-25 — Lane D: proving the Aqua integration against the real contract, and two wrong checksums
 
 **What changed.** `venues/aqua/solidity/test/AquaShipFork.t.sol` — 5 tests that execute our `ship()`

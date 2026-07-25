@@ -85,7 +85,7 @@ async def test_full_quote_then_swap_produces_an_executable_plan(requires_uniswap
     assert plan.expected_slippage_bps is not None
     assert plan.quote_expires_at is not None
     for step in plan.steps:
-        assert step.target.lower() in addresses.EXPECTED_ALLOWLIST
+        assert step.target.lower() in addresses.allowlist()
 
 
 async def test_venue_resolves_pct_of_holdings_against_real_vault_state(

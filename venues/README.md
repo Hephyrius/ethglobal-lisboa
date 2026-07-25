@@ -126,7 +126,8 @@ the decision loop alive.
 | | |
 |---|---|
 | **`UNISWAP_API_KEY`** | Required for the `uniswap` venue only. `uniswap_key` also accepted (the pre-Wave-0 name). |
-| **`ANVIL_RPC_URL` / `BASE_RPC_URL`** | Required for the `aqua` venue. Needs `eth_call` **state-override** support (anvil and Alchemy have it). Falls back to public Base. |
+| **`ANVIL_RPC_URL` / `BASE_RPC_URL`** | Required for the `aqua` venue. Needs `eth_call` **state-override** support. **Verified: the public `https://mainnet.base.org` supports it**, as do anvil and Alchemy — so this venue needs no archive endpoint and no deployment. |
+| `DEPLOYMENTS_FILE` | Optional. Points the allowlist reader at a manifest other than `deployments/base-fork.json`. |
 | `AQUA_PROGRAM_BUILDER_ADDRESS` | Optional. Set it to use a deployed builder instead of the state-override path — needed only on endpoints without override support. |
 | Python | `eth-abi`, `eth-utils`, `httpx`, `pydantic` (root `venues` extra: `uv sync --all-extras`) |
 | Foundry | **Not required to use this lane.** Only to regenerate `aqua/program_builder.json`. |
@@ -202,10 +203,24 @@ shaped every design decision here.
 
 ---
 
-## Vault allowlist — what Lane A must permit
+## Vault allowlist — read, never hardcoded
 
-`execute()` reverts unless the target is allowlisted. Verified live, not
-assumed:
+`execute()` reverts unless the target is allowlisted, so every plan is checked
+against the allowlist *before* it is returned.
+
+**The list is read from `deployments/base-fork.json` → `executeAllowlist.targets`**
+(Lane A's published manifest), not compiled into this lane — at their request,
+and because the vault's `allowedTargets()` is **mutable**: a guardian can widen
+or narrow it after deploy. A constant here would drift, and the symptom would be
+an on-chain revert instead of a clear failure with a message naming the seam.
+
+- Point at a different manifest with `DEPLOYMENTS_FILE=/path/to/manifest.json`
+  (e.g. a mainnet deployment).
+- Falls back to a static list when no manifest exists, so a fresh clone still
+  works. A test reconciles the two and fails if this lane could emit a target
+  the deployed vault would reject.
+
+Lane A's deployed list — confirmed identical to our fallback:
 
 | Address | What | Why |
 |---|---|---|

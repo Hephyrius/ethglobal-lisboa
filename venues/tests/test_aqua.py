@@ -210,7 +210,7 @@ class TestVenueContract:
             AquaShipIntent(tokens=["USDC", "WETH"], amounts=["1000000", "1000000"]), _vault()
         )
         for step in plan.steps:
-            assert step.target.lower() in addresses.EXPECTED_ALLOWLIST
+            assert step.target.lower() in addresses.allowlist()
 
     async def test_plan_validates_against_the_frozen_json_schema(self, venue, repo_root: Path):
         schema = json.loads(

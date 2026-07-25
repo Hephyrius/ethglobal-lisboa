@@ -9,6 +9,10 @@ Chain is Base mainnet (8453) throughout, including the anvil fork of it.
 
 from __future__ import annotations
 
+import json
+import os
+from functools import lru_cache
+from pathlib import Path
 from typing import Final
 
 CHAIN_ID: Final[int] = 8453
@@ -92,12 +96,10 @@ def decimals_for(address: str) -> int | None:
     return DECIMALS.get(address.lower())
 
 
-#: Targets an ExecutionPlan step may legitimately address. This mirrors what we
-#: have ASKED Lane A to allowlist on the vault's execute(); it is not the
-#: contract's own list and cannot be — Lane D never reads contracts/. It exists
-#: so a plan that would revert on-chain fails here instead, with a message that
-#: names the seam. See cross-lane requests 7 and 8 in docs/active-work.md.
-EXPECTED_ALLOWLIST: Final[frozenset[str]] = frozenset(
+#: Fallback allowlist, used only when no deployment manifest is available (a
+#: fresh clone before Lane A has deployed, or an unfamiliar network). The
+#: deployed vault is authoritative — see `allowlist()`.
+FALLBACK_ALLOWLIST: Final[frozenset[str]] = frozenset(
     a.lower()
     for a in (
         AQUA,
@@ -109,3 +111,50 @@ EXPECTED_ALLOWLIST: Final[frozenset[str]] = frozenset(
         USDC,
     )
 )
+
+#: Where Lane A publishes deployed addresses and the vault's real `execute()`
+#: allowlist. Overridable so a mainnet manifest can be pointed at without a
+#: code change.
+DEPLOYMENTS_ENV_VAR: Final[str] = "DEPLOYMENTS_FILE"
+DEFAULT_DEPLOYMENTS: Final[Path] = (
+    Path(__file__).resolve().parents[1] / "deployments" / "base-fork.json"
+)
+
+
+def deployments_path() -> Path:
+    override = os.environ.get(DEPLOYMENTS_ENV_VAR)
+    return Path(override) if override else DEFAULT_DEPLOYMENTS
+
+
+@lru_cache(maxsize=4)
+def _allowlist_from(path: Path, mtime: float) -> frozenset[str] | None:
+    """`mtime` is part of the cache key only, so a redeploy is picked up
+    without a restart."""
+    del mtime
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        targets = manifest["executeAllowlist"]["targets"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return frozenset(t.lower() for t in targets) or None
+
+
+def allowlist() -> frozenset[str]:
+    """Targets an `ExecutionPlan` step may legitimately address.
+
+    Read from Lane A's `deployments/base-fork.json` rather than hardcoded, at
+    their explicit request (cross-lane request 1): the deployed vault's
+    `allowedTargets()` is the only authority, and it is *mutable* — a guardian
+    can widen or narrow it after deploy, so a constant compiled into this lane
+    would silently drift out of date and the symptom would be an on-chain
+    revert rather than a clear failure here.
+
+    Falls back to `FALLBACK_ALLOWLIST` when no manifest is present, so this
+    lane still works on a fresh clone and in isolation.
+    """
+    path = deployments_path()
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return FALLBACK_ALLOWLIST
+    return _allowlist_from(path, mtime) or FALLBACK_ALLOWLIST

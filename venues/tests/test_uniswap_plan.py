@@ -94,7 +94,7 @@ class TestAllowlist:
     def test_all_targets_are_on_the_agreed_allowlist(self, quote_response, swap_response):
         plan = _plan(quote_response, swap_response)
         for step in plan.steps:
-            assert step.target.lower() in addresses.EXPECTED_ALLOWLIST
+            assert step.target.lower() in addresses.allowlist()
 
     def test_unknown_target_is_rejected_before_it_can_revert_on_chain(
         self, quote_response, swap_response

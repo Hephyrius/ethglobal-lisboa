@@ -196,13 +196,15 @@ def build_plan(
 def assert_targets_allowlisted(plan: ExecutionPlan) -> None:
     """Fail here, with the seam named, rather than as an opaque on-chain revert.
 
-    This checks against `addresses.EXPECTED_ALLOWLIST` — what we have ASKED
-    Lane A to allowlist, not what the deployed vault actually enforces. Lane D
-    never reads `contracts/`, so it cannot check the real thing; this catches
-    the common case where an adapter invents a target nobody agreed to.
+    Checks against `addresses.allowlist()`, which reads the deployed vault's
+    real list from `deployments/base-fork.json` (Lane A's published manifest)
+    and falls back to a static list only when no manifest is present. The
+    on-chain list is *mutable* — a guardian can widen or narrow it after
+    deploy — so reading it beats compiling a copy into this lane.
     """
+    allowed = addresses.allowlist()
     for index, step in enumerate(plan.steps):
-        if step.target.lower() not in addresses.EXPECTED_ALLOWLIST:
+        if step.target.lower() not in allowed:
             raise PlanValidationError(
                 f"step {index} targets {step.target}, which is not on the vault "
                 f"allowlist agreed with Lane A. Either the API returned a new "
