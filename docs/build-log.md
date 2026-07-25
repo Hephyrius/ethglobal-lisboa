@@ -1424,6 +1424,57 @@ path shapes and remembers the first that answers.
 
 ---
 
+## 2026-07-25 — Lane D (Wave 2): the prediction-market gate says no, for the third time for the same reason
+
+**What changed.** Nothing in code — that is the point of a gate. The Wave 2 §D2 evaluation ran inside
+its timebox and returned **NO-GO**, written up in cross-lane request 62 with the read path handed to
+Lane C.
+
+**What was checked, in the order that made the decision cheapest.** Candidate: Limitless on Base.
+Following our own standard (#30) the first move was the deployed bytecode, not the documentation.
+`0x05c748E2f4DcDe0ec9Fa8DDc40DE6b867f923fa5` holds 17,178 bytes, and selector extraction identifies
+it as a **Polymarket CTF Exchange fork** — `getCtf()`, `getPolyProxyFactoryImplementation()`,
+`registerToken(uint256,uint256,bytes32)`, `getComplement(uint256)`. The read path is live and
+unauthenticated: 454 active markets with implied probabilities, collateralised in the *same* Base
+USDC the vault already holds.
+
+Two of three criteria passed, and both were encouraging enough to make the third feel like a
+formality.
+
+**The write path is where it dies, and the reason is structural rather than incidental.** Limitless
+is a CLOB: orders are EIP-712 signed off-chain. The exchange *does* accept **ERC-1271** contract
+signatures — it pushes `0x1626ba7e` to call `isValidSignature` on the maker — so a contract *can*
+trade there. **Ours cannot: `CuratedVault` does not implement it.** Confirmed against Lane A's
+published ABI rather than assumed: 48 functions, no `isValidSignature`.
+
+Closing that gap needs a new signing surface on the vault, in the wave where Lane A is explicitly
+scoped to an adversarial security pass with no new features, plus order-lifecycle management against
+a matching engine and a 50 USDC minimum order size. That is not a 90-minute integration, and
+"add a signature-validation entry point to the custody contract during its security review" is a bad
+trade at any speed.
+
+**The through-line is the finding, more than the no-go.** This is the *third* venue whose design was
+decided by one fact: **the vault is a contract with no private key.**
+
+| Venue | What the venue wanted | What made it work |
+|---|---|---|
+| Uniswap | an EIP-712 `PermitSingle` signature | Permit2's signature-**free** `approve` |
+| Aqua | a signed maker order | `useAquaInsteadOfSignature = true` |
+| Limitless | an EIP-712 signed CLOB order | *nothing* — ERC-1271 is the only door and the vault lacks it |
+
+Twice we found a door; the third time there is not one. The useful generalisation for any future
+venue is to **ask that question first** — *can a keyless contract act here?* — because it has been
+decisive every time and it is answerable in about ten minutes from the deployed bytecode. Had it been
+asked first here, the gate would have closed in a quarter of the time it took.
+
+**Why the outcome is still a net gain.** The plan anticipated this and put the fallback in Lane C:
+prediction-market odds ship as read-only facts regardless, so the agent still *reasons about* forward
+market consensus even though it cannot trade it. The evaluation therefore handed Lane C the working
+endpoint, the exact response shape, and the trap that `/markets` and `?limit=` both 404 while
+`/markets/active` is the real path — which is most of §C2's discovery work already done.
+
+---
+
 ## 2026-07-25 — Lane D (Wave 2): a venue manifest, and the front-running answer nearly came out backwards
 
 **What changed.** `venues/capabilities.py` — every venue publishes its intents, tokens, custody
