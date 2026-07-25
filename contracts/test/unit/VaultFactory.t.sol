@@ -109,4 +109,90 @@ contract VaultFactoryTest is VaultTestBase {
         vm.expectRevert(abi.encodeWithSelector(ICuratedVault.DuplicateValuation.selector, address(usdc)));
         factory.createVault(_createParams());
     }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Deployer attribution — who asked for this vault
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// @dev The archetype case: a vault someone deployed and never deposited into. `balanceOf`
+    ///      cannot see it, which is why the dashboard needs this record at all.
+    function test_deployerIsRecordedAndQueryable() public {
+        address created = factory.createVault(_createParams());
+
+        assertEq(factory.deployerOf(created), deployer, "recorded against the address that asked");
+        assertEq(factory.vaultsOf(deployer).length, 2, "the base fixture's vault plus this one");
+        assertEq(factory.vaultsOf(deployer)[1], created, "in creation order");
+        assertEq(CuratedVault(created).balanceOf(deployer), 0, "and holds no shares, which is the point");
+    }
+
+    /// @dev `deployer` and `msg.sender` differ here on purpose: at genesis the *agent* submits the
+    ///      transaction, so if these were allowed to collapse the test would prove nothing.
+    function test_deployerIsIndexedOnTheEvent() public {
+        address expected = _predictNextVault();
+
+        vm.expectEmit(true, true, true, true, address(factory));
+        emit IVaultFactory.VaultCreated(expected, address(usdc), agent, MANDATE_HASH, deployer);
+
+        vm.prank(agent);
+        assertEq(factory.createVault(_createParams()), expected, "predicted the clone address");
+    }
+
+    function test_deployerDefaultsToTheSubmitter() public {
+        IVaultFactory.CreateParams memory p = _createParams();
+        p.deployer = address(0);
+
+        vm.prank(agent);
+        address created = factory.createVault(p);
+
+        assertEq(factory.deployerOf(created), agent, "never null: falls back to msg.sender");
+    }
+
+    function test_vaultsOfSeparatesDeployers() public {
+        IVaultFactory.CreateParams memory p = _createParams();
+        p.deployer = alice;
+        address hers = factory.createVault(p);
+
+        p.deployer = bob;
+        factory.createVault(p);
+
+        assertEq(factory.vaultsOf(alice).length, 1, "alice sees only her own");
+        assertEq(factory.vaultsOf(alice)[0], hers, "and it is the right one");
+        assertEq(factory.vaultsOf(bob).length, 1, "bob likewise");
+        assertEq(factory.vaultsOf(makeAddr("nobody")).length, 0, "a stranger sees nothing");
+        assertEq(factory.deployerOf(makeAddr("notAVault")), address(0), "and an unknown vault has no deployer");
+    }
+
+    /// @dev The limitation, as a test rather than a footnote. `deployer` is *asserted* by whoever
+    ///      submits the transaction — there is no signature behind it — so anyone can claim a vault
+    ///      was deployed for anyone. That is tolerable only because it confers nothing.
+    function test_deployerIsAClaimAndGrantsNoPowers() public {
+        IVaultFactory.CreateParams memory p = _createParams();
+        p.deployer = alice;
+
+        vm.prank(bob);
+        CuratedVault claimed = CuratedVault(factory.createVault(p));
+
+        assertEq(factory.deployerOf(address(claimed)), alice, "bob attributed the vault to alice unilaterally");
+
+        // And it bought her nothing: not the agent's powers, not the guardian's, not a share.
+        vm.startPrank(alice);
+        vm.expectRevert();
+        claimed.execute(address(venue), 0, "");
+        vm.expectRevert();
+        claimed.pause();
+        vm.expectRevert();
+        claimed.setTargetAllowed(address(venue), false);
+        vm.stopPrank();
+
+        assertEq(claimed.balanceOf(alice), 0, "attribution is a label, not a balance");
+    }
+
+    /// @dev Clones are deployed with `Clones.clone`, whose address depends only on the deployer and
+    ///      nonce — so the next one is predictable without mining it.
+    function _predictNextVault() private returns (address) {
+        uint256 snapshot = vm.snapshotState();
+        address next = factory.createVault(_createParams());
+        vm.revertToState(snapshot);
+        return next;
+    }
 }
