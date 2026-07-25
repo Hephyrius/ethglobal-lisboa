@@ -12,6 +12,7 @@ Two classes of test live here and they are kept strictly apart:
 from __future__ import annotations
 
 import json
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -63,3 +64,32 @@ def swap_response() -> dict[str, Any]:
 @pytest.fixture
 def repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
+
+
+@pytest.fixture
+async def anvil_rpc(config: VenueConfig):
+    """An RPC that supports `eth_call` state overrides.
+
+    The program builder is a *pure* contract, so this needs no Base fork and no
+    archive node — a bare `anvil` is enough, which keeps this lane's live tests
+    running even while `BASE_RPC_URL` is unset. Skips rather than fails when
+    nothing is listening, so the suite stays green on a fresh clone.
+    """
+
+    from venues.rpc import RpcClient
+
+    url = os.environ.get("VENUES_TEST_RPC_URL", "http://localhost:8547")
+    client = RpcClient(url)
+    try:
+        await client.request("eth_blockNumber", [])
+    except Exception as exc:  # noqa: BLE001 — any failure means "no node here"
+        await client.aclose()
+        pytest.skip(
+            f"no JSON-RPC at {url} ({type(exc).__name__}). Start one with:\n"
+            f"  wsl -d Ubuntu-24.04 -- anvil --host 0.0.0.0 --port 8547\n"
+            f"or set VENUES_TEST_RPC_URL."
+        )
+    try:
+        yield client
+    finally:
+        await client.aclose()
