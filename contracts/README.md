@@ -4,6 +4,8 @@ ERC-4626 vaults curated by an autonomous agent. This document is the integration
 another lane needs is here, and **nothing else in this directory should have to be read.**
 
 - **Owner:** Lane A. Nobody else edits `contracts/`. Lane D's Solidity lives in `venues/aqua/solidity/`.
+- **Security:** [SECURITY.md](SECURITY.md) — every attack vector, each with the test that proves the
+  claim, and the two that are deliberately *not* mitigated.
 - **Plan:** [plans/2026-07-25-lane-a-contracts.md](../plans/2026-07-25-lane-a-contracts.md)
 - **Toolchain:** Foundry, run inside `wsl -d Ubuntu-24.04` (the default 20.04 distro has glibc 2.31,
   too old for Foundry's binaries). Native on macOS.
@@ -30,7 +32,7 @@ reading any venue's state.
 cd contracts
 ./script/install-deps.sh          # vendored, pinned — only needed to change a version
 forge build
-forge test                        # 79 tests, no network required (+7 fork tests skip)
+forge test                        # 101 tests, no network required (+7 fork tests skip)
 ```
 
 Fork deployment (from repo root, two terminals):
@@ -332,7 +334,8 @@ src/
   libraries/ChainlinkPriceLib read + validate + decimal-convert
 test/
   mocks/                      MockERC20, MockAggregatorV3, CallTarget
-  unit/                       79 tests, no network
+  unit/                       unit tests, no network
+  invariant/                  9 properties x 2,048 calls + handler sanity
   fork/                       real Base state; skips when BASE_RPC_URL is unset
 script/
   Deploy.s.sol                deploy + publish deployments/<network>.json
@@ -345,7 +348,7 @@ script/
 ## Verification
 
 ```bash
-forge test                                    # 79 unit tests, no network
+forge test                                    # 101 tests, no network
 forge test --match-path "test/fork/*"         # real Base state, needs an RPC
 ./script/check-deployment.sh                  # deployed code == this source?
 ```
