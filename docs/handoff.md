@@ -197,7 +197,7 @@ Ollama tags are **exact** — pull the exact tag in `.env` or `/health` reports 
 
 - **The model's prose is less trustworthy than its decisions.** On the first live run it cited fact
   `f6` — a $12.4M *liquidity* figure — as "the highest headline APY of 10.43%". A real fact id with
-  an invented value, and it passed all four layers, because grounding catches fabricated **ids**, not
+  an invented value, and it passed every layer then in place, because grounding catches **ids**, not
   fabricated **numbers**. The fact table was rewritten to make units unmisreadable and the misread
   stopped, but a 3B still makes qualitative errors (it called 91% utilization "low"). Every
   *decision* was mandate-legal throughout — which is the argument for enforcing constraints in code

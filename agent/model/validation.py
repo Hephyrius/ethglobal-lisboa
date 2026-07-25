@@ -87,7 +87,7 @@ class DecisionRejected(Exception):
 
 @dataclass
 class ValidatedDecision:
-    """A decision that passed all four layers, plus what it took to get there."""
+    """A decision that passed every layer, plus what it took to get there."""
 
     decision: AllocationDecision
     #: Total attempts, including the successful one.

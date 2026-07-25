@@ -14,7 +14,7 @@ So this reports two things per model:
 - **mechanical** — one raw completion, giving prefill and generation tok/s from
   the endpoint's own token counts. Comparable across machines.
 - **end to end** — the full `LlmDecisionEngine`: real curator prompt, real
-  four-layer validation, real reject-and-retry. This is the number that decides
+  five-layer validation, real reject-and-retry. This is the number that decides
   whether the demo feels alive.
 
 Kept as a permanent tool rather than a throwaway (INSTRUCTIONS.md Rule 6): the

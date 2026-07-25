@@ -297,7 +297,7 @@ model/
   openai_compat.py   one HTTP client for every OpenAI-compatible endpoint
   backends/          ollama · vllm · scripted (tests) — one line each in the table
   extraction.py      recovering JSON from fences, prose and <think> blocks
-  validation.py      ★ four-layer validation + reject-and-retry
+  validation.py      * five-layer validation + reject-and-retry
   prompts/           curator and genesis prompts, kept out of the calling code
 mandate/
   hashing.py         canonical JSON → keccak256 (identical in both modes)
@@ -347,7 +347,7 @@ from rather than agreement with ourselves.
 
 ## Status and known gaps
 
-**Complete:** all frozen routes in both modes · four-layer output validation with reject-and-retry ·
+**Complete:** all frozen routes in both modes · five-layer output validation with reject-and-retry ·
 mandate store, hashing and amendment · the decision cycle with cooldown, slippage and stale-quote
 enforcement · the append-only journal · `VaultClient` on web3.py against Lane A's published ABIs ·
 live genesis. 192 tests green, ruff clean, no network or model needed to run them.
