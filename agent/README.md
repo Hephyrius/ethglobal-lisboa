@@ -59,7 +59,49 @@ Plus three additions that are **not** part of the freeze:
 | `GET /vault/{addr}/mandate/verification` | `MandateVerificationResponse` | Cross-lane request #71. Whether the stored mandate still hashes to what the chain recorded — and, when it does not, **which of three reasons applies**. |
 | `GET /genesis/sources` | `{sources[], venues[]}` | The genesis flow asks the user to grant data sources. That list must come from what Lane C actually registered, not a copy hardcoded in the dApp. |
 | `GET /venues` | Lane D's manifest array, **unwrapped and unmodelled** | Cross-lane request #73. The manifest existed in Python but nothing served it, so the browser could only see bare venue keys. Deliberately no `response_model`: the shape is Lane D's and not frozen, so validating it here would silently drop their next field. A 503 (never `[]`) when the manifest cannot be resolved — `[]` would claim there are no venues. |
+| `GET /archetypes` | `ArchetypeSummary[]` | Wave 3 §B1. The envelopes a card may offer, each with `deployed` — how many vaults it has already produced, which is per-deployment state no static file can carry. The bounds themselves are Lane F's and importable from `@curator/schema`; this route exists for the count and so a new archetype appears without a package bump. |
+| `POST /archetypes/{key}/deploy` | `ArchetypeDeployResponse` | Wave 3 §B1. Generates a mandate inside the envelope, checks it, regenerates on escape, deploys. See below. |
 | `GET /health` | see below | Reports **which provider each seam actually resolved to**. |
+
+### Archetypes — one click, a strategy nobody wrote
+
+`POST /archetypes/{key}/deploy` takes an **optional** body `{deployer?}` — optional so the button
+works before a wallet is connected — and returns:
+
+```
+{vault, mandate_hash, deploy_tx, archetype, mandate, emphasis, attempts, rejections[], collided}
+```
+
+An archetype is **bounds, not a template**: allowed asset and venue sets plus a range per numeric
+constraint (`packages/schema/archetypes/`). The model writes a fresh mandate inside them on every
+call, and **two clicks produce two different vaults**. Verified on the fork: one click gave
+*"Depth-First USDC Lender"* (40% cash, 25 bps, aave + morpho), the next *"Instant Liquidity USDC
+Reserve"* (40% cash, 15 bps, aave only).
+
+**Nobody reads the mandate before the transaction is signed**, which is the whole reason this is
+built the way it is. There is no conversation, no preview, and no user input beyond the key. So
+Lane F's `check_envelope()` is the entire review process: a generation that escapes its bounds is
+**regenerated and never deployed**, and when the attempts run out the route returns **422 with
+nothing on-chain**. It is `agent/model/validation.py`'s discipline applied one step earlier, for
+the same reason.
+
+Two response fields are worth rendering:
+
+- **`emphasis`** — which of the archetype's angles produced this vault. Rotated rather than sampled,
+  so the second click cannot draw the first one's angle. The most legible evidence that two clicks
+  are not the same click.
+- **`collided: true`** — the model produced a strategy this archetype had already deployed and the
+  attempts ran out, so it deployed anyway. Inside its bounds and correct, just not new. A duplicate
+  vault is a cosmetic failure; a button that refuses to work is a functional one. Worth a quiet note
+  in the UI, not an error.
+
+`attempts > 1` means the envelope check rejected something that consequently never reached the
+chain. **404** names the available keys.
+
+Deployment goes through the existing genesis path, so hashing and `createVault` are unchanged and an
+archetype vault is indistinguishable from a curated one afterwards — every other route already works
+on it. Which archetype produced which vault is recorded in `<state_dir>/archetypes/`, because
+nothing on-chain says: the factory emits no archetype and `vaults()` is a flat list.
 
 ### Status codes
 
@@ -370,6 +412,43 @@ in token units, which cannot be projected without a price.
 
 All six have been observed rejecting live, each producing a journaled `AgentAction(status="rejected")`
 with no plan and no transaction.
+
+## Wind-down — what a paused vault is for
+
+`VaultState.paused` is **real since Wave 3** and read from the chain. It flips the objective of a
+tick, so it is read rather than assumed: a paused vault whose harness thinks it is trading normally
+does nothing at all, and its depositors are the ones waiting for the book to converge on cash.
+
+While paused the mandate's target allocations are **suspended** and the objective becomes *convert
+holdings to the base asset, at good execution*. **Not "hold"** — `redeem` pays in one asset, so a
+holder whose claim exceeds the vault's cash cannot exit through it, and a paused vault that sits
+still leaves them there. (They are never trapped: Lane A's `redeemInKind` pays a slice of every
+token and is unpausable. Wind-down is what makes the *simpler* exit work again.)
+
+Three things change, and each is added rather than relaxed:
+
+- **A separate direction rule.** `check_wind_down_direction` replaces layer 5 while paused; the
+  validator runs exactly one of the two. It is the off-chain twin of Lane A's on-chain check —
+  the contract reverts, which costs gas and surfaces as a failed tick with no explanation, while
+  this rejects with a correction the model can act on. It also catches what the contract **cannot
+  see**: an Aqua ship moves no tokens at all and a supply swaps the underlying for a receipt, so
+  neither raises a non-base balance the way the end-of-batch check measures, and both commit capital
+  when the job is to free it.
+- **Layer 6 stands down only its overshoot rule**, whose premise is the suspended targets. The floor
+  and ceiling still run — not an exemption but a no-op, since selling raises cash and lowers
+  positions.
+- **The prompt replaces its decision procedure** rather than appending to it. The normal step 4 says
+  idle capital is a position earning nothing and deploying it is the default, which is backwards
+  when cash is the goal.
+
+**Plan steps sort releases ahead of spends.** An Aqua position is encumbered rather than absent and a
+lending position is held as a receipt token, so a swap of the underlying reverts until it is docked
+or withdrawn. The whole plan goes to chain as one `executeBatch`, so the wrong order costs the entire
+tick. A stable sort — the agent still chooses route, size and sequence.
+
+⚠️ **The guardian pauses; it never names the trade.** Route and size stay the agent's under the same
+allowlists. A guardian who could name the trade would pick the timing and could trade ahead of it,
+which is a worse power than the one the pause exists to contain.
 
 ## Prompt injection
 
