@@ -61,7 +61,7 @@ def _render_mandate(mandate: Mandate) -> str:
             f"Risk posture: {mandate.risk_posture}",
             f"Base asset (cash): {mandate.base_asset}",
             "",
-            "HARD LIMITS — a decision breaching any of these is rejected:",
+            "HARD LIMITS. A decision breaching any of these is rejected:",
             f"- Allowed assets: {', '.join(limits.allowed_assets)}. No others, ever.",
             "- Target weights must sum to 1.0.",
             f"- No single non-cash position above {limits.max_position_pct:.0%} of the vault.",
@@ -150,7 +150,7 @@ def _render_gaps(snapshot: MarketSnapshot) -> str:
     """
     if not snapshot.errors:
         return ""
-    lines = ["", "Data you could NOT read this tick — reason about this explicitly:"]
+    lines = ["", "Data you could NOT read this tick. Reason about this explicitly:"]
     lines += [f"- {error.source}: {error.message}" for error in snapshot.errors]
     return "\n".join(lines)
 
@@ -214,7 +214,7 @@ YOUR MANDATE
 {_render_mandate(mandate)}
 {_render_holdings(vault)}
 
-MARKET DATA — cite these ids in `facts_used`:
+MARKET DATA. Cite these ids in `facts_used`:
 {_render_facts(snapshot)}{_render_gaps(snapshot)}
 
 Decide what to do with this vault now.
@@ -233,7 +233,7 @@ Return exactly this JSON shape:
 }}
 
 If you choose "hold", omit `venue_intents` entirely. If you choose any other \
-action, you must supply the venue intents that carry it out — an action with no \
+action, you must supply the venue intents that carry it out. An action with no \
 intents changes nothing."""
 
     return [
