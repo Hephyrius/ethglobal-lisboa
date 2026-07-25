@@ -9,6 +9,15 @@
 # ABIs and bytecode are in the per-contract artifacts — so keep them out of the committed tree.
 /out/build-info/
 
+# Artifacts for the *test* tree. Nothing outside this lane integrates against a test contract's ABI,
+# and committing them cost more than they were worth twice over: they are the bulk of the diff noise
+# every lane sees on a `contracts/` commit, and their solc metadata carries dozens of IPFS CIDs that
+# a credential scanner reasonably reads as high-entropy secrets. The artifacts for `src/` — the ones
+# the convention above exists for — are still committed and still published.
+/out/*.t.sol/
+/out/VaultTestBase.sol/
+/out/VaultHandler.sol/
+
 # Foundry local state. Already covered by the root file; repeated so this directory is
 # self-explanatory to anyone who opens it alone.
 /cache/
