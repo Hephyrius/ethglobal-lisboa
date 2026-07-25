@@ -1,0 +1,23 @@
+# Standalone Foundry project — NOT contracts/ (Lane A). Nothing here is ever
+# imported by the vault. This project exists only to compile SwapVM strategy
+# programs using 1inch's OFFICIAL libraries, so we never reimplement their
+# bytecode encoding in Python. Read off-chain with eth_call; the vault receives
+# the result as opaque bytes.
+
+[profile.default]
+src = "src"
+test = "test"
+out = "out"
+libs = ["node_modules"]
+# Matches the pragma in 1inch's swap-vm and aqua sources exactly. A different
+# minor version fails to compile their files.
+solc_version = "0.8.30"
+optimizer = true
+optimizer_runs = 700
+# swap-vm compiles with via_ir; MakerTraitsLib.build hits stack-too-deep
+# without it because of the 20-field Args struct.
+via_ir = true
+
+[fmt]
+line_length = 120
+bracket_spacing = true

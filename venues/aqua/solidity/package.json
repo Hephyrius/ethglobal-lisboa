@@ -1,0 +1,20 @@
+{
+  "name": "@curator/swapvm-program-builder",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Lane D — SwapVM strategy program builder, compiled against 1inch's official libraries",
+  "comment": [
+    "Solidity dependencies arrive through npm, not forge submodules, because that",
+    "is how 1inch ship swap-vm and aqua (their remappings.txt points at",
+    "node_modules/). It also avoids writing to the repo-root .gitmodules, which",
+    "Lane A's Foundry project would be writing to at the same time.",
+    "Pinned to the same versions swap-vm itself declares."
+  ],
+  "dependencies": {
+    "@1inch/aqua": "github:1inch/aqua#v1.0.0",
+    "@1inch/solidity-utils": "6.9.10",
+    "@1inch/swap-vm": "github:1inch/swap-vm",
+    "@openzeppelin/contracts": "5.4.0",
+    "forge-std": "github:foundry-rs/forge-std#v1.11.0"
+  }
+}
