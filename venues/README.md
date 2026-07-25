@@ -38,6 +38,36 @@ plan  = await venue.plan(intent, vault_state)   # -> ExecutionPlan
 | `Venue.key` | `str` | Registry key. |
 | `Venue.aclose` | `async () -> None` | Closes the HTTP/RPC client. Call at shutdown. |
 
+### Verifying an Aqua position — `read_position` / `assert_position_live`
+
+**A successful `ship()` transaction is not evidence that the position exists.**
+`ship()` accepts almost anything and returns a valid strategy hash; the only
+observable that distinguishes a fillable position from an accounting entry is
+`Aqua.safeBalances()`.
+
+```python
+from venues.aqua import assert_position_live
+from venues.rpc import RpcClient
+
+async with RpcClient(rpc_url) as rpc:
+    balances = await assert_position_live(          # raises with a diagnosis
+        rpc, maker=vault_address, strategy_hash=hash_from_ship_receipt,
+        token_a="WETH", token_b="USDC",
+    )
+    print(balances.describe())   # "3000000000000000000 0x42000000… / … (fillable)"
+```
+
+| | |
+|---|---|
+| `read_position(...) -> PositionBalances \| None` | `None` means docked, never shipped, or not covering those tokens — Aqua *reverts* rather than returning zeros, and that revert is an answer, not an error. |
+| `assert_position_live(...) -> PositionBalances` | Raises `AssertionError` naming the likely cause. For tests and the e2e suite. |
+| `PositionBalances.live` | Both sides non-zero. A one-sided curve cannot be traded against. |
+
+Three states that look alike and are not: **not active** (`None`), **active but
+empty** (`live is False`), and **active and fillable**. A missing ERC-20
+approval produces *none* of these — it leaves balances intact and fails only at
+fill time, which is why the approval steps must never be dropped.
+
 Adapters are constructed lazily, so a mandate that never names Uniswap does not
 require `UNISWAP_API_KEY` to be present.
 
