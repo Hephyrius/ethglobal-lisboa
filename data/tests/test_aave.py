@@ -131,10 +131,16 @@ async def test_assets_are_filtered_case_insensitively():
     assert {f.subject.market for f in facts} == {"USDC"}
 
 
-async def test_no_matching_reserve_is_noted():
+async def test_no_matching_reserve_is_context_not_a_failure():
+    """The query worked; this protocol just does not list the asset. Routing
+    that to errors[] told the agent its data layer was broken 35 ticks out of
+    36, which is how it learns to distrust a feed that never failed."""
     source = _source(_handler([_reserve(symbol="DAI")]))
     assert await source.fetch(["USDC"]) == []
-    assert "no active reserve" in source.drain_notes()[0]
+    assert source.drain_notes() == []
+    remark = source.drain_remarks()[0]
+    assert "no active reserve" in remark
+    assert "not an option" in remark      # the "so what"
 
 
 async def test_a_missing_price_costs_only_the_tvl_fact():

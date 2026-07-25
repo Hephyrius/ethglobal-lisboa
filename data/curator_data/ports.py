@@ -120,6 +120,51 @@ class BaseSource(ABC):
         remarks, self._remarks = self._remarks, []
         return remarks
 
+    # ── diagnoses ─────────────────────────────────────────────────────────
+    #
+    # Wave 1 fixed *which channel* a message goes to. This fixes *what it
+    # says*. The reader is an LLM deciding whether to move capital, and
+    #
+    #     messari: ConnectionError: [Errno 11001] getaddrinfo failed
+    #
+    # tells it nothing it can act on. A model shown that can only guess whether
+    # the market it cannot see is a market it should worry about.
+    #
+    # Every message is therefore three parts:
+    #
+    #   who         the subject inside this source — a protocol, a feed, a token
+    #   what        the observation, WITH THE NUMBER. "slow" is an opinion;
+    #               "no response within 6s" is a fact the agent can weigh
+    #   so what     the consequence already taken, or the one the agent should
+    #               draw. This is the part that was always missing
+    #
+    # rendering as `subject: observation - consequence`. The registry prefixes
+    # the source key, so the line the agent finally reads is
+    #
+    #     messari - uniswap-v3: no response within 6s - skipped so it does not
+    #     delay the other protocols
+    #
+    # ASCII hyphen, not an em dash: these reach a Windows console through the
+    # CLI, where cp1252 turns a dash into a mojibake box mid-demo.
+
+    def diagnose(
+        self,
+        subject: str,
+        observation: str,
+        consequence: str,
+        *,
+        failure: bool = True,
+    ) -> None:
+        """Record a three-part diagnosis: who, what (with the number), so what.
+
+        `failure=False` routes to `remark`/`notes` for something that did not
+        go wrong — a deliberate skip, or a question this source was never able
+        to answer. Getting that split wrong is what made 35 of 36 ticks open by
+        telling the agent its data layer was broken.
+        """
+        message = f"{subject}: {observation} - {consequence}"
+        (self.note if failure else self.remark)(message)
+
     async def close(self) -> None:
         """Release held resources. Safe to call more than once."""
         return None

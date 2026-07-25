@@ -41,6 +41,7 @@ import httpx
 from curator_schema.models import Fact
 
 from ..config import Settings
+from ..diagnostics import DROPPED_NOT_SHOWN
 from ..facts import FactBuilder
 from ..http import LoopBoundClient
 from ..ports import BaseSource
@@ -121,8 +122,12 @@ class DefiLlamaSource(BaseSource):
         if len(candidates) > TOP_N:
             # Never truncate silently. A model told "here is the market" when it
             # was shown a quarter of it will reason confidently about a subset.
-            self.remark(
-                f"{len(candidates)} Base pools matched; showing the {TOP_N} deepest by TVL"
+            self.diagnose(
+                "pool universe",
+                f"{len(candidates)} Base pools matched the mandate's assets",
+                f"showing only the {TOP_N} deepest by TVL, so shallower pools are absent "
+                f"from this snapshot rather than absent from the market",
+                failure=False,
             )
 
         builder = FactBuilder(self.key, chain=self.settings.chain)
@@ -131,9 +136,12 @@ class DefiLlamaSource(BaseSource):
             facts.extend(self._facts_for(row, builder))
 
         if not facts:
-            self.remark(
+            self.diagnose(
+                "pool universe",
                 f"no Base pool above ${MIN_TVL_USD:,.0f} TVL matched "
-                f"{sorted(wanted) if wanted else 'any asset'}"
+                f"{sorted(wanted) if wanted else 'any asset'}",
+                "there is no aggregator-sourced pool yield for these assets this tick",
+                failure=False,
             )
         return facts
 
@@ -200,18 +208,23 @@ class DefiLlamaSource(BaseSource):
         if isinstance(base, int | float):
             fraction = float(base) / 100.0  # DefiLlama reports percent
             if isinstance(total, int | float) and total - base > 1.0:
-                self.remark(
-                    f"{protocol} {market}: reporting its {base:.2f}% base yield, not the "
-                    f"{total:.2f}% headline — the difference is token emissions, which is a "
-                    f"bet on the emitted token rather than interest"
+                self.diagnose(
+                    f"{protocol} {market}",
+                    f"reporting its {base:.2f}% base yield, not the {total:.2f}% headline",
+                    "the difference is token emissions, which is a bet on the emitted token "
+                    "rather than interest",
+                    failure=False,
                 )
         elif isinstance(total, int | float):
             # No split available. Use the headline but say so, rather than
             # dropping a real pool or presenting emissions as interest.
             fraction = float(total) / 100.0
-            self.remark(
-                f"{protocol} {market}: {total:.2f}% is a headline APY with no base/reward "
-                f"split published, so it may include token emissions"
+            self.diagnose(
+                f"{protocol} {market}",
+                f"{total:.2f}% is a headline APY with no base/reward split published",
+                "it may include token emissions, so treat it as an upper bound rather than "
+                "interest earned",
+                failure=False,
             )
         else:
             return None
@@ -219,9 +232,11 @@ class DefiLlamaSource(BaseSource):
         if fraction <= 0:
             return None
         if fraction > MAX_PLAUSIBLE_APY:
-            self.remark(
-                f"{protocol} {market} reports {fraction:.0%} — dropped as an indexing error "
-                f"rather than shown as a yield"
+            self.diagnose(
+                f"{protocol} {market}",
+                f"reports {fraction:.0%}, far outside any plausible yield",
+                DROPPED_NOT_SHOWN,
+                failure=False,
             )
             return None
 

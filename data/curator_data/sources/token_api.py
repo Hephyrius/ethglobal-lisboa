@@ -43,6 +43,12 @@ import httpx
 from curator_schema.models import Fact
 
 from ..config import Settings
+from ..diagnostics import (
+    OTHERS_UNAFFECTED,
+    RETRY_NEXT_TICK,
+    explain_exception,
+    is_rate_limited,
+)
 from ..facts import FactBuilder
 from ..http import LoopBoundClient
 from ..ports import BaseSource
@@ -138,8 +144,10 @@ class TokenApiSource(BaseSource):
             # Whole-source failure: with no credential nothing can be fetched,
             # so this belongs in errors[] as one clear line.
             raise RuntimeError(
-                "TOKEN_API_KEY is not set - the Token API needs its own bearer JWT from "
-                "The Graph Market. GRAPH_API_KEY is rejected with 401."
+                "TOKEN_API_KEY is not set - dex-derived prices are unavailable this tick "
+                "and no retry will fix it; the chainlink oracle source still prices the same "
+                "assets. The Token API needs its own bearer JWT from The Graph Market - "
+                "GRAPH_API_KEY is rejected with 401."
             )
 
         network = NETWORK_IDS.get(self.settings.chain, self.settings.chain)
@@ -192,7 +200,12 @@ class TokenApiSource(BaseSource):
             f"/evm/swaps?network={network}&pool={pool_address}&limit={SWAP_SAMPLE}"
         )
         if swaps is None:
-            self.note(f"price for {symbol} unavailable: no swaps returned for pool {pool_address}")
+            self.diagnose(
+                symbol,
+                f"pool {pool_address[:10]}... has no recent swaps to price from",
+                "this asset is unpriced by dex activity; the chainlink oracle source may still "
+                "carry it",
+            )
             return None
 
         target = _norm(address)
@@ -208,8 +221,11 @@ class TokenApiSource(BaseSource):
                 observations.append(quote_amount / target_amount)
 
         if not observations:
-            self.note(f"price for {symbol} unavailable: no usable swap legs in the last "
-                      f"{SWAP_SAMPLE} trades")
+            self.diagnose(
+                symbol,
+                f"none of the last {SWAP_SAMPLE} swaps had a usable pair of legs",
+                "this asset is unpriced by dex activity this tick",
+            )
             return None
 
         price = statistics.median(observations)
@@ -241,7 +257,12 @@ class TokenApiSource(BaseSource):
             f"/evm/pools?network={network}&token={address}&limit={POOL_SAMPLE}"
         )
         if pools is None:
-            self.note(f"price for {symbol} unavailable: pool discovery returned nothing")
+            self.diagnose(
+                symbol,
+                "pool discovery returned no pools",
+                "this asset is unpriced by dex activity; pin a pool in "
+                "curator_data/sources/pools.py to skip discovery",
+            )
             return None
 
         target = _norm(address)
@@ -292,7 +313,7 @@ class TokenApiSource(BaseSource):
                 if attempt == 1:
                     await asyncio.sleep(_RETRY_BACKOFF_S)
                     continue
-                self.note(f"Token API unreachable: {type(exc).__name__}: {exc}")
+                self.diagnose("Token API", explain_exception(exc), RETRY_NEXT_TICK)
                 return None
             if response.status_code < 500 or attempt == 2:
                 break
@@ -306,7 +327,14 @@ class TokenApiSource(BaseSource):
         # over a page-size mistake would be the same misclassification as
         # treating the subgraph gateway's auth error as a schema error.
         if response.status_code == 403 and _is_quota_complaint(response.text):
-            self.note(f"Token API plan limit hit on {path.split('?')[0]}: {response.text[:120]}")
+            # A quota complaint, not a rejected credential. Separating the two
+            # matters: one clears by itself, the other needs an operator, and a
+            # model told the same thing about both learns nothing from either.
+            self.diagnose(
+                path.split("?")[0],
+                f"the free plan refused this request ({response.text[:90]})",
+                RETRY_NEXT_TICK,
+            )
             return None
         if response.status_code in (401, 403):
             # A real credential problem is not per-route; fail the whole source.
@@ -315,13 +343,20 @@ class TokenApiSource(BaseSource):
                 f"TOKEN_API_KEY must be a Graph Market JWT, not GRAPH_API_KEY"
             )
         if response.status_code >= 400:
-            self.note(f"Token API returned HTTP {response.status_code} for {path.split('?')[0]}")
+            throttled = is_rate_limited(response.status_code, response.text)
+            self.diagnose(
+                path.split("?")[0],
+                f"HTTP {response.status_code}" + (" - rate limited" if throttled else ""),
+                RETRY_NEXT_TICK if throttled else OTHERS_UNAFFECTED,
+            )
             return None
 
         try:
             body: Any = response.json()
         except ValueError:
-            self.note(f"Token API returned non-JSON for {path.split('?')[0]}")
+            self.diagnose(
+                path.split("?")[0], "the response was not JSON", OTHERS_UNAFFECTED
+            )
             return None
 
         rows = body.get("data") if isinstance(body, dict) else None

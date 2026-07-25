@@ -225,7 +225,11 @@ async def test_a_plan_limit_403_does_not_kill_the_whole_source():
 
     source = _source(handler)
     assert await source.fetch(["WETH"]) == []  # degraded, not raised
-    assert any("plan limit" in n for n in source.drain_notes())
+    notes = source.drain_notes()
+    assert any("free plan refused" in n for n in notes)
+    # A quota refusal clears by itself; saying so is what separates it from a
+    # rejected credential, which never will.
+    assert any("next tick" in n for n in notes)
 
 
 async def test_a_genuine_credential_403_still_fails_the_source():

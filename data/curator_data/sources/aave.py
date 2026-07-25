@@ -38,6 +38,7 @@ from typing import Any
 from curator_schema.models import Fact
 
 from ..config import Settings
+from ..diagnostics import OTHERS_UNAFFECTED, explain_exception
 from ..facts import FactBuilder
 from ..graph.factory import make_gateway
 from ..graph.gateway import GatewayClient
@@ -114,8 +115,9 @@ class AaveSource(BaseSource):
             return []
         if not self.settings.graph_api_key:
             raise RuntimeError(
-                "GRAPH_API_KEY is not set - get one free at https://thegraph.com/studio "
-                "-> API Keys and put it in .env"
+                "GRAPH_API_KEY is not set - every Aave market is unreadable this tick, and "
+                "no retry will fix it. Get one free at https://thegraph.com/studio -> API Keys "
+                "and put it in .env"
             )
 
         facts: list[Fact] = []
@@ -123,7 +125,10 @@ class AaveSource(BaseSource):
             try:
                 facts.extend(await self._fetch_protocol(protocol, wanted))
             except Exception as exc:  # noqa: BLE001 - one deployment must not sink the rest
-                self.note(f"{protocol.key}: {type(exc).__name__}: {exc}")
+                # `OTHERS_UNAFFECTED` matters more than it looks: this source
+                # can serve several deployments, and without it one failure
+                # reads as "Aave is down" rather than "one deployment is".
+                self.diagnose(protocol.key, explain_exception(exc), OTHERS_UNAFFECTED)
         return facts
 
     async def _fetch_protocol(self, protocol: Protocol, wanted: set[str]) -> list[Fact]:
@@ -158,9 +163,13 @@ class AaveSource(BaseSource):
                 facts.append(builder.usd("tvl", subject, tvl))
 
         if wanted and not matched:
-            self.note(
-                f"{protocol.key}: no active reserve for {sorted(wanted)} in the first "
-                f"{RESERVE_LIMIT}"
+            # Not a failure: the query worked, this protocol simply does not
+            # list the asset. `remark` keeps it out of "data you could not read".
+            self.diagnose(
+                protocol.key,
+                f"no active reserve for {sorted(wanted)} among the first {RESERVE_LIMIT}",
+                "this protocol is not an option for those assets this tick",
+                failure=False,
             )
         return facts
 

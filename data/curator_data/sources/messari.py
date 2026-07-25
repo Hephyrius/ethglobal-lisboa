@@ -224,8 +224,9 @@ class MessariSource(BaseSource):
         # single actionable error.
         if not self.settings.graph_api_key:
             raise RuntimeError(
-                "GRAPH_API_KEY is not set - get one free at https://thegraph.com/studio "
-                "-> API Keys and put it in .env"
+                "GRAPH_API_KEY is not set - every subgraph is unreadable this tick, and no "
+                "retry will fix it. Get one free at https://thegraph.com/studio -> API Keys "
+                "and put it in .env"
             )
 
         live = [p for p in self._protocols if self._breaker_allows(p)]
@@ -344,9 +345,14 @@ class MessariSource(BaseSource):
                 ([p.get("token0") or {}, p.get("token1") or {}], p.get("totalValueLockedUSD"))
                 for p in data.get("pools") or []
             ]
-            self.note(
-                f"{protocol.key}: uses its own pool schema, not the Messari standardized "
-                f"one - fell back (harmless; pin the family in protocols.py to skip the retry)"
+            # "harmless" was in the old message and then it was filed as an
+            # error anyway. It is a successful fallback, not a gap.
+            self.diagnose(
+                protocol.key,
+                "publishes its own pool schema rather than the Messari standardized one",
+                "fell back and read it successfully; pin the family in protocols.py to skip "
+                "the retry",
+                failure=False,
             )
 
         return self._dex_facts(protocol, pools, wanted, builder)

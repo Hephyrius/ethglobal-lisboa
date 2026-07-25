@@ -164,7 +164,12 @@ async def test_a_stale_price_is_still_returned_but_flagged():
 
     facts = await source.fetch(["WETH"])
     assert len(facts) == 1
-    assert "stale" in source.drain_notes()[0]
+    # Context, not a gap: the price was read and returned. Filing it under
+    # "data you could NOT read" asks the agent to reason about absent data
+    # that is in fact present.
+    assert source.drain_notes() == []
+    remark = source.drain_remarks()[0]
+    assert "2.0d old" in remark and "stale" in remark   # keeps the number
 
 
 async def test_an_unreachable_node_degrades_to_a_note():
@@ -174,9 +179,11 @@ async def test_an_unreachable_node_degrades_to_a_note():
 
 
 async def test_an_asset_with_no_feed_is_named_with_the_fix():
+    """Not carrying a feed is not a failure of the feed we do carry."""
     source = _source(FakeRpc())
     await source.fetch(["WETH", "DOGE"])
-    assert any("DOGE" in n and "feeds.py" in n for n in source.drain_notes())
+    assert source.drain_notes() == []
+    assert any("DOGE" in r and "feeds.py" in r for r in source.drain_remarks())
 
 
 async def test_one_broken_feed_does_not_lose_the_others():

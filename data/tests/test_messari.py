@@ -342,8 +342,11 @@ async def test_a_dex_subgraph_with_its_own_schema_falls_back_to_the_native_shape
     assert facts[0].kind == "liquidity"
     assert facts[0].value == 9_100_000.0
     assert facts[0].subject.pair == ["USDC", "WETH"]
-    # The fallback is reported, not silent — it is a config fix worth making.
-    assert "own pool schema" in source.drain_notes()[0]
+    # Reported, but as context: the fallback SUCCEEDED, so it is not a gap in
+    # the agent's view. It is still worth saying, because pinning the family
+    # in protocols.py would skip the wasted retry.
+    assert source.drain_notes() == []
+    assert "own pool schema" in source.drain_remarks()[0]
 
 
 async def test_the_standardized_shape_is_preferred_and_costs_no_extra_request():

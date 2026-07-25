@@ -48,6 +48,12 @@ from curator_schema.models import Fact
 
 from ..chain.rpc import RpcClient, RpcError, decode_string, decode_word
 from ..config import Settings
+from ..diagnostics import (
+    DROPPED_NOT_SHOWN,
+    TREAT_AS_STALE,
+    describe_age,
+    explain_exception,
+)
 from ..facts import FactBuilder
 from ..ports import BaseSource
 from .feeds import PriceFeed, feeds_for, known_symbols
@@ -117,20 +123,31 @@ class ChainlinkSource(BaseSource):
             try:
                 fact = await self._read_feed(feed, builder)
             except RpcError as exc:
-                self.note(f"{feed.symbol}: {exc}")
+                # RpcError messages are already written as diagnoses (wrong
+                # feed identity, empty return, implausible decimals), so they
+                # are the observation rather than something to translate.
+                self.diagnose(feed.symbol, str(exc), "this asset is unpriced this tick")
                 continue
             except Exception as exc:  # noqa: BLE001 - one feed must not sink the rest
-                self.note(f"{feed.symbol}: {type(exc).__name__}: {exc}")
+                self.diagnose(
+                    feed.symbol, explain_exception(exc), "this asset is unpriced this tick"
+                )
                 continue
             if fact is not None:
                 facts.append(fact)
 
         missing = wanted - {f.symbol.upper() for f in self._feeds}
         if missing:
-            self.note(
-                f"no Chainlink feed configured for {sorted(missing)} on "
-                f"{self.settings.chain} (have: {', '.join(known_symbols(self.settings.chain))}) - "
-                f"add it to curator_data/sources/feeds.py"
+            # Not a failure: nothing broke, we simply do not carry a feed for
+            # it. Saying so as a remark keeps "data you could NOT read" for
+            # things that actually went wrong.
+            self.diagnose(
+                ", ".join(sorted(missing)),
+                f"no Chainlink feed is configured on {self.settings.chain} "
+                f"(configured: {', '.join(known_symbols(self.settings.chain))})",
+                "this asset has no oracle price; add it to "
+                "curator_data/sources/feeds.py to change that",
+                failure=False,
             )
         return facts
 
@@ -145,10 +162,18 @@ class ChainlinkSource(BaseSource):
         answered_in_round = decode_word(data, 4)
 
         if answer <= 0:
-            self.note(f"{feed.symbol}: feed returned a non-positive answer ({answer}) - ignored")
+            self.diagnose(
+                feed.symbol,
+                f"the feed returned a non-positive answer ({answer})",
+                DROPPED_NOT_SHOWN,
+            )
             return None
         if answered_in_round < round_id:
-            self.note(f"{feed.symbol}: round {round_id} is incomplete - ignored")
+            self.diagnose(
+                feed.symbol,
+                f"round {round_id} is incomplete (answered in {answered_in_round})",
+                DROPPED_NOT_SHOWN,
+            )
             return None
 
         price = answer / (10**decimals)
@@ -157,9 +182,19 @@ class ChainlinkSource(BaseSource):
         if updated_at:
             age = datetime.now(timezone.utc).timestamp() - updated_at
             if age > STALE_AFTER_S:
-                self.note(
-                    f"{feed.symbol}: price is {age / 3600:.1f}h old - the agent should treat "
-                    f"it as stale"
+                # The one message the Wave 2 plan quotes verbatim as the
+                # target shape. The price is still returned - staleness is
+                # information the agent should weigh, not grounds for hiding it.
+                # `failure=False`: the price WAS read and is returned below.
+                # `errors[]` is rendered to the model as "data you could NOT
+                # read", and a stale price is data you could read that happens
+                # to be old. Filing it as an error asks the agent to reason
+                # about a gap that is not there.
+                self.diagnose(
+                    feed.symbol,
+                    f"price is {describe_age(age)} old",
+                    TREAT_AS_STALE,
+                    failure=False,
                 )
 
         # observed_at is when the ORACLE last spoke, not when we asked.

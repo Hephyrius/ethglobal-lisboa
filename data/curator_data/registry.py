@@ -25,6 +25,7 @@ from collections.abc import Callable, Iterable, Mapping
 from curator_schema.models import Fact, MarketSnapshot, SourceError, SourceNote
 
 from .config import Settings
+from .diagnostics import explain_exception
 from .facts import dedupe_ids, utcnow
 from .ports import DataSource
 
@@ -197,7 +198,12 @@ class Registry:
             # model; a stack trace at WARNING would bury the demo's own output.
             logger.warning("data source %s failed: %s", key, exc)
             logger.debug("data source %s traceback", key, exc_info=True)
-            error = SourceError(source=key, message=f"{type(exc).__name__}: {exc}")
+            # `explain_exception` rather than `f"{type}: {exc}"`. The reader is
+            # a model deciding whether to move capital, and a sentence it can
+            # act on beats an exception class name it cannot. Sources that
+            # raise a written-out reason (a missing credential, say) come
+            # through unchanged; opaque failures still fall back to the type.
+            error = SourceError(source=key, message=explain_exception(exc))
 
         # Drained even on failure: a source that fetched three protocols and
         # then blew up on the fourth should still report the three notes.
