@@ -92,6 +92,17 @@ interface ICuratedVault {
     error RolesAreFrozen();
 
     // ─────────────────────────────────────────────────────────────────────
+    // Genesis
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// @notice Configure a freshly-cloned vault. Callable exactly once, by the factory, in the same
+    ///         transaction as the clone.
+    /// @dev Everything in `InitParams` is immutable afterwards except the target allowlist, which
+    ///      only `GUARDIAN_ROLE` may change. `DEFAULT_ADMIN_ROLE` is never granted, so the role
+    ///      assignments made here are permanent.
+    function initialize(InitParams calldata params) external;
+
+    // ─────────────────────────────────────────────────────────────────────
     // Agent surface — AGENT_ROLE only
     // ─────────────────────────────────────────────────────────────────────
 

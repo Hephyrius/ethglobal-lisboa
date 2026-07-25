@@ -35,10 +35,18 @@ library ChainlinkPriceLib {
 
         if (updatedAt == 0) revert IncompleteRound(address(feed));
         if (answer <= 0) revert InvalidPrice(address(feed), answer);
+
+        // A freshness check has no other clock to read. The bound is measured in hours, so the few
+        // seconds a proposer could shift `block.timestamp` cannot turn a stale answer into a fresh
+        // one or the reverse.
+        // forge-lint: disable-next-line(block-timestamp)
         if (maxAge != 0 && block.timestamp > updatedAt + maxAge) {
             revert StalePrice(address(feed), updatedAt, maxAge);
         }
 
+        // Safe: `answer <= 0` reverted two lines above, so the value is strictly positive and
+        // within int256, which is a subset of uint256.
+        // forge-lint: disable-next-line(unsafe-typecast)
         return uint256(answer);
     }
 
