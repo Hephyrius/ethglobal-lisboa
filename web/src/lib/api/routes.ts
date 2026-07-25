@@ -42,6 +42,18 @@ export const AgentHealth = z
   })
   .passthrough()
 
+/**
+ * `GET /genesis/sources` — what the data registry actually has registered.
+ *
+ * Reading this instead of hard-coding a source list is the point: granting a
+ * source is a mandate edit, not a code change, so the genesis screen must offer
+ * whatever Lane C has registered today. When their Aave adapter binds, `aave`
+ * appears here and becomes grantable with no change on this side.
+ */
+export const GenesisSources = z
+  .object({ sources: z.array(z.string()), venues: z.array(z.string()) })
+  .passthrough()
+
 export const routes = {
   genesisChat: () => '/genesis/chat',
   genesisFinalize: () => '/genesis/finalize',
@@ -61,4 +73,5 @@ export const schemas = {
   vaultDecisions: { response: AgentActionList },
   vaultTick: { response: AgentAction },
   health: { response: AgentHealth },
+  genesisSources: { response: GenesisSources },
 } as const

@@ -6,7 +6,7 @@ import { ChatPanel } from '@/components/genesis/ChatPanel'
 import { MandateDraft } from '@/components/genesis/MandateDraft'
 import { DeployPanel } from '@/components/genesis/DeployPanel'
 import { ModeNotice } from '@/components/ui/ModeBadge'
-import { useGenesisChat } from '@/lib/api/genesis-queries'
+import { useGenesisChat, useGenesisSources } from '@/lib/api/genesis-queries'
 import { GENESIS_OPENING, type ChatMessage } from '@/lib/api/genesis-sim'
 
 /**
@@ -25,12 +25,15 @@ export default function CreatePage() {
   ])
   const [draft, setDraft] = useState<Partial<Mandate>>({})
   const chat = useGenesisChat()
+  // What the data registry actually has registered — never a hard-coded list,
+  // so a source Lane C adds becomes grantable here with no change. Request #19.
+  const available = useGenesisSources()
 
   async function send(text: string) {
     const next: ChatMessage[] = [...messages, { role: 'user', content: text }]
     setMessages(next)
 
-    const result = await chat.mutateAsync({ messages: next, draft }).catch(() => null)
+    const result = await chat.mutateAsync({ messages: next, draft, available }).catch(() => null)
     if (!result) {
       setMessages([
         ...next,
@@ -68,7 +71,7 @@ export default function CreatePage() {
         <ChatPanel messages={messages} pending={chat.isPending} onSend={(text) => void send(text)} />
 
         <div className="space-y-4">
-          <MandateDraft draft={draft} />
+          <MandateDraft draft={draft} available={available} />
           <DeployPanel draft={draft} />
         </div>
       </div>

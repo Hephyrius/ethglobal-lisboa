@@ -1,6 +1,6 @@
 'use client'
 
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import type { z } from 'zod'
 import type { Mandate as MandateT } from '@curator/schema'
 import { apiFetch, apiFetchStrict, postJson, type Sourced } from './client'
@@ -16,20 +16,54 @@ const MODEL_TIMEOUT_MS = 120_000
 /** A deploy waits on a block. */
 const DEPLOY_TIMEOUT_MS = 90_000
 
+/** Registry keys the agent could be granted, straight from Lane C's registry. */
+export type AvailableGrants = { sources: string[]; venues: string[] }
+
+const GRANT_FALLBACK: AvailableGrants = { sources: ['messari', 'token_api'], venues: ['uniswap', 'aqua'] }
+
+/**
+ * What the agent may be granted, read from the live registry rather than
+ * hard-coded here.
+ *
+ * "The user picks permitted data sources" is exactly a registry lookup — the
+ * same mechanism that makes adding Chainlink or Pyth later a config line rather
+ * than a code change. Hard-coding the list on this side would quietly break
+ * that: Lane C's Aave adapter is registered as its own key (`aave`, since Aave
+ * V3 Base publishes its own schema rather than the Messari standardized one),
+ * and a baked-in list would never offer it. Cross-lane request #19.
+ */
+export function useGenesisSources() {
+  const query = useQuery({
+    queryKey: ['genesis-sources'],
+    staleTime: 60_000,
+    retry: false,
+    queryFn: (): Promise<Sourced<AvailableGrants>> =>
+      apiFetch({
+        path: routes.genesisSources(),
+        schema: schemas.genesisSources.response,
+        fallback: () => GRANT_FALLBACK,
+      }),
+  })
+
+  return query.data?.data ?? GRANT_FALLBACK
+}
+
 export function useGenesisChat() {
   const mutation = useMutation({
     mutationFn: ({
       messages,
       draft,
+      available,
     }: {
       messages: ChatMessage[]
       draft: Partial<MandateT>
+      available: AvailableGrants
     }): Promise<Sourced<ChatResponse>> =>
       apiFetch({
         path: routes.genesisChat(),
         schema: schemas.genesisChat.response,
         init: postJson({ messages }),
-        fallback: () => simulateGenesisChat(messages, draft),
+        fallback: () => simulateGenesisChat(messages, draft, available),
         timeoutMs: MODEL_TIMEOUT_MS,
       }),
   })

@@ -14,8 +14,16 @@ import { cn } from '@/lib/cn'
  * they are about to hand an autonomous agent. Progressive disclosure would hide
  * exactly the thing that deserves scrutiny.
  */
-export function MandateDraft({ draft }: { draft: Partial<Mandate> }) {
+export function MandateDraft({
+  draft,
+  available,
+}: {
+  draft: Partial<Mandate>
+  available?: { sources: string[]; venues: string[] }
+}) {
   const constraints = draft.constraints
+  const granted = draft.permitted_data_sources ?? []
+  const ungranted = (available?.sources ?? []).filter((source) => !granted.includes(source))
 
   return (
     <Card>
@@ -59,6 +67,11 @@ export function MandateDraft({ draft }: { draft: Partial<Mandate> }) {
             sources={draft.permitted_data_sources}
             emptyHint="No sources granted — the agent would be blind."
           />
+          {ungranted.length > 0 ? (
+            <p className="mt-1.5 text-2xs text-faint">
+              Registered but not granted: {ungranted.join(', ')}. The agent will not see these.
+            </p>
+          ) : null}
         </Field>
 
         <Field label="Execution venues" filled={Boolean(draft.permitted_venues?.length)}>
