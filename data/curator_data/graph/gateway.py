@@ -22,6 +22,24 @@ from .errors import GatewayAuthError, GatewayError, GatewayQueryError
 
 logger = logging.getLogger(__name__)
 
+#: Substrings that mark a GraphQL-level error as a credential problem rather
+#: than a bad query. The gateway answers an unauthenticated request with
+#: HTTP 200 and {"errors":[{"message":"auth error: missing authorization
+#: header"}]}, so status code alone cannot tell these apart.
+_AUTH_ERROR_MARKERS = (
+    "auth error",
+    "missing authorization",
+    "invalid api key",
+    "unauthorized",
+    "payment required",
+    "rate limit",
+)
+
+
+def _looks_like_auth_failure(message: str) -> bool:
+    lowered = message.lower()
+    return any(marker in lowered for marker in _AUTH_ERROR_MARKERS)
+
 
 class GatewayClient:
     """Executes GraphQL documents against subgraphs by id.
@@ -127,6 +145,13 @@ class GatewayClient:
         if isinstance(body, dict) and body.get("errors"):
             errors = body["errors"]
             first = errors[0].get("message", "unknown") if errors else "unknown"
+            # Verified against the live gateway: a missing or rejected key comes
+            # back as HTTP *200* with {"errors":[{"message":"auth error: ..."}]},
+            # not as a 401. Classifying that as a query error would send someone
+            # to debug our GraphQL when the real fix is a credential.
+            if _looks_like_auth_failure(first):
+                raise GatewayAuthError(f"gateway rejected the request: {first}",
+                                       subgraph_id=subgraph_id)
             raise GatewayQueryError(
                 f"GraphQL error: {first}", subgraph_id=subgraph_id, errors=errors
             )

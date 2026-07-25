@@ -37,7 +37,7 @@ async def test_endpoint_discovery_falls_through_404s_and_then_sticks():
     attempted: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        attempted.append(request.url.path)
+        attempted.append(str(request.url))
         if "ohlc" not in request.url.path:
             return httpx.Response(404, text="not found")
         return httpx.Response(200, json={"data": [{"close": 3218.44}]})
@@ -100,7 +100,9 @@ async def test_missing_credential_raises_before_any_request():
 
 async def test_one_unpriceable_token_does_not_lose_the_other():
     def handler(request: httpx.Request) -> httpx.Response:
-        if "4200" in request.url.path:  # WETH
+        # The contract address travels as a query parameter, so match the whole
+        # URL rather than just the path.
+        if "4200" in str(request.url):  # WETH
             return httpx.Response(503, text="unavailable")
         return httpx.Response(200, json={"price_usd": 1.0})
 

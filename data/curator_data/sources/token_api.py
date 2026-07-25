@@ -41,11 +41,18 @@ logger = logging.getLogger(__name__)
 
 #: Tried in order; `{address}` and `{network}` are substituted. The first that
 #: returns a parseable price wins and is reused for the rest of the process.
+#:
+#: Order verified by probe on 2026-07-25 against the live host: the first two
+#: return HTTP 401 (route exists, needs a credential) while the older
+#: `/prices/evm/{address}` shape returns 404 (route does not exist). The 404
+#: shapes are kept last rather than deleted — this API moved hosts and layout
+#: once already during its beta, and a stale entry costs one wasted request
+#: while a missing one costs the whole source.
 PRICE_PATHS: tuple[str, ...] = (
+    "/evm/prices?network={network}&contract={address}",
+    "/evm/ohlc/prices?network={network}&contract={address}&interval=1h&limit=1",
     "/prices/evm/{address}?network_id={network}",
-    "/v1/prices/evm/{address}?network_id={network}",
     "/ohlc/prices/evm/{address}?network_id={network}&interval=1h&limit=1",
-    "/v1/ohlc/prices/evm/{address}?network_id={network}&interval=1h&limit=1",
 )
 
 #: The Token API's identifier for Base mainnet.

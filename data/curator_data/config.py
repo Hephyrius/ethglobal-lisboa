@@ -22,7 +22,12 @@ DEFAULT_GATEWAY_URL = "https://gateway.thegraph.com/api"
 
 # Token API is a REST service on its own host with its own credential — it is
 # NOT the same key as the subgraph gateway. See README "Credentials".
-DEFAULT_TOKEN_API_URL = "https://token-api.thegraph.com"
+#
+# Host verified by probe on 2026-07-25: `token-api.thegraph.com` (the name in
+# The Graph's own docs) does not resolve at all, and the docs now redirect to
+# Pinax, a Graph core developer who operates the service. `GET /health` here
+# returns {"status":"OK"}.
+DEFAULT_TOKEN_API_URL = "https://api.pinax.network/v1"
 
 # x402: the same subgraph gateway, on the payment-gated route. Deliberately
 # needs no API key — that is the entire point of the path.

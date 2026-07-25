@@ -8,6 +8,61 @@ the hackathon window.
 
 ---
 
+## 2026-07-25 — Lane C: three live findings that contradict the documented values
+
+Probed the real endpoints rather than waiting for `GRAPH_API_KEY`. Two of the three would have
+failed silently or misleadingly at demo time. (Supersedes the "unverified" paragraph in the entry
+below.)
+
+**1. The subgraph gateway answers an unauthenticated request with HTTP 200, not 401.**
+
+```
+POST https://gateway.thegraph.com/api/subgraphs/id/<id>
+-> HTTP 200  {"errors":[{"message":"auth error: missing authorization header"}]}
+```
+
+Our transport classified any GraphQL `errors[]` as a *query* error — "our GraphQL is wrong". So a
+missing or malformed key would have printed `Type 'Market' has no field...`-shaped guidance and sent
+whoever hit it at 3am to debug the schema instead of putting a key in `.env`. `_looks_like_auth_failure`
+now inspects the message and raises `GatewayAuthError`, with the live wording (`auth error`,
+`malformed API key`) covered by tests. Confirmed end to end: `GRAPH_API_KEY=not-a-real-key
+curator-data verify-live` now reports *"gateway rejected the request: auth error: malformed API key"*
+against all three subgraphs.
+
+**2. `token-api.thegraph.com` does not resolve. At all.**
+
+That host is what The Graph's own Token API documentation names, and it was our default. It fails
+DNS resolution; the docs now redirect to Pinax, a Graph core developer who operates the service. The
+live host is **`https://api.pinax.network/v1`** (`GET /health` → `{"status":"OK"}`). Had this shipped,
+every price fact would have been a `ConnectError` and the agent would have valued non-USDC holdings
+at nothing — while the snapshot still looked structurally fine.
+
+**3. The price endpoint path shape was wrong too.** Probing distinguishes 401 (route exists, needs
+auth) from 404 (route does not exist):
+
+| Path | Result |
+|---|---|
+| `/evm/prices?network=base&contract=<addr>` | **401 — exists** |
+| `/evm/ohlc/prices?network=base&contract=<addr>` | **401 — exists** |
+| `/prices/evm/<addr>?network_id=base` | 404 — does not exist |
+
+The verified shapes now lead `PRICE_PATHS`. The 404 shapes are kept last rather than deleted: this
+API has already moved host *and* layout once during its beta, so a stale entry costs one wasted
+request while a missing one costs the whole source. The source remembers whichever answers first.
+
+**What this validates, beyond the fixes.** All three subgraph IDs are routable and the gateway URL
+construction is correct, so the only thing standing between us and live Graph data is the key
+itself. **Still genuinely unverified:** whether each subgraph answers the *Messari standardized*
+schema. Aave V3 and Moonwell are expected to; the Uniswap V3 entry may answer Uniswap's own `pools`
+shape, in which case it degrades into `errors[]` and `verify-live` names it — a one-line config fix,
+which is why the protocol table is data.
+
+**Method worth repeating:** an invalid credential exercises the whole network path and the whole
+error-classification path without needing a valid one. Both fixes came from running `verify-live`
+with a deliberately bad key, which cost nothing and found a dead hostname.
+
+---
+
 ## 2026-07-25 — Lane C: the data registry, two Graph sources, a standalone MCP server, x402
 
 **What changed.** `/data` — a pluggable market-data registry (`curator-data`), Messari and Token API
