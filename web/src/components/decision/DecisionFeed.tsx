@@ -12,7 +12,14 @@ import { useVaultDecisions, useVaultTick } from '@/lib/api/vault-queries'
  * because triggering a cycle and watching the resulting card appear at the top
  * is the demo: it turns an audit log into something a judge sees happen.
  */
-export function DecisionFeed({ address }: { address: string }) {
+export function DecisionFeed({
+  address,
+  tokenDecimals,
+}: {
+  address: string
+  /** symbol → decimals, from the vault's holdings. Threaded to the intent renderer. */
+  tokenDecimals?: Record<string, number>
+}) {
   const { data, isPending } = useVaultDecisions(address)
   const tick = useVaultTick(address)
 
@@ -58,7 +65,12 @@ export function DecisionFeed({ address }: { address: string }) {
       ) : (
         <div className="space-y-4">
           {actions.map((action, index) => (
-            <DecisionCard key={action.id} action={action} isLatest={index === 0} />
+            <DecisionCard
+              key={action.id}
+              action={action}
+              isLatest={index === 0}
+              tokenDecimals={tokenDecimals}
+            />
           ))}
         </div>
       )}

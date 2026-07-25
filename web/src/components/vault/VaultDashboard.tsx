@@ -1,5 +1,6 @@
 'use client'
 
+import type { VaultState } from '@curator/schema'
 import { Badge } from '@/components/ui/Badge'
 import { Card, CardBody } from '@/components/ui/Card'
 import { ModeNotice } from '@/components/ui/ModeBadge'
@@ -64,9 +65,25 @@ export function VaultDashboard({ address }: { address: `0x${string}` }) {
         }
       />
 
-      <DecisionFeed address={address} />
+      <DecisionFeed address={address} tokenDecimals={tokenDecimals(state)} />
     </div>
   )
+}
+
+/**
+ * symbol → decimals, from the vault's own holdings.
+ *
+ * `venue_intents` carry amounts as base-unit strings with no decimals attached,
+ * and the vault is sole custodian, so its holdings are the authoritative place
+ * to learn the scale of any token an intent can mention. Without this the
+ * renderer shows raw base units rather than dividing by a guess.
+ */
+function tokenDecimals(state: VaultState): Record<string, number> {
+  const map: Record<string, number> = {}
+  for (const holding of state.holdings) {
+    if (holding.decimals !== undefined) map[holding.symbol] = holding.decimals
+  }
+  return map
 }
 
 function DashboardSkeleton() {

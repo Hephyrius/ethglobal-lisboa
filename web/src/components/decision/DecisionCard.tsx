@@ -6,6 +6,8 @@ import { Badge, type BadgeTone } from '@/components/ui/Badge'
 import { FactCard, UnresolvedFactCard } from './FactCard'
 import { BlindSpots } from './BlindSpots'
 import { ExecutionSteps } from './ExecutionSteps'
+import { VenueIntents } from './VenueIntents'
+import { YieldComparison } from './YieldComparison'
 import { clockTime, formatDuration, fullTimestamp, relativeTime } from '@/lib/format/time'
 import { cn } from '@/lib/cn'
 
@@ -28,7 +30,16 @@ const STATUS: Record<AgentAction['status'], { tone: BadgeTone; label: string }> 
   pending: { tone: 'neutral', label: 'PENDING' },
 }
 
-export function DecisionCard({ action, isLatest }: { action: AgentAction; isLatest?: boolean }) {
+export function DecisionCard({
+  action,
+  isLatest,
+  tokenDecimals,
+}: {
+  action: AgentAction
+  isLatest?: boolean
+  /** symbol → decimals, from the vault's holdings; lets intent amounts be scaled. */
+  tokenDecimals?: Record<string, number>
+}) {
   const status = STATUS[action.status]
   const facts = action.snapshot?.facts ?? []
   const factsById = new Map(facts.map((fact) => [fact.id, fact]))
@@ -83,6 +94,11 @@ export function DecisionCard({ action, isLatest }: { action: AgentAction; isLate
 
       <div className="grid gap-px bg-line lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_minmax(0,1fr)]">
         <Stage index="01" title="Data consulted" accent="text-data">
+          {/* The relationship between the facts, which a list of cards cannot
+              show — and the comparison the mandate actually asks the agent to
+              make. Renders only when there are two or more yields. */}
+          <YieldComparison facts={facts} citedIds={citedIds} />
+
           {cited.length === 0 && unresolved.length === 0 ? (
             <p className="text-xs text-faint">
               {facts.length > 0
@@ -126,6 +142,13 @@ export function DecisionCard({ action, isLatest }: { action: AgentAction; isLate
 
               {action.decision.target_allocations?.length ? (
                 <TargetAllocations allocations={action.decision.target_allocations} />
+              ) : null}
+
+              {action.decision.venue_intents?.length ? (
+                <VenueIntents
+                  intents={action.decision.venue_intents}
+                  tokenDecimals={tokenDecimals}
+                />
               ) : null}
             </>
           ) : (
