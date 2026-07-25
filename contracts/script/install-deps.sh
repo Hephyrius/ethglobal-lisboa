@@ -23,17 +23,24 @@ cd "$(dirname "$0")/.."
 FORCE=0
 [ "${1:-}" = "--force" ] && FORCE=1
 
-# name | repo | tag | space-separated paths to keep
+# dest | repo | tag | paths to keep | paths to prune after copying
+#
+# Destination names are deliberately short, and the unused OpenZeppelin trees are deliberately
+# pruned. Both exist for the same reason: a fresh `git clone` on Windows aborts when any path exceeds
+# the 260-character MAX_PATH, and `lib/openzeppelin-contracts-upgradeable/contracts/mocks/docs/
+# access-control/…Upgradeable.sol` came to 130 characters before the clone directory is even counted.
+# Nothing here compiles governance, mocks or account abstraction, so dropping them costs nothing and
+# roughly halves what a judge has to scroll past.
 DEPS=(
-  "openzeppelin-contracts|https://github.com/OpenZeppelin/openzeppelin-contracts|v5.1.0|contracts LICENSE"
-  "openzeppelin-contracts-upgradeable|https://github.com/OpenZeppelin/openzeppelin-contracts-upgradeable|v5.1.0|contracts LICENSE"
-  "forge-std|https://github.com/foundry-rs/forge-std|v1.9.4|src LICENSE-MIT LICENSE-APACHE"
+  "oz|https://github.com/OpenZeppelin/openzeppelin-contracts|v5.1.0|contracts LICENSE|contracts/mocks contracts/governance contracts/finance contracts/metatx contracts/crosschain contracts/account contracts/vendor"
+  "oz-upgradeable|https://github.com/OpenZeppelin/openzeppelin-contracts-upgradeable|v5.1.0|contracts LICENSE|contracts/mocks contracts/governance contracts/finance contracts/metatx contracts/crosschain contracts/account contracts/vendor"
+  "forge-std|https://github.com/foundry-rs/forge-std|v1.9.4|src LICENSE-MIT LICENSE-APACHE|"
 )
 
 mkdir -p lib
 
 for entry in "${DEPS[@]}"; do
-  IFS='|' read -r name repo tag keep <<< "$entry"
+  IFS='|' read -r name repo tag keep prune <<< "$entry"
   dest="lib/$name"
   stamp="$dest/.vendored-version"
 
@@ -59,6 +66,12 @@ for entry in "${DEPS[@]}"; do
     [ -e "$dest.tmp/$path" ] && cp -R "$dest.tmp/$path" "$dest/"
   done
   rm -rf "$dest.tmp"
+
+  # Drop trees nothing in src/ or test/ imports. Verified by `forge clean && forge build` — if a
+  # prune ever removes something load-bearing, the build fails loudly rather than at deploy time.
+  for path in $prune; do
+    rm -rf "${dest:?}/${path}"
+  done
 
   echo "$tag" > "$stamp"
   echo "✓ $name $tag"

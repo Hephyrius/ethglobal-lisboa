@@ -89,7 +89,10 @@ contract CuratedVaultAccountingTest is VaultTestBase {
 
         usdc.mint(attacker, 10_000e6);
         vm.prank(attacker);
-        usdc.transfer(address(vault), 10_000e6); // donation, not a deposit — no shares minted
+        // The unchecked return is the point: this is a raw donation, deliberately bypassing
+        // deposit() so no shares are minted against it.
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
+        usdc.transfer(address(vault), 10_000e6);
 
         uint256 victimShares = _deposit(bob, 1_000e6);
 
