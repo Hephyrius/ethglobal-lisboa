@@ -32,70 +32,71 @@ const config: Config = {
         // Do not reintroduce a colour token whose name is a font-size step.
         canvas: '#FFFFFF',
         surface: '#FFFFFF',
-        raised: '#F6F5F9', // insets, table stripes
-        line: '#E7E5EE', // hairline rules
-        'line-bright': '#CBC7D8',
-        ink: '#17161D', // near-black, violet undertone
-        muted: '#575366',
-        faint: '#86818F',
+        raised: '#F1F2F3', // insets, table stripes
+        line: '#E6E9EC', // hairline rules
+        'line-bright': '#ACB1B9',
+        ink: '#141A1F', // near-black with a cool blue cast
+        muted: '#5E676E',
+        faint: '#939A9F',
 
         // ── The curator's voice ───────────────────────────────────────────
-        // Deep violet: mystical in hue, institutional in depth. Chosen dark
-        // enough (~9:1 on white) to serve as body-weight text AND as a solid
-        // button ground with white type, because it is used both ways. A
-        // brighter violet would have forced a second colour for one of them.
-        agent: '#4A3B8C',
-        'agent-soft': '#6F5FB8', // borders, hover, secondary marks
-        'agent-tint': '#F1EFF9', // wash backgrounds
-
-        // ── Highlight ─────────────────────────────────────────────────────
-        // Antique gold. Decorative and structural only — rules, active
-        // underlines, the one figure on a page that should be looked at
-        // first. Deliberately yellower than `warn` below: gold must never be
-        // mistaken for a warning in a UI where colour carries meaning.
-        gold: '#A8801F',
-        'gold-bright': '#D9A93C', // hairline rules, underlines
-        'gold-tint': '#FAF4E6', // wash backgrounds
+        // The blue family. #005BCC is the workhorse: ~6.3:1 on white, so it
+        // carries body-weight text AND a solid button ground with white type,
+        // which is what `agent` is used for (16x and 12x respectively).
+        agent: '#005BCC',
+        'agent-deep': '#003D99', // pressed states, higher-emphasis text
+        'agent-bright': '#008CFF', // rules, underlines, the accent
+        'agent-tint': '#F2FAFF', // wash backgrounds
 
         // ── Semantic ──────────────────────────────────────────────────────
-        data: '#156E6A', // observed facts and their provenance
-        ok: '#136B3E', // executed on-chain
-        warn: '#B45309', // degraded / held / fixture mode — orange, not gold
-        bad: '#A32B21', // rejected by validation, failed
+        // The reference palette is essentially monochrome — near-black, white
+        // and blues. It carries no green and no amber, so these three are an
+        // extension, desaturated to sit beside the blue rather than compete
+        // with it. Only `bad` is drawn from the source, which uses a pure red.
+        data: '#0F6E8C', // observed facts and their provenance — steel cyan
+        ok: '#0F7A43', // executed on-chain
+        warn: '#B45309', // degraded / held / fixture mode
+        bad: '#CC0000', // rejected by validation, failed
       },
       fontFamily: {
         // No webfont: next/font/google fetches at build time, which would make a
         // fresh clone on the 10:00 macOS handoff depend on network access.
         // These stacks resolve to something appropriate on macOS and Windows.
+        // One family for everything, which is how the reference site is set:
+        // no serif anywhere, hierarchy carried by size, weight and tracking.
+        //
+        // The reference uses a proprietary custom face (`rippleFont`); its own
+        // declared fallback is Helvetica/Arial, so that is what is reproduced
+        // here. Helvetica Neue leads because it is the closest neo-grotesque
+        // that macOS ships, and no webfont is fetched — a fresh clone must
+        // still build without network access.
         sans: [
+          'Helvetica Neue',
+          'Helvetica',
+          'Inter',
           'ui-sans-serif',
           'system-ui',
           '-apple-system',
           'Segoe UI',
           'Roboto',
-          'Helvetica Neue',
           'Arial',
           'sans-serif',
         ],
-        // Serif headings do most of the work of reading "financial" rather than
-        // "web3", and cost nothing — every target OS ships one of these.
-        //
-        // Ordered for a higher-contrast, older-cut face first: Hoefler Text and
-        // Baskerville are the transitional serifs a private bank's letterhead
-        // would use, and both ship on macOS. Iowan and Palatino are humanist
-        // and warmer — kept as the next rung because they are the best that
-        // Windows offers before Georgia. The visual jump from Georgia up to
-        // Baskerville is most of what makes this read "traditional" rather
-        // than "website".
+        // Deliberately points at the same grotesque as `sans`. The reference
+        // site sets one family across every surface, so `font-serif` must not
+        // introduce a second voice. Kept as a key rather than deleted because
+        // six call sites still use it, and a token that quietly resolves to
+        // the house family is safer than six edits that can be missed — but
+        // treat it as deprecated: new work should not reach for `font-serif`.
         serif: [
-          'Hoefler Text',
-          'Baskerville',
-          'Iowan Old Style',
-          'Palatino Linotype',
-          'Palatino',
-          'Georgia',
-          'Times New Roman',
-          'serif',
+          'Helvetica Neue',
+          'Helvetica',
+          'Inter',
+          'ui-sans-serif',
+          'system-ui',
+          '-apple-system',
+          'Arial',
+          'sans-serif',
         ],
         mono: [
           'ui-monospace',

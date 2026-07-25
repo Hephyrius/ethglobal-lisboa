@@ -32,17 +32,17 @@
   }
 
   /* Section heading with a rule beneath — the research-note convention.
-     The rule is where the highlight lives: a single gold hairline under each
+     The rule is where the highlight lives: a single blue hairline under each
      section title is the entire accent on a page. Used as a rule rather than
-     as fill because gold at any real area competes with the figures, and in
+     as fill because the accent at any real area competes with the figures, and in
      this UI the figures are the point. Held at /70 for the same reason. */
   .rule-heading {
-    @apply border-b border-gold-bright/70 pb-2 text-sm font-semibold text-ink;
+    @apply border-b border-agent-bright/70 pb-2 text-sm font-semibold text-ink;
   }
 
   .scroll-slim {
     scrollbar-width: thin;
-    scrollbar-color: #cbc7d8 transparent;
+    scrollbar-color: #acb1b9 transparent;
   }
 
   .scroll-slim::-webkit-scrollbar {

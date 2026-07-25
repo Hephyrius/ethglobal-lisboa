@@ -77,7 +77,7 @@ export function LineChart({
   }
 
   const { xs, ys, path, area, first, last, min, max, rising } = geometry
-  const stroke = rising ? 'var(--chart-up, #136B3E)' : 'var(--chart-down, #A32B21)'
+  const stroke = rising ? 'var(--chart-up, #0F7A43)' : 'var(--chart-down, #CC0000)'
   const active = hover === null ? null : points[hover]
 
   return (

@@ -32,12 +32,15 @@ const VIEW_H = 120
 
 /** Deliberately the semantic palette, not a rainbow. Base asset first. */
 const BANDS = [
-  'rgba(74,59,140,0.85)', // agent
-  'rgba(21,110,106,0.80)', // data
-  'rgba(19,107,62,0.75)', // ok
-  'rgba(168,128,31,0.70)', // gold highlight
-  'rgba(163,43,33,0.65)', // bad
-  'rgba(87,83,102,0.55)', // muted
+  // Same validated categorical set as HoldingsDonut — see the note there for
+  // why these are not the brand blues, and why they are solid rather than
+  // alpha-composited. Keep the two lists identical: a holding must not change
+  // colour between the donut and the allocation history.
+  '#005BCC', // base asset — the brand blue
+  '#B23A7A',
+  '#00A38F',
+  '#7A5AD6',
+  '#7C8794', // overflow / "other" — a neutral, not an identity
 ]
 
 export function AllocationChart({
