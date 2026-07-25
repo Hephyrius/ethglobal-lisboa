@@ -50,17 +50,34 @@ Every link is tested. **The chain has never been run end to end through the real
 
 ### 2.2 🔴 Credentials that gate whole features
 
-`.env` currently has **4 of 9** values set.
+**Keys are now generated. Two wallets need funding before they do anything.**
 
-| Missing | Consequence |
+Generated with `cast wallet new` and written straight to `.env` — the private keys were never
+echoed. Addresses verified against `cast wallet address`:
+
+| Var | Address | State |
+|---|---|---|
+| `AGENT_PRIVATE_KEY` | `0x70997970C51812dc3A010C7d01b50e0d17dc79C8` | ✅ **Set** — anvil account **#1**, holds `AGENT_ROLE` on the fork vault. Well-known public test key, not a secret. §2.1 is unblocked. |
+| `X402_PRIVATE_KEY` | `0x64D21ebD9C0872dab5Cc69Dafc7Acce7CF16fBb7` | ⚠️ **Set but unfunded** — needs a few dollars of USDC on **real Base** (`0x8335…2913`). Queries cost fractions of a cent. |
+| `DEPLOYER_PRIVATE_KEY` | `0x50c29464C591079dd6d9b2B7464884Cba10a6909` | ⚠️ **Set but unfunded** — needs ETH for gas plus ~$20 USDC for the mainnet demo run. |
+
+x402 settles through a facilitator from a signed payment payload, so the x402 wallet should need
+USDC but little or no ETH — send a few cents' worth anyway rather than debug that assumption live.
+
+**Now set, with caveats:**
+
+| Var | State |
 |---|---|
-| `AGENT_PRIVATE_KEY` | §2.1 — no on-chain writes at all |
-| `TOKEN_API_KEY` | Price facts absent from every snapshot. Needs its **own** Graph Market JWT — `GRAPH_API_KEY` returns 401 (Lane C, request #19) |
-| `X402_PRIVATE_KEY` | The x402 path has never made a real payment — see §3.1 |
-| `BASESCAN_API_KEY` | No `forge verify-contract`; judges cannot read the source Uniswap's rules require the README to point at |
-| `DEPLOYER_PRIVATE_KEY` | No mainnet demo run |
+| `TOKEN_API_KEY` | ✅ **Set** (Graph Market JWT) and **authenticating** — the 401 is gone. But all four of Lane C's `PRICE_PATHS` are wrong; the working route is `/evm/swaps`. Fully debugged in request #22. |
+| `ETHERSCAN_API_KEY` / `BASESCAN_API_KEY` | ⚠️ **Set but unusable for Base.** Etherscan V2 free tier rejects this chain outright, and basescan V1 is deprecated. **Verify with Blockscout instead — no key needed.** Request #23. |
+| `GRAPH_MARKET_API_KEY` | Set. The Market key paired with the JWT; the subgraph gateway continues to use `GRAPH_API_KEY`. |
 
 `uniswap_key` is set under the legacy lowercase name — fine, `venues/config.py:23` accepts both.
+
+> **Swapping to mainnet:** `AGENT_PRIVATE_KEY` is currently the anvil key and is correct *for the
+> fork only*. Replace it at the mainnet run — and note the plan's suggestion that the agent and
+> x402 wallets be the same address there, since the agent paying for its own market data out of its
+> own wallet is the narrative.
 
 ### 2.3 🟠 One open cross-lane request, and it is safety-critical
 
@@ -172,10 +189,16 @@ ever needed.
 behaviour, and lights up the moment a JWT appears. Removing it would weaken Track 3; Messari + Aave
 subgraphs + x402 still carry the composition either way.
 
-*Caveat worth stating:* sharing an oracle with the contract means the agent cannot cross-check a bad
-feed. Lane A covers that at the contract layer — `totalAssets()` reverts rather than returning a
-wrong number when a feed is stale. Note `priceMaxAge` is `0` on the fork, so staleness checking is
-**off**; it should be set for the mainnet run.
+*The caveat that was here — "sharing an oracle with the contract means the agent cannot cross-check
+a bad feed" — is now retired.* The Token API turns out to work on Base after all (request #22), and
+it derives price from **executed dex swaps** rather than an oracle. Registering both gives two
+genuinely independent price sources: Chainlink said **$1,858.97**, the last WETH/USDC swap on Base
+said **$1,857.03** — 0.1% apart, from completely different mechanisms. That is a real
+cross-validation, and a disagreement between them is exactly the signal a curator should act on.
+
+Lane A still covers the contract side: `totalAssets()` reverts rather than returning a wrong number
+when a feed is stale. Note `priceMaxAge` is `0` on the fork, so staleness checking is **off**; set
+it for the mainnet run.
 
 ### 3.2 1inch — $5K · one gap between proven and demonstrable
 
@@ -281,10 +304,11 @@ chain has never been run end to end — you verified reads and said so yourself 
 requires on-chain token transfers in the demo, so this gate is unmet and the demo currently contains
 an untested step. Nothing else in phase 2 starts until this lands.
 
-1. Set `AGENT_PRIVATE_KEY` to anvil account **#1** —
-   `0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d` (`0x7099…79C8`).
-   **Not account #0.** Your own request #11 warns the wrong key reads perfectly and reverts every
-   write on an AccessControl check — it looks healthy until the first `executeBatch`.
+1. ✅ **`AGENT_PRIVATE_KEY` is already set for you** — anvil account **#1**
+   (`0x70997970C51812dc3A010C7d01b50e0d17dc79C8`), the holder of `AGENT_ROLE` on the fork vault.
+   Verified by `cast wallet address`. Your own request #11 warned that account #0 reads perfectly
+   and reverts every write on an AccessControl check; that trap is closed. Just confirm the address
+   the harness logs at startup matches `GET /vault/{addr}/state`'s reported `agent`.
 2. Force a non-`held` decision. The vault holds USDC and no WETH, so a USDC→WETH rotation through
    Uniswap is the natural first write.
 3. Land one `executeBatch`. **Record the tx hash in `docs/handoff.md`.**
@@ -304,8 +328,17 @@ Highest-value work remaining, and zero chain contention.
 2. **Add a Chainlink on-chain price source** — see §3.1. Unblocks price facts with no credential,
    stays consistent with how the vault values holdings, and proves the registry abstracts kinds of
    provider rather than just endpoints. Keep `token_api` registered alongside it.
-3. If `X402_PRIVATE_KEY` and `TOKEN_API_KEY` appear, make one real x402 payment and light up the
-   Token API. The agent paying for its own market data is the strongest narrative beat available.
+3. **`X402_PRIVATE_KEY` is set** — wallet `0x64D21ebD9C0872dab5Cc69Dafc7Acce7CF16fBb7`, freshly
+   generated. It is **not funded yet**, so build and test the flow against it and expect the payment
+   step to fail on insufficient balance until someone sends it USDC on real Base. Everything up to
+   that point — the 402, the payload construction, the signature — you can verify now. The agent
+   paying for its own market data is the strongest narrative beat available.
+4. **`TOKEN_API_KEY` is set and the Token API works — but your four `PRICE_PATHS` are all wrong, in
+   two different ways.** Fully debugged against the live API in request #22: two of the routes do
+   not exist, and the other two use `network_id=` where the API wants `network=`. The working call
+   is `GET /evm/swaps?network=base&pool={pool}&limit=1`, which returns a `price` field directly.
+   Read #22 before touching the file — it has the verified pool address and the response shape, and
+   will save you the twenty minutes of probing it took to find.
 
 ### Lane E — `web/` · **after Lane B confirms its write**
 
