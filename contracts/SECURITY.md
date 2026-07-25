@@ -6,7 +6,7 @@ says so; a limitation a judge finds for themselves is worth less than one we wro
 Scope: `CuratedVault` and `VaultFactory`. Reproduce everything with:
 
 ```bash
-cd contracts && forge test                      # 142 tests, no network
+cd contracts && forge test                      # 153 tests, no network
 FOUNDRY_PROFILE=deep forge test --match-path "test/invariant/*"
 ```
 

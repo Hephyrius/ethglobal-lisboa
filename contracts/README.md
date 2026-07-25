@@ -32,7 +32,7 @@ reading any venue's state.
 cd contracts
 ./script/install-deps.sh          # vendored, pinned — only needed to change a version
 forge build
-forge test                        # 142 tests, no network required (+9 fork tests skip)
+forge test                        # 153 tests, no network required (+9 fork tests skip)
 ```
 
 Fork deployment (from repo root, two terminals):
@@ -47,9 +47,18 @@ The deploy writes [`deployments/base-fork.json`](../deployments/base-fork.json).
 from that file. Never hardcode them.**
 
 > ⚠️ **Redeploying overwrites that file, and Lanes B, D and E read the vault address from it.** Only
-> redeploy if anvil has been restarted, and tell the other lanes when you do. Reassuringly, a cold
-> deploy signed by anvil #0 at nonce 0 is deterministic and reproduces the same vault address, so a
-> clean replay is far less disruptive than it sounds.
+> redeploy if anvil has been restarted, and tell the other lanes when you do.
+>
+> **The addresses will change, and an earlier version of this file claimed otherwise.** The claim was
+> that a cold deploy at nonce 0 reproduces the same addresses. It does not, and cannot: a CREATE
+> address is `keccak(deployer, nonce)`, and the fork deployer is **anvil account #0 — a key whose
+> private key is published in Foundry's docs and which strangers therefore transact from on real Base
+> constantly.** Forking inherits its real nonce, which was 3,393,100 at block 49,077,772 and
+> 3,393,112 at 49,166,831. Fork at a newer head, get a different nonce, get different addresses.
+>
+> Deploys *are* reproducible if you pin **`FORK_BLOCK_NUMBER`**, because then the inherited nonce is
+> fixed too. That is the only thing that makes a replay non-disruptive; nonce 0 never had anything to
+> do with it. Set it in `.env` before a demo you might need to reproduce.
 
 **A fork deploy deliberately ignores `DEPLOYER_PRIVATE_KEY`.** That variable is the funded *mainnet*
 wallet, so it has no balance on a fresh fork — reading it here meant merely sourcing `.env` turned a
@@ -62,24 +71,34 @@ working deploy into a failing one. Fork deploys sign with anvil account #0; set
 
 ### Deploying to a real network
 
+**Follow [DEPLOY.md](DEPLOY.md).** It is the go-live runbook — the ordered steps, what to have ready,
+and what to check after. The short form:
+
 ```bash
 DEPLOY_NETWORK=base-mainnet \
 DEPLOYER_PRIVATE_KEY=0x…  AGENT_ADDRESS=0x…  GUARDIAN_ADDRESS=0x… \
-forge script script/Deploy.s.sol --rpc-url "$BASE_RPC_URL" --broadcast
+forge script script/Deploy.s.sol --rpc-url "$BASE_RPC_URL"            # dry run first, no --broadcast
+                                                              # then again with --broadcast
 
+DEPLOY_NETWORK=base-mainnet forge script script/VerifyDeployment.s.sol --rpc-url "$BASE_RPC_URL"
+./script/check-deployment.sh base-mainnet "$BASE_RPC_URL"
 ./script/verify.sh base-mainnet    # Blockscout — no API key
 ```
 
 `priceMaxAge` is derived from the network: `0` on `base-fork`, **3600 everywhere else**. You do not
 need to remember to set it.
 
-The script **refuses** two configurations rather than warning about them, because both are immutable
-after genesis and would mean abandoning the vault:
+The script **refuses** these rather than warning, because every one of them is immutable after
+genesis and would mean abandoning the vault:
 
 | Revert | Cause |
 |---|---|
 | `UnsafeAnvilKeyOnRealNetwork(what, account)` | deployer, agent or guardian is an anvil account. Their keys are published in Foundry's docs, and `AGENT_ROLE` can never be revoked |
 | `StalenessCheckDisabledOnRealNetwork(network)` | `priceMaxAge == 0`, so `totalAssets()` would trust a Chainlink answer of any age |
+| `AgentAndGuardianAreTheSameAccount(account)` | one key holding both roles is neither. The guardian may halt trading but never name a trade; the agent may trade but never halt itself |
+| `WrongChainForNetwork(network, expected, actual)` | one wrong `--rpc-url`. Every address in the script is Base mainnet; elsewhere they are empty accounts |
+| `AllowlistedTargetHasNoCode(target)` / `PriceFeedHasNoCode(feed)` | an address in the script is not a contract on this chain |
+| `StalePrice` / `InvalidPrice` / `IncompleteRound` | **the feed is read through the same `ChainlinkPriceLib.readPrice` `totalAssets()` will call**, with the bound this vault is about to freeze — so the deploy cannot create a vault whose accounting reverts on first use |
 
 An unrecognised `DEPLOY_NETWORK` counts as real, so a typo gets the strict settings.
 
@@ -422,7 +441,7 @@ script/
 ## Verification
 
 ```bash
-forge test                                    # 142 tests, no network
+forge test                                    # 153 tests, no network
 forge test --match-path "test/fork/*"         # real Base state, needs an RPC
 ./script/check-deployment.sh                  # deployed code == this source?
 ```
