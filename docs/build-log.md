@@ -8,6 +8,70 @@ the hackathon window.
 
 ---
 
+## 2026-07-25 — Lane A: rehearsing R0 found the landmine under R8
+
+**What changed.** `script/Deploy.s.sol` no longer reads the mainnet deployer key on a fork, and
+refuses to start a deploy the signer cannot pay for. 92 tests. Filed requests #44 and #45.
+
+**Why rehearse a rung Wave 0 owns.** The [e2e plan](../plans/2026-07-25-e2e-local-deployment.md)
+assigns Lane A nothing — the four narrative breaks belong to B, C and D. But R8, the plan's actual
+deliverable, replays `Deploy.s.sol` from a cold anvil, and the plan's own rule is *"every integration
+failure in this project so far has been a lower rung assumed rather than checked."* The deploy half of
+R0 was assumed. So: a throwaway clone, a scratch anvil on port 8541, and the shared fork left alone.
+
+It failed, in a way that would only have shown up during R8.
+
+**The trap: the deploy worked in a bare shell and failed in the documented one.** `run()` read
+`DEPLOYER_PRIVATE_KEY` — which `.env.example` defines as the funded *mainnet* wallet, "Fresh wallet,
+funded ~$20 + gas on Base". That variable was unset when this script was written and is set now. It
+has zero balance on a fresh fork **by definition**, because it is a mainnet wallet. So the deploy
+succeeded from a clean environment and failed the instant `.env` was sourced — which every
+`scripts/*.sh` does, and which any runbook tells a human to do. The variable that broke it was the one
+whose own documentation says it is for something else.
+
+Fork deploys now ignore it and use anvil #0, with `FORK_DEPLOYER_PRIVATE_KEY` as the override. The
+mainnet key is reserved for real networks, which is all it was ever documented to be.
+
+**The second defect was worse, and it is the one worth remembering.** `forge script` simulates the
+entire script before broadcasting. So the unfunded deployer ran all the way through `_publish`,
+**wrote `deployments/base-fork.json`**, and only then died in the broadcast phase. I checked what it
+had published: `cast code` on the factory address returned `0x`. Nothing there.
+
+That is a genuinely nasty failure. Four lanes read that file for addresses. They would have found a
+factory with no bytecode and concluded "the contracts are broken" — debugging Lane A while the actual
+fault was an unfunded key three steps earlier. The error message on offer was `Internal EVM error
+during simulation`, which names neither the cause nor the account.
+
+The fix is a balance precheck that runs before the guards' work is published — `DeployerCannotPayGas
+(deployer, balance, minimum)`, thrown at the top of `run()`. Confirmed by observation that a failed
+run now leaves the deployments file untouched. **The general lesson: in a `forge script`, anything with
+a side effect outside the EVM — writing a file, in this case — happens during simulation, so it
+happens even when the broadcast fails. Validate before you publish, not after.**
+
+**One good discovery for R8.** A cold deploy signed by anvil #0 at nonce 0 is deterministic, so it
+reproduces the demo vault at *the same address*, `0x0E2c…B5d1`. R8 is therefore far less disruptive
+than the plan fears — `deployments/base-fork.json` need not change at all. Passed to Wave 0 as #44.
+
+**A flaky test of my own making, fixed at the root.** The first version of the deployer-key tests
+passed alone and failed in the full suite: `vm.setEnv` persists for the whole `forge test` process, so
+one test setting `FORK_DEPLOYER_PRIVATE_KEY` changed what a later test observed. The tempting fix is
+to order the tests or clear the variable. The better one was to notice the design smell — the
+precedence *rule* was tangled up with environment *I/O*. Split out a pure `_chooseDeployerKey(isFork,
+forkKeyOrZero, mainnetKeyOrZero)` and the policy became exhaustively testable with no environment at
+all, order-independent by construction. Verified stable across three consecutive runs. A flaky test
+is usually telling you something about the code, not about the test.
+
+**One thing I broke, reported rather than buried.** `scripts/seed-fork.sh` sources `.env` with
+`set -a` *before* reading `ANVIL_RPC_URL`, so it overwrites a value the caller already exported. My
+`ANVIL_RPC_URL=…:8541` was silently discarded and it seeded the **shared** fork on 8540 — topping up
+three anvil accounts to 100,000 USDC. The vault itself was untouched (its movement since is Lane B's
+second rotation), and the script is designed to be idempotent and re-run, so the effect is benign. But
+it is someone else's node state that I changed without meaning to, so it is written down in #45 along
+with the fix. `scripts/` is Wave 0's active claim, so I filed rather than edited — the exec-bit change
+earlier was a zero-byte fix to an ownerless file, which is a different situation.
+
+---
+
 ## 2026-07-25 — Lane A phase 2: guarding the one deploy that cannot be undone
 
 **What changed.** `script/Deploy.s.sol` now refuses to deploy to a real network with fork-grade
