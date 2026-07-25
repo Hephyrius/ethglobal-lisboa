@@ -104,8 +104,11 @@ if you want the position left in place.
 calldata and the share accounting; what it does not cover is connecting MetaMask and having it sign
 — that is `@wagmi/core` plus the extension rather than our code, and it needs a human with a wallet
 installed. *~2 min:* import anvil account #0 into MetaMask, add a network on
-`http://localhost:8540` with chain id `8453`, open `/vault/0x0E2c0e50E67B96C9C401C94e111a3DBD00DEB5d1`,
-connect, deposit 1 USDC.
+`http://localhost:8540` with chain id `8453`, open the vault from the list on `/` — **not a
+hardcoded address**, because anvil keeps fork state in memory and any restart deploys a new vault and
+rewrites `deployments/base-fork.json`. The app follows that file. If you do land on a dead address
+the page now says **NO CONTRACT AT THIS ADDRESS** and explains why, instead of quietly falling back
+to fixtures.
 
 Smaller notes:
 
@@ -181,6 +184,43 @@ only the second one spends money.
 
 Weights come from the vault's own `value_in_asset` — the Chainlink figure `totalAssets()` is built
 from — so the checks agree with the contract rather than forming a second opinion.
+
+### ✅ R5 and R6 closed, and the guards demonstrated catching
+
+**R6 — genesis deploys for real.** `POST /genesis/finalize` → `createVault` on-chain:
+vault `0xCa58ff3ebe6CD8FAFB1f5f35Ae59e47e3BE59F29`, tx `0x9868681c…`, and **the `mandate_hash` shown
+at genesis equals the on-chain `mandateHash`**. That equality is the depositor's only verification
+handle. Genesis mints a *fresh* vault every run, so the shared vault is never touched.
+
+**R5 — agent-driven Aqua ship**, tx `0x16eae7a2…`, three steps in Lane D's order as one atomic
+`executeBatch`:
+
+```
+allowance USDC->Aqua   0 -> 500000000            (exactly the shipped amount)
+allowance WETH->Aqua   0 -> 250000000000000000   (exactly the shipped amount)
+vault                  50.0% / 50.0%, totalAssets 2,498.51 — UNCHANGED
+```
+
+> ⚠️ **The e2e plan gates R5 on `safeBalances()` being non-zero. That does not prove what it says.**
+> Request #17 states plainly that a ship with *no* approvals yields "non-zero `safeBalances`, valid
+> hash, no error, a successful tx" and is silently never fillable — so the plan's proof passes on
+> exactly the dead position #17 exists to warn about. **The allowance is what separates the two
+> cases**, needs only a standard ERC-20 ABI, and is what this lane asserts. Filed as request #39.
+
+`totalAssets()` unchanged with a position open is the Pattern 1 proof: capital never left the vault.
+That is what makes Aqua load-bearing rather than cosmetic.
+
+**The guards, shown rejecting.** All three produced a journaled `AgentAction(status="rejected")` with
+no plan and no transaction — visible in Lane E's feed:
+
+| layer | fed a decision that | rejected with |
+|---|---|---|
+| 4 grounding | cited fact ids not in its snapshot | the invented ids *and* the real ones |
+| 5 direction | sold the underweight asset | *"selling WETH, already at 50.0% against a 60.0% target … swap the other way"* |
+| 6 outcome | swapped 100% of holdings | cash floor, position ceiling, and overshoot on both legs |
+
+They had existed and been unit-tested but never been seen catching the failures that motivated them.
+Now they have, on the live stack, against a real vault.
 
 ### Run it
 
