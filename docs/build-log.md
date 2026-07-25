@@ -193,6 +193,49 @@ localhost. Point `forge test` and `forge script` at the anvil endpoint, not at t
 
 ---
 
+## 2026-07-25 — Lane E: a mislabelled number, and surviving a cold restart
+
+Two fixes found by reading other lanes' findings and by thinking about what the e2e plan's R8 rung
+does to this app.
+
+**`expected_slippage_bps` was being rendered as a claim about what happened.** Lane B's request #26
+points out the field is populated from the Uniswap API's slippage *tolerance* — 250 bps by default,
+where the realised fill was 0.035%. The badge said "250 bps slip", which reads as *this
+low-drawdown vault just took a 2.5% hit*: wrong, and precisely the number a judge stops on. It now
+reads "≤ 250 bps slippage", and the tooltip says it is the venue's tolerance rather than a
+prediction. The schema field name is frozen and stays; the label does not have to inherit its
+inaccuracy.
+
+Better, the badge now **turns red when it exceeds the mandate's own `max_slippage_bps`**, naming the
+limit. That is exactly why the harness refuses to execute (#26 again — the golden mandate's 50 bps
+rejects every Uniswap plan), so the feed now explains its own rejections instead of leaving a reader
+to infer the cause from two numbers on different screens.
+
+**Plans now render on `rejected` and `failed` actions, not just successful ones.** A plan rejected on
+slippage still *has* a plan, and the numbers that caused the rejection are in it. Showing them turns
+"rejected" from an assertion into something checkable. Verified against the live stack: the failed
+cycle's 3-step Uniswap plan and its slippage now appear beside the revert message.
+
+**The app now diagnoses a restarted anvil instead of silently falling back.** The e2e plan's R8 rung
+kills anvil and replays from cold, and the runbook lists "vault address 404s" as a failure mode —
+fork state lives in memory, so a restart destroys every deployed vault while the address survives in
+`deployments/base-fork.json`, in localStorage and in bookmarks. Previously the page just showed
+fixtures with an amber badge: honest, but it does not say *why*, which is the part that costs twenty
+minutes. A `getBytecode` check now distinguishes "no code at this address" from "cannot reach the
+node" — only a successful empty read means the vault is gone — and renders **NO CONTRACT AT THIS
+ADDRESS** with the cause and the fix.
+
+Same reasoning applied to the docs: the two-minute wallet procedure no longer hardcodes the vault
+address, because R8 will change it. Tx hashes stay — those are historical evidence, not
+instructions.
+
+**Verified against the fully live stack** (8 real cycles, badge green `LIVE`) by dumping the
+rendered DOM rather than eyeballing a screenshot: 3 × "≤ 250 bps slippage" — two executed plans and
+the failed one that previously showed no plan at all — zero instances of the old label, 8 × "Yield
+comparison · USDC" correctly scoped, and all five `AgentAction` statuses rendering.
+
+---
+
 ## 2026-07-25 — Lane E phase 2: the write path lands, and two things the feed left implicit
 
 **What changed.** Phase 2 §3.2 and §3.5 for this lane: `venue_intents` (including SwapVM program
@@ -1141,6 +1184,83 @@ speaks our schema and never touches the network. That is what lets the plan buil
 against recorded responses — the offline suite covers step ordering, unit conversion and allowlist
 enforcement with no quota and no market dependency — and it confines a future Uniswap API change to
 one file.
+
+---
+
+## 2026-07-25 — Lane B: e2e rungs R5 and R6 closed, and R5's stated proof does not prove it
+
+**What changed.** The two narrative breaks the e2e plan assigns to this lane are closed, the
+validation guards have been shown catching for the first time, and one item in the plan's own
+definition of done turns out to be insufficient. 240 tests green.
+
+### R6 — genesis actually deploys now
+
+`createVault` had never been submitted. Live mode fell back to the stub client because
+`AGENT_PRIVATE_KEY` was unset; both it and `VAULT_FACTORY_ADDRESS` are set now, so the real path ran:
+
+```
+POST /genesis/finalize -> createVault
+vault 0xCa58ff3ebe6CD8FAFB1f5f35Ae59e47e3BE59F29   tx 0x9868681c…
+hash shown at genesis == on-chain mandateHash      0xf6d84803…  ✓
+```
+
+That equality is R6's actual proof and the depositor's only verification handle. Genesis mints a
+*fresh* vault every run, so the shared vault three lanes assert against is never touched.
+
+Also switched `VaultCreated` parsing to `errors=DISCARD`. Creating a vault emits the clone's own
+initialization events, which cannot decode against the *factory* ABI and are not supposed to — the
+default printed a `MismatchedABI` warning per undecodable log, four alarming paragraphs mid-genesis,
+for nothing.
+
+### R5 — the Aqua ship, and why the plan's proof is wrong
+
+Agent-driven `ship()` from the real vault, tx `0x16eae7a2…`, three steps in Lane D's order as one
+atomic `executeBatch`:
+
+```
+allowance USDC->Aqua   0 -> 500000000            exactly the shipped amount
+allowance WETH->Aqua   0 -> 250000000000000000   exactly the shipped amount
+vault                  50.0% / 50.0%, totalAssets 2,498.51 — UNCHANGED
+```
+
+`totalAssets()` unchanged with a position open is the **Pattern 1 proof**: capital never left the
+vault. That property is the entire reason Aqua is load-bearing rather than cosmetic, and it is now
+demonstrated rather than argued.
+
+**But the plan gates R5 on `Aqua.safeBalances()` being non-zero, and that check cannot distinguish a
+live position from a dead one.** Request #17 says so in as many words: a ship with no approvals
+produces *"non-zero `safeBalances`, valid hash, no error, a successful tx"* and is silently never
+fillable. So the stated proof passes on precisely the failure #17 exists to warn about — the plan
+cites the finding and then asks for a check the finding rules out.
+
+**The allowance is what separates the two cases**: zero in the broken case, equal to the shipped
+amount in the good one, and readable with a standard ERC-20 ABI without touching Lane D's source.
+Filed as request #39 asking that R5 be gated on it. Keeping `safeBalances()` as a liveness check is
+fine; treating it as evidence of fillability is not.
+
+### The guards, finally seen catching
+
+The plan notes the layers "have never been demonstrated catching the failures that motivated them."
+All three now have been, on the live stack against a real vault, each producing a journaled
+`AgentAction(status="rejected")` with no plan and no transaction:
+
+| layer | fed a decision that | rejected with |
+|---|---|---|
+| 4 grounding | cited fact ids absent from its snapshot | the invented ids *and* the real ones |
+| 5 direction | sold the underweight asset | *"selling WETH, already at 50.0% against a 60.0% target … swap the other way"* |
+| 6 outcome | swapped 100% of holdings | cash floor, position ceiling and overshoot, both legs |
+
+Worth recording: **layer 5's first attempt was caught by layer 4 instead.** The fact ids came from a
+snapshot fetched separately rather than the tick's own, so grounding rejected them — correctly. It
+cost a rerun and it is exactly the behaviour that layer is for, so it stays in the record rather than
+being tidied into a clean narrative.
+
+### A small vindication of following a published interface
+
+Lane A's `contracts/out/**` was deleted in the working tree mid-rebuild while this work was running.
+Lane B was unaffected, because `agent/chain/abi.py` reads `contracts/abis/*.json` — the curated flat
+arrays Lane A asked consumers to prefer in request #2 — and only falls back to `out/**`. Had this lane
+stayed on the raw artifacts it would have broken at exactly the wrong moment. Noted as #42.
 
 ---
 
