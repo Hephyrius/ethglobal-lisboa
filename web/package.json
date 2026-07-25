@@ -10,7 +10,9 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "audit:deps": "node scripts/audit-dependency-age.mjs",
-    "verify:write-path": "node scripts/verify-vault-write-path.mjs"
+    "verify:write-path": "node scripts/verify-vault-write-path.mjs",
+    "lint:imports": "node scripts/check-forbidden-imports.mjs",
+    "prebuild": "node scripts/check-forbidden-imports.mjs"
   },
   "dependencies": {
     "@curator/schema": "workspace:*",

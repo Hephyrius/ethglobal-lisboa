@@ -70,6 +70,10 @@ const STAGES: Array<{
         max_slippage_bps: 50,
         rebalance_cooldown_seconds: 3600,
         max_actions_per_tick: 2,
+        // Lane F's Wave 2 default. Allocation and exposure constraints may bend
+        // by this much and be accepted with a recorded warning; slippage and
+        // the allowlists never bend.
+        tolerance_band_pct: 0.05,
       },
     }),
   },

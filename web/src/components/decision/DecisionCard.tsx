@@ -8,6 +8,7 @@ import { BlindSpots } from './BlindSpots'
 import { ExecutionSteps } from './ExecutionSteps'
 import { VenueIntents } from './VenueIntents'
 import { YieldComparison } from './YieldComparison'
+import { BandedWarnings } from './BandedWarnings'
 import type { FeedContext } from './feed-context'
 import { clockTime, formatDuration, fullTimestamp, relativeTime } from '@/lib/format/time'
 import { cn } from '@/lib/cn'
@@ -163,6 +164,11 @@ export function DecisionCard({
                   tokenDecimals={context?.tokenDecimals}
                 />
               ) : null}
+
+              {/* Beside the reasoning, not tucked in a corner: a band that is
+                  invisible is the same as no rule, and the drift it enables is
+                  silent by construction. */}
+              <BandedWarnings warnings={action.warnings} />
             </>
           ) : (
             <p className="whitespace-pre-line text-sm leading-relaxed text-bad/90">

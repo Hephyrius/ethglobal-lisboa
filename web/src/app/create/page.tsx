@@ -5,6 +5,9 @@ import type { Mandate } from '@curator/schema'
 import { ChatPanel } from '@/components/genesis/ChatPanel'
 import { MandateDraft } from '@/components/genesis/MandateDraft'
 import { DeployPanel } from '@/components/genesis/DeployPanel'
+import { PresetCards } from '@/components/genesis/PresetCards'
+import { UniverseStrip } from '@/components/genesis/UniverseStrip'
+import { suggestionsFor } from '@/lib/mandate/suggestions'
 import { ModeNotice } from '@/components/ui/ModeBadge'
 import { useGenesisChat, useGenesisSources } from '@/lib/api/genesis-queries'
 import { GENESIS_OPENING, type ChatMessage } from '@/lib/api/genesis-sim'
@@ -24,6 +27,7 @@ export default function CreatePage() {
     { role: 'assistant', content: GENESIS_OPENING },
   ])
   const [draft, setDraft] = useState<Partial<Mandate>>({})
+  const [presetKey, setPresetKey] = useState<string>()
   const chat = useGenesisChat()
   // What the data registry actually has registered — never a hard-coded list,
   // so a source Lane C adds becomes grantable here with no change. Request #19.
@@ -51,11 +55,31 @@ export default function CreatePage() {
     }
   }
 
+  /**
+   * Load a whole archetype, then say so in the transcript.
+   *
+   * The announcement is not decoration: without it the mandate panel silently
+   * fills with values the user did not type, which reads as the app deciding
+   * for them. Saying it in the curator's own voice keeps the conversation the
+   * place where the mandate is agreed.
+   */
+  function loadPreset(mandate: Mandate, key: string) {
+    setDraft(mandate)
+    setPresetKey(key)
+    setMessages((previous) => [
+      ...previous,
+      {
+        role: 'assistant',
+        content: `Loaded **${mandate.name}** as a starting point — it is on the right, complete and deployable as it stands. Tell me what you would change: a different cash floor, another asset, a tighter slippage ceiling. Anything you do not mention stays as it is.`,
+      },
+    ])
+  }
+
   return (
     <div className="space-y-6">
       <header>
         <p className="label">Genesis</p>
-        <h1 className="mt-2 text-2xl font-semibold tracking-tight text-ink">
+        <h1 className="mt-2 text-xl font-semibold tracking-tight text-ink sm:text-2xl">
           Design the strategy, then hand it over
         </h1>
         <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted">
@@ -67,8 +91,17 @@ export default function CreatePage() {
 
       <ModeNotice />
 
+      <PresetCards onSelect={loadPreset} selectedKey={presetKey} />
+
+      <UniverseStrip available={available} />
+
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
-        <ChatPanel messages={messages} pending={chat.isPending} onSend={(text) => void send(text)} />
+        <ChatPanel
+          messages={messages}
+          pending={chat.isPending}
+          onSend={(text) => void send(text)}
+          suggestions={suggestionsFor(messages, draft)}
+        />
 
         <div className="space-y-4">
           <MandateDraft draft={draft} available={available} />

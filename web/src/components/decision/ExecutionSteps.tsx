@@ -41,17 +41,23 @@ export function ExecutionSteps({
       ) : null}
 
       {steps.map((step, index) => (
-        <div key={`${step.target}-${index}`} className="rounded-lg border border-line bg-raised/50 p-3">
+        <div
+          key={`${step.target}-${index}`}
+          className="overflow-hidden rounded-lg border border-line bg-raised/50 p-3"
+        >
           <div className="flex items-start gap-2">
             <span className="mt-0.5 font-mono text-2xs text-faint">{index + 1}</span>
             <div className="min-w-0 flex-1">
               <p className="text-xs leading-relaxed text-ink">{step.why}</p>
 
-              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+              {/* min-w-0 lets the flex children actually shrink: without it a
+                  long mono address refuses to wrap and pushes the card wider
+                  than the viewport at 375px. */}
+              <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
                 <AddressChip address={step.target} label="to" />
-                <span className="inline-flex items-center gap-1 text-2xs text-faint">
+                <span className="inline-flex min-w-0 items-center gap-1 text-2xs text-faint">
                   <span className="label">data</span>
-                  <span className="font-mono" title={step.calldata}>
+                  <span className="truncate font-mono" title={step.calldata}>
                     {step.calldata.slice(0, 10)}…
                   </span>
                   <CopyButton value={step.calldata} />

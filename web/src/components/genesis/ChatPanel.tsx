@@ -18,10 +18,14 @@ export function ChatPanel({
   messages,
   pending,
   onSend,
+  suggestions = [],
 }: {
   messages: ChatMessage[]
   pending: boolean
   onSend: (text: string) => void
+  /** One-tap replies, so a reader who does not know the vocabulary is never
+   *  facing an empty box. See lib/mandate/suggestions.ts. */
+  suggestions?: string[]
 }) {
   const [draft, setDraft] = useState('')
   const endRef = useRef<HTMLDivElement>(null)
@@ -38,7 +42,11 @@ export function ChatPanel({
   }
 
   return (
-    <div className="card flex h-[calc(100vh-11rem)] min-h-[32rem] flex-col">
+    // On a phone the panel stacks above the mandate draft, so pinning it to
+    // viewport height would push the draft — the thing the conversation is
+    // producing — entirely below the fold. It takes a bounded height there and
+    // only fills the viewport once the two sit side by side.
+    <div className="card flex h-[26rem] flex-col sm:h-[32rem] lg:h-[calc(100vh-13rem)] lg:min-h-[32rem]">
       <div className="scroll-slim flex-1 space-y-5 overflow-y-auto px-5 py-5">
         {messages.map((message, index) => (
           <Message key={index} message={message} />
@@ -55,6 +63,26 @@ export function ChatPanel({
       </div>
 
       <div className="border-t border-line p-3">
+        {suggestions.length > 0 && !pending ? (
+          <div className="scroll-slim -mx-1 mb-2 flex gap-1.5 overflow-x-auto px-1 pb-1">
+            {suggestions.map((suggestion) => (
+              <button
+                key={suggestion}
+                type="button"
+                onClick={() => onSend(suggestion)}
+                title={suggestion}
+                className="shrink-0 rounded border border-line bg-raised px-2.5 py-1 text-2xs text-muted transition-colors hover:border-agent/40 hover:text-ink"
+              >
+                {/* Truncated on a phone, full text on a laptop — the whole
+                    sentence is the example, but three of them stacked would
+                    push the input off a 375px screen. */}
+                <span className="sm:hidden">{truncate(suggestion, 34)}</span>
+                <span className="hidden sm:inline">{truncate(suggestion, 64)}</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
+
         <div className="flex items-end gap-2">
           <textarea
             value={draft}
@@ -98,7 +126,7 @@ function Message({ message }: { message: ChatMessage }) {
       </div>
       <div
         className={cn(
-          'max-w-[85%] rounded-xl px-3.5 py-2.5 text-sm leading-relaxed',
+          'min-w-0 max-w-[88%] break-words rounded-xl px-3.5 py-2.5 text-sm leading-relaxed sm:max-w-[85%]',
           isUser ? 'bg-raised text-ink' : 'border border-line bg-surface text-ink/90',
         )}
       >
@@ -106,4 +134,9 @@ function Message({ message }: { message: ChatMessage }) {
       </div>
     </div>
   )
+}
+
+/** Suggested replies are whole sentences; the button is not. */
+function truncate(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max - 1).trimEnd()}…`
 }

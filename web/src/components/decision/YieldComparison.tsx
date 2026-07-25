@@ -61,7 +61,11 @@ function MarketComparison({ market, rows }: { market: string; rows: Row[] }) {
         <span className="text-2xs text-faint">{rows.length} protocols</span>
       </div>
 
-      <table className="tabular mt-2 w-full text-2xs">
+      {/* Scrolls inside its own box rather than making the page scroll
+          sideways. Four numeric columns do not fit at 375px, and a table that
+          widens the viewport breaks every other section on the page too. */}
+      <div className="scroll-slim -mx-1 mt-2 overflow-x-auto px-1">
+      <table className="tabular w-full min-w-[19rem] text-2xs">
         <thead>
           <tr className="text-faint">
             <th className="pb-1 text-left font-medium">Protocol</th>
@@ -87,6 +91,7 @@ function MarketComparison({ market, rows }: { market: string; rows: Row[] }) {
           ))}
         </tbody>
       </table>
+      </div>
 
       <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-line pt-2">
         <Badge tone="neutral">{spreadBps} bp spread</Badge>
