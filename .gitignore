@@ -44,3 +44,6 @@ Thumbs.db
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# A verbatim copy of .env — never track it (see docs/active-work.md)
+env.txt
