@@ -63,6 +63,79 @@ one file.
 
 ---
 
+## 2026-07-25 — Lane B phase 2: the model seam and the validation layer that guards the key
+
+**What changed.** `agent/model/` — an OpenAI-compatible client shared by an Ollama and a vLLM
+backend, a scripted backend for tests, the curator prompt, and the four-layer output validator with
+reject-and-retry. `agent/mandate/constraints.py` holds the mandate checks. 40 new tests; 60 green.
+
+**Why validation is four separately-named layers instead of one `try: parse`.** The layering exists
+to make *retries actually work*. A model told "invalid output, try again" learns nothing and burns
+the tick; a model told "cbETH is not permitted; the mandate allows only USDC, WETH" fixes it on the
+next attempt. So each layer produces a message written to be fed straight back:
+
+| Layer | Catches | Told to the model |
+|---|---|---|
+| 1 extract | fences, prose, `<think>`, trailing commas | "return only a JSON object" |
+| 2 schema | wrong types, unknown fields, bad enums | the pydantic error, compacted to 6 lines |
+| 3 mandate | forbidden asset, weights ≠ 1, too many actions | the breach **and the limit it broke** |
+| 4 grounding | citing facts that were never in the snapshot | the invented ids **and the real ones** |
+
+Layer 3 reports *every* breach at once rather than the first: one retry that fixes three problems
+beats three retries.
+
+**Why the correction is appended as a conversation turn rather than a rewritten prompt.** The retry
+puts the model's own rejected output back as an `assistant` message and the failure as a `user`
+message. Models correct a visible, concrete mistake far more reliably than they avoid an abstract one
+described in a system prompt, and it leaves the original task text intact. The echoed output is
+capped at 1200 characters so three failures cannot crowd the real prompt out of a small context
+window.
+
+**Why grounding is a validation layer and not a UI nicety.** `facts_used` must cite real `Fact.id`s
+from the snapshot the model was given. Two things ride on it: the dApp joins facts → reasoning → tx
+hash to show *why* the agent acted, and a model citing `f9` when the snapshot stopped at `f6` has
+demonstrably stopped reading its inputs. That is the cheapest signal available that the reasoning is
+confabulated — and a confabulated rebalance spends real money. Also rejected: any non-`hold` action
+citing no facts at all. Holding while citing nothing stays legal, because "nothing could be read this
+tick" is an honest reason to hold.
+
+**The golden fixtures settled a constraint ambiguity that would otherwise have been a coin flip.**
+The golden mandate sets `max_position_pct: 0.6` and `min_cash_pct: 0.2`; the golden decision
+allocates USDC 0.70 / WETH 0.30 with `base_asset: "USDC"`. Reading `max_position_pct` as a cap on
+*every* allocation makes the shared fixture violate the shared mandate. So it caps **risk positions**
+— non-base assets — while the cash leg is governed from the other side by `min_cash_pct`. WETH 0.30 ≤
+0.60 and USDC 0.70 ≥ 0.20, consistent. A test asserts the golden decision is legal under the golden
+mandate, so if another lane ever reads these fields differently the disagreement surfaces here rather
+than as a mystery rejection at demo time.
+
+**Why coherence between `action` and `venue_intents` is enforced.** A `rebalance` carrying no intents
+executes nothing while reporting that it acted; a `hold` carrying swap intents trades while claiming
+to have stood still. Both are schema-valid and both make the decision feed lie to a depositor, which
+is the one thing this product cannot afford — the feed *is* the product.
+
+**Why the backend split is one hook and not two HTTP clients.** The only real difference between
+Ollama and vLLM is how you request structured output: Ollama takes `response_format: {"type":
+"json_object"}` (syntax only), vLLM accepts full JSON-Schema-guided decoding. That is a single
+callable passed into the shared client, so each backend file is a dozen lines. Neither hint is
+treated as a guarantee — `ports.ModelBackend` says so and it is true: guided decoding can produce a
+perfectly well-formed decision that breaks the mandate, so layers 3 and 4 run identically on both.
+
+**Why `scripted` is not in the backend registration table.** It is a real `ModelBackend` (the harness
+cannot tell it from Ollama, so tests exercise the true code path), but it is constructed directly and
+deliberately *not* selectable via `AGENT_MODEL_BACKEND`. Nothing should be able to put a canned model
+in front of a live vault by setting an environment variable.
+
+**`ModelUnavailable` is distinct from a validation failure**, and the cycle records it as `failed`
+rather than `rejected`. Conflating "the server is down" with "the model is unreliable" would make the
+decision feed misreport why a tick produced nothing.
+
+**Rejected:** relying on `response_format` / guided decoding *instead* of validating — it constrains
+syntax and at best shape, never mandate legality, and the agent holds a key. Also rejected: repairing
+model JSON beyond trailing commas. Silently "fixing" a malformed decision is exactly the risk the
+layer exists to prevent; only a repair that cannot change semantics is acceptable.
+
+---
+
 ## 2026-07-25 — Lane B phase 1: frozen routes live on fixtures; late binding to Lanes C and D
 
 **What changed.** `/agent` stood up: config, typed fixture access, the FastAPI app with all five

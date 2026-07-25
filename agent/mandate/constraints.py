@@ -1,0 +1,253 @@
+"""Checking a decision against what the mandate actually permits.
+
+This is layer 3 of output validation, and the layer with teeth. A model can emit
+perfectly schema-valid JSON that proposes buying an asset the mandate forbids,
+allocating 140% of the vault, or firing six transactions when the mandate allows
+two. The schema cannot catch any of that; only the mandate can.
+
+Kept separate from `agent/model/validation.py` for two reasons: these rules are a
+property of the *mandate*, not of model plumbing, and keeping them here means
+they are testable without a model, a network or an event loop.
+
+Every check returns *all* violations rather than raising on the first. The list
+becomes the retry hint, and a model told about three problems at once fixes them
+in one attempt instead of three.
+
+## How `max_position_pct` and `min_cash_pct` are read
+
+The golden fixtures settle an ambiguity that would otherwise be guesswork. The
+golden mandate sets `max_position_pct: 0.6` and `min_cash_pct: 0.2`, and the
+golden decision allocates USDC 0.7 / WETH 0.3 against `base_asset: "USDC"`.
+
+Reading `max_position_pct` as a cap on *every* line would make the shared fixture
+violate the shared mandate — so it is a cap on **risk positions**, meaning
+allocations to assets other than the base asset. The base asset is the cash leg
+and is governed by `min_cash_pct` from the other side. WETH 0.3 ≤ 0.6 and USDC
+0.7 ≥ 0.2: consistent, and it matches what the two fields obviously mean.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from curator_schema import AllocationDecision, ExecutionPlan, Mandate
+
+__all__ = ["Violation", "check_decision", "check_plan", "describe"]
+
+#: Weights are model-generated decimals, so an exact sum to 1.0 is not a fair
+#: requirement — three-way splits of 0.33 are correct in intent and 0.01 short in
+#: arithmetic. One percentage point of slack costs nothing real and avoids
+#: retrying a decision that is right.
+WEIGHT_SUM_TOLERANCE = 0.01
+
+
+@dataclass(frozen=True)
+class Violation:
+    """One breach, phrased so it can be handed straight back to the model."""
+
+    field: str
+    message: str
+
+    def __str__(self) -> str:
+        return f"{self.field}: {self.message}"
+
+
+def describe(violations: list[Violation]) -> str:
+    """Render violations as a retry instruction."""
+    return "; ".join(str(v) for v in violations)
+
+
+def check_decision(decision: AllocationDecision, mandate: Mandate) -> list[Violation]:
+    """Every way this decision breaches its mandate."""
+    problems: list[Violation] = []
+    allowed = set(mandate.constraints.allowed_assets)
+    problems += _check_allocations(decision, mandate, allowed)
+    problems += _check_intents(decision, mandate, allowed)
+    problems += _check_action_coherence(decision)
+    return problems
+
+
+def _check_allocations(
+    decision: AllocationDecision, mandate: Mandate, allowed: set[str]
+) -> list[Violation]:
+    allocations = decision.target_allocations
+    if not allocations:
+        return []
+
+    problems: list[Violation] = []
+    limits = mandate.constraints
+
+    unknown = sorted({a.asset for a in allocations} - allowed)
+    if unknown:
+        problems.append(
+            Violation(
+                "target_allocations",
+                f"{', '.join(unknown)} not permitted; the mandate allows only "
+                f"{', '.join(sorted(allowed))}",
+            )
+        )
+
+    duplicates = sorted(
+        {a.asset for a in allocations if sum(1 for b in allocations if b.asset == a.asset) > 1}
+    )
+    if duplicates:
+        problems.append(
+            Violation("target_allocations", f"{', '.join(duplicates)} appears more than once")
+        )
+
+    total = sum(a.weight for a in allocations)
+    if abs(total - 1.0) > WEIGHT_SUM_TOLERANCE:
+        problems.append(
+            Violation("target_allocations", f"weights sum to {total:.4f}, but must sum to 1.0")
+        )
+
+    # Risk positions only — the base asset is the cash leg, capped from the
+    # other side by min_cash_pct. See the module docstring.
+    oversized = [
+        a
+        for a in allocations
+        if a.asset != mandate.base_asset and a.weight > limits.max_position_pct
+    ]
+    for allocation in oversized:
+        problems.append(
+            Violation(
+                "target_allocations",
+                f"{allocation.asset} at {allocation.weight:.2%} exceeds the "
+                f"{limits.max_position_pct:.0%} single-position ceiling",
+            )
+        )
+
+    cash = sum(a.weight for a in allocations if a.asset == mandate.base_asset)
+    if cash + WEIGHT_SUM_TOLERANCE < limits.min_cash_pct:
+        problems.append(
+            Violation(
+                "target_allocations",
+                f"holds {cash:.2%} in {mandate.base_asset} but the mandate requires at "
+                f"least {limits.min_cash_pct:.0%} in cash",
+            )
+        )
+
+    return problems
+
+
+def _intent_assets(intent) -> list[str]:
+    if intent.kind == "swap":
+        return [intent.token_in, intent.token_out]
+    if intent.kind == "ship":
+        return list(intent.tokens)
+    return []
+
+
+def _check_intents(
+    decision: AllocationDecision, mandate: Mandate, allowed: set[str]
+) -> list[Violation]:
+    intents = decision.venue_intents
+    if not intents:
+        return []
+
+    problems: list[Violation] = []
+    limits = mandate.constraints
+
+    if len(intents) > limits.max_actions_per_tick:
+        problems.append(
+            Violation(
+                "venue_intents",
+                f"{len(intents)} actions requested but the mandate allows at most "
+                f"{limits.max_actions_per_tick} per tick",
+            )
+        )
+
+    permitted_venues = set(mandate.permitted_venues)
+    used = {i.venue for i in intents}
+    if forbidden := sorted(used - permitted_venues):
+        problems.append(
+            Violation(
+                "venue_intents",
+                f"venue {', '.join(forbidden)} not permitted; the mandate allows "
+                f"{', '.join(sorted(permitted_venues))}",
+            )
+        )
+
+    for position, intent in enumerate(intents):
+        if unknown := sorted(set(_intent_assets(intent)) - allowed):
+            problems.append(
+                Violation(
+                    f"venue_intents[{position}]",
+                    f"{', '.join(unknown)} not in the mandate's allowed assets",
+                )
+            )
+        if intent.kind == "swap":
+            if intent.amount_in is None and intent.pct_of_holdings is None:
+                problems.append(
+                    Violation(
+                        f"venue_intents[{position}]",
+                        "a swap needs either amount_in or pct_of_holdings; neither was set",
+                    )
+                )
+            if intent.token_in == intent.token_out:
+                problems.append(
+                    Violation(
+                        f"venue_intents[{position}]",
+                        f"cannot swap {intent.token_in} for itself",
+                    )
+                )
+        elif intent.kind == "ship" and len(intent.tokens) != len(intent.amounts):
+            problems.append(
+                Violation(
+                    f"venue_intents[{position}]",
+                    f"{len(intent.tokens)} tokens but {len(intent.amounts)} amounts; "
+                    "they must correspond one to one",
+                )
+            )
+
+    return problems
+
+
+def _check_action_coherence(decision: AllocationDecision) -> list[Violation]:
+    """The stated action and the requested work must agree.
+
+    Catches a real and expensive class of model error: a confident `rebalance`
+    with nothing attached executes nothing while reporting that it acted, and a
+    `hold` carrying swap intents would trade while claiming to have stood still.
+    Either one makes the decision feed lie to the depositor.
+    """
+    intents = decision.venue_intents or []
+    if decision.action == "hold" and intents:
+        return [
+            Violation(
+                "action",
+                f"action is 'hold' but {len(intents)} venue intent(s) were supplied; "
+                "either hold and request nothing, or choose a different action",
+            )
+        ]
+    if decision.action in {"rebalance", "enter", "exit"} and not intents:
+        return [
+            Violation(
+                "action",
+                f"action is '{decision.action}' but no venue_intents were supplied, so "
+                "nothing would happen; supply intents or use 'hold'",
+            )
+        ]
+    return []
+
+
+def check_plan(plan: ExecutionPlan, mandate: Mandate) -> list[Violation]:
+    """Check a venue's execution plan before it is submitted.
+
+    Slippage is the mandate constraint that can only be evaluated here: the
+    decision expresses intent, and only the venue knows the price impact of
+    filling it.
+    """
+    limits = mandate.constraints
+    if (
+        plan.expected_slippage_bps is not None
+        and plan.expected_slippage_bps > limits.max_slippage_bps
+    ):
+        return [
+            Violation(
+                "expected_slippage_bps",
+                f"plan expects {plan.expected_slippage_bps}bps of slippage but the "
+                f"mandate ceiling is {limits.max_slippage_bps}bps",
+            )
+        ]
+    return []

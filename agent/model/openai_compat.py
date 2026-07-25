@@ -1,0 +1,123 @@
+"""One OpenAI-compatible chat-completions client, shared by every backend.
+
+Standardizing on this request shape is a locked decision
+(`plans/initiate_plan.md` §3.1): Ollama and vLLM both expose it, so they work
+behind a single interface today and a hosted provider is a drop-in later without
+the decision loop noticing.
+
+What actually differs between backends is one thing — how you ask for structured
+output. Ollama takes `response_format: {"type": "json_object"}`; vLLM accepts a
+full JSON-Schema-guided decode. That difference is a single hook here, which is
+why `backends/ollama.py` and `backends/vllm.py` are a dozen lines each rather
+than two copies of an HTTP client.
+
+**The hint is never a guarantee.** `curator_schema.ports.ModelBackend` says so
+explicitly, and it is true in practice: `json_object` mode constrains syntax, not
+shape, and guided decoding still lets a model emit a well-formed decision that
+breaks the mandate. Everything from here goes through
+`agent/model/validation.py`.
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Callable
+from typing import Any
+
+import httpx
+
+__all__ = ["OpenAICompatClient", "ModelUnavailable"]
+
+log = logging.getLogger(__name__)
+
+#: A hint builder maps the requested JSON Schema to extra request-body fields.
+StructuredOutputHint = Callable[[dict[str, Any] | None], dict[str, Any]]
+
+
+class ModelUnavailable(RuntimeError):
+    """The model endpoint could not be reached or returned an unusable response.
+
+    Distinct from a validation failure: the model said nothing, rather than
+    saying something wrong. The cycle records this as `failed`, not `rejected` —
+    conflating "the server is down" with "the model is unreliable" would make
+    the decision feed lie about why a tick produced nothing.
+    """
+
+
+class OpenAICompatClient:
+    """Transport for any `/chat/completions` endpoint."""
+
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        model: str,
+        timeout: float = 120.0,
+        api_key: str | None = None,
+        structured_output: StructuredOutputHint | None = None,
+    ) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._model = model
+        self._timeout = timeout
+        self._api_key = api_key
+        self._structured_output = structured_output
+
+    def _headers(self) -> dict[str, str]:
+        headers = {"Content-Type": "application/json"}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        return headers
+
+    async def complete(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        json_schema: dict[str, Any] | None = None,
+        temperature: float = 0.0,
+    ) -> str:
+        payload: dict[str, Any] = {
+            "model": self._model,
+            "messages": messages,
+            "temperature": temperature,
+            "stream": False,
+        }
+        if self._structured_output:
+            payload.update(self._structured_output(json_schema))
+
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                response = await client.post(
+                    f"{self._base_url}/chat/completions",
+                    json=payload,
+                    headers=self._headers(),
+                )
+                response.raise_for_status()
+                body = response.json()
+        except httpx.HTTPStatusError as exc:
+            raise ModelUnavailable(
+                f"{self._base_url} returned {exc.response.status_code}: "
+                f"{exc.response.text[:300]}"
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise ModelUnavailable(f"could not reach {self._base_url}: {exc}") from exc
+
+        try:
+            return body["choices"][0]["message"]["content"] or ""
+        except (KeyError, IndexError, TypeError) as exc:
+            raise ModelUnavailable(
+                f"unexpected response shape from {self._base_url}: {str(body)[:300]}"
+            ) from exc
+
+    async def reachable(self) -> bool:
+        """Whether the endpoint answers at all — surfaced on `GET /health`.
+
+        Uses the models listing rather than a completion: it is instant, and a
+        loaded-but-slow model should read as reachable rather than timing out a
+        health check.
+        """
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get(f"{self._base_url}/models", headers=self._headers())
+                return response.status_code < 500
+        except httpx.HTTPError:
+            return False
