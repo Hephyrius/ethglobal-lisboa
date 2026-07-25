@@ -26,6 +26,26 @@ fs_permissions = [{ access = "read-write", path = "../deployments" }]
 [profile.default.fuzz]
 runs = 256
 
+[profile.default.invariant]
+runs = 64
+depth = 32
+# Handler actions deliberately attempt things that must revert — an unauthorized execute, a
+# non-allowlisted target, a role change. Failing the run on those would test nothing. Each attack
+# instead increments a ghost counter when it *succeeds*, and the invariants assert those are zero,
+# so a single breach anywhere in a sequence is caught and reported with the calls that produced it.
+fail_on_revert = false
+call_override = false
+
+# `FOUNDRY_PROFILE=deep forge test --match-path "test/invariant/*"` — a longer hunt for the CI-less
+# equivalent of an overnight run. Kept out of the default profile so the normal suite stays seconds.
+[profile.deep.invariant]
+runs = 512
+depth = 128
+fail_on_revert = false
+
+[profile.deep.fuzz]
+runs = 5000
+
 [fmt]
 line_length = 120
 tab_width = 4

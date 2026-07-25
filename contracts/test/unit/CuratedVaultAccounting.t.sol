@@ -79,27 +79,70 @@ contract CuratedVaultAccountingTest is VaultTestBase {
         assertLt(bobShares, 1_000e18, "bob gets fewer shares because each share is now worth more");
     }
 
-    /// @dev The classic ERC-4626 first-depositor attack: seed the vault with 1 wei, donate a large
-    ///      balance directly to inflate the share price, and the next depositor rounds to zero
-    ///      shares. `_decimalsOffset() = 12` is what stops it — OpenZeppelin's virtual shares make
-    ///      the donation 10^12 times less effective.
-    function test_inflationAttackIsMitigated() public {
+    /// @dev The classic ERC-4626 first-depositor theft, run end to end rather than asserted.
+    ///
+    ///      The attack: be the first depositor for 1 wei, donate a large balance directly to inflate
+    ///      the price per share, and the next depositor's shares round to **zero** — at which point
+    ///      the attacker redeems their single share and takes the victim's deposit with it.
+    ///
+    ///      `_decimalsOffset() = 12` is the defence, and "we set the offset" is an assertion until
+    ///      the attack is actually executed against it. So this executes it, and checks the two
+    ///      things that matter: **the victim gets their money back**, and **the attacker loses
+    ///      money by trying.** The second is the stronger claim — a merely survivable attack is one
+    ///      someone still runs.
+    function test_inflationAttackIsUnprofitableAndTheVictimIsWholeAgain() public {
         address attacker = makeAddr("attacker");
-        _deposit(attacker, 1);
+
+        uint256 attackerSpend = 1 + 10_000e6; // the 1 wei seed plus the donation
+        uint256 attackerShares = _deposit(attacker, 1);
 
         usdc.mint(attacker, 10_000e6);
         vm.prank(attacker);
-        // The unchecked return is the point: this is a raw donation, deliberately bypassing
-        // deposit() so no shares are minted against it.
+        // The unchecked return is the point: a raw donation, deliberately bypassing deposit() so no
+        // shares are minted against it. That asymmetry is the whole attack.
         // forge-lint: disable-next-line(erc20-unchecked-transfer)
         usdc.transfer(address(vault), 10_000e6);
 
         uint256 victimShares = _deposit(bob, 1_000e6);
+        assertGt(victimShares, 0, "victim rounded to zero shares - the attack succeeded");
 
-        assertGt(victimShares, 0, "victim must not round to zero shares");
-        assertApproxEqRel(
-            vault.convertToAssets(victimShares), 1_000e6, 1e16, "victim keeps ~all of the deposit's value"
-        );
+        // The victim actually leaves, rather than being asked what they could theoretically get.
+        vm.prank(bob);
+        uint256 victimOut = vault.redeem(victimShares, bob, bob);
+        assertGe(victimOut, 1_000e6 - 2, "victim lost value to the attacker");
+
+        // And the attacker leaves too, so the attack can be priced.
+        vm.prank(attacker);
+        uint256 attackerOut = vault.redeem(attackerShares, attacker, attacker);
+
+        assertLt(attackerOut, attackerSpend, "the attack was profitable");
+
+        // And the loss is material rather than dust, which is what makes the attack not worth
+        // attempting: the donation is shared pro-rata with every other holder, and the virtual
+        // offset means a 1 wei seed buys almost none of the pool. Measured here: ~5,000 USDC lost
+        // on a ~10,000 USDC attack. The bound is 60% rather than an exact figure so the test states
+        // "the attacker loses a large fraction" instead of pinning an arithmetic artefact — an
+        // earlier `< spend / 2` failed by one wei while describing the same outcome.
+        assertLe(attackerOut, (attackerSpend * 60) / 100, "the attacker recovered too much of the donation");
+    }
+
+    /// @dev The same defence from the other end: a donation into a vault that already has holders is
+    ///      a gift to them, and must never let the donor take more out than they put in.
+    function test_donatingToALiveVaultIsAGiftNotALever() public {
+        _deposit(alice, 10_000e6);
+
+        address donor = makeAddr("donor");
+        uint256 donorShares = _deposit(donor, 1_000e6);
+
+        usdc.mint(donor, 5_000e6);
+        vm.prank(donor);
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
+        usdc.transfer(address(vault), 5_000e6);
+
+        vm.prank(donor);
+        uint256 out = vault.redeem(donorShares, donor, donor);
+
+        assertLt(out, 6_000e6, "the donor extracted their own donation back plus a profit");
     }
 
     function test_holdingsMirrorsTotalAssets() public {
