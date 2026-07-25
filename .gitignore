@@ -55,3 +55,11 @@ env.txt
 env*.txt
 *.env.local
 secrets.*
+
+# ...but the document that explains the rotation is not a secret, and `secrets.*` was quietly
+# swallowing it. Narrow exception for exactly that path, which is safe now for a reason:
+# `scripts/check-secrets.sh` scans staged content and is installed as a pre-commit hook, so a
+# credential pasted into this file would be caught by shape rather than by filename. Do not widen
+# this to a directory or a glob — the pattern above exists because the last leak had a name nobody
+# had thought of.
+!docs/secrets.md

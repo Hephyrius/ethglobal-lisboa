@@ -31,6 +31,24 @@
 # wstETH is deliberately excluded: its Base feed reports WSTETH/ETH at 18 decimals, not USD, and
 # totalAssets() assumes a USD-quoted feed.
 #
+# ── ERC-4626 share tokens need a feed that does not exist yet ──────────────────────────────────────
+#
+# A MetaMorpho share is not an aToken. It APPRECIATES rather than rebasing 1:1, so the underlying's
+# Chainlink feed is wrong for it — valuing gtUSDCp as plain USDC understates the position by ~760 bps
+# and worsens every block (cross-lane request #66). There is also no Chainlink feed for a MetaMorpho
+# share and there never will be.
+#
+# So the feed is composed: ERC4626PriceFeed(vault, assetFeed) answers
+# `convertToAssets(1 share) x underlying USD price` behind IAggregatorV3, which is all
+# `priceFeed(token)` requires. Lane D wrote it; this script deploys and registers it.
+#
+# It is DEPLOYED ON DEMAND rather than pasted in as a constant, and that is the whole reason this is
+# more than three lines. A deployed helper lives in anvil's state, so a fork restart destroys it and
+# a hardcoded address becomes an address with no code — which this script's own verification would
+# then reject, correctly but confusingly, in the middle of demo prep. Instead the feed is looked up
+# from the factory's own `defaultValuations()` and redeployed only when it is genuinely absent, so
+# re-running after an anvil restart repairs the universe instead of failing it.
+#
 # Usage:
 #   ./scripts/expand-universe.sh                  # register everything below
 #   ./scripts/expand-universe.sh --dry-run        # print what would be sent
@@ -123,6 +141,23 @@ TABLE
 # #8, already settled for USDC and WETH. Without this every first swap in a new asset reverts on
 # step 1 with TargetNotAllowed, which reads as a venue bug and is not one.
 
+# ── ERC-4626 share tokens ─────────────────────────────────────────────────────────────────────────
+#
+# "SYMBOL VAULT UNDERLYING_FEED DESCRIPTION…" per line; the description is the rest of the line.
+# UNDERLYING_FEED prices the vault's `asset()`, not the share — the share price is composed from it.
+#
+# Gauntlet USDC Prime is the default of the two verified MetaMorpho vaults on Base ($426M vs $9.3M
+# for Moonwell Flagship): a curator supplying into the deeper book is the less interesting claim to
+# have to defend. Moonwell Flagship 0xc1256Ae5FF1cf2719D4937adb3bbCCab2E00A2Ca is the alternative.
+
+ERC4626_VALUATIONS=$(cat <<'TABLE'
+gtUSDCp 0xeE8F4eC5672F09119b96Ab6fB59C27E1b7e44b61 0x7e860098F58bBFC8648a4311b374B1D669a2bc6B gtUSDCp / USD
+TABLE
+)
+
+FEED_PROJECT="venues/aqua/solidity"
+FEED_CONTRACT="src/ERC4626PriceFeed.sol:ERC4626PriceFeed"
+
 send() {
   if [ "$DRY_RUN" -eq 1 ]; then
     echo "    would send: $*"
@@ -145,6 +180,130 @@ if [ -n "$FACTORY_OWNER" ] && [ "$(echo "$CALLER" | tr 'A-Z' 'a-z')" != "$(echo 
   echo "  pass the owner's key with --key, or set FACTORY_OWNER_KEY" >&2
   exit 1
 fi
+
+# ── resolve the ERC-4626 share feeds: reuse what is registered, deploy what is missing ────────────
+#
+# Reuse is decided by asking the CHAIN, not by remembering: `defaultValuations()` already carries
+# every (token, feed) pair the factory will hand a new vault, so it is the authority on whether a
+# feed exists. That keeps this idempotent with no extra state file to go stale, and makes a re-run
+# after an anvil restart a repair rather than a failure.
+
+# The feed a previous run registered for $1, or empty. Output shape is
+# `[(0xtoken, 0xfeed), (…)]`, so flatten and pair it up.
+registered_feed_for() {
+  cast call "$FACTORY" "defaultValuations()((address,address)[])" --rpc-url "$RPC" 2>/dev/null \
+    | tr -d '[]() ' | tr ',' '\n' | grep '^0x' \
+    | awk -v want="$(echo "$1" | tr 'A-Z' 'a-z')" '
+        { if (NR % 2 == 1) { tok = tolower($1) } else if (tok == want) { print $1; exit } }'
+}
+
+ERC4626_RESOLVED=""
+
+echo "Resolving ERC-4626 share feeds…"
+while read -r SYMBOL VAULT_TOKEN ASSET_FEED FEED_DESC; do
+  [ -n "${SYMBOL:-}" ] || continue
+
+  # The share token first. `asset()` is what makes it a 4626 rather than a plain ERC-20, and a
+  # missing answer here means the address is wrong — cheaper to learn now than after a deploy.
+  UNDERLYING="$(cast call "$VAULT_TOKEN" "asset()(address)" --rpc-url "$RPC" 2>/dev/null || echo "")"
+  [ -n "$UNDERLYING" ] || {
+    echo "  x $SYMBOL — no asset() at $VAULT_TOKEN; not an ERC-4626 vault" >&2
+    exit 1
+  }
+  SHARE_VALUE="$(cast call "$VAULT_TOKEN" "convertToAssets(uint256)(uint256)" 1000000000000000000 \
+    --rpc-url "$RPC" 2>/dev/null | sed 's/[^0-9].*//')"
+  echo "  $SYMBOL: 1 share = $SHARE_VALUE of $UNDERLYING (base units)"
+
+  EXISTING="$(registered_feed_for "$VAULT_TOKEN")"
+  FEED=""
+  if [ -n "$EXISTING" ]; then
+    # Registered is not the same as alive: anvil may have restarted since, leaving the address
+    # bare. A feed with no code answers nothing, so ask it.
+    EXISTING_DESC="$(cast call "$EXISTING" "description()(string)" --rpc-url "$RPC" 2>/dev/null | tr -d '"' || echo "")"
+    if [ "$EXISTING_DESC" = "$FEED_DESC" ]; then
+      echo "    reusing registered feed $EXISTING ('$EXISTING_DESC')"
+      FEED="$EXISTING"
+    else
+      echo "    registered feed $EXISTING answers '$EXISTING_DESC', expected '$FEED_DESC' — redeploying"
+    fi
+  fi
+
+  if [ -z "$FEED" ]; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+      # Deliberately NOT folded into VALUATIONS: there is no feed address to verify, and a
+      # placeholder would fail the verification gate below and report a dry run as broken.
+      echo "    would deploy ERC4626PriceFeed($VAULT_TOKEN, $ASSET_FEED, \"$FEED_DESC\")"
+      echo "    would then register it as the valuation and an execute() target for $SYMBOL"
+      continue
+    fi
+    command -v forge >/dev/null 2>&1 || {
+      echo "  x forge not found, and $SYMBOL needs a feed deployed." >&2
+      echo "    Windows: run inside 'wsl -d Ubuntu-24.04' with ~/.foundry/bin on PATH." >&2
+      exit 1
+    }
+    echo "    deploying ERC4626PriceFeed($VAULT_TOKEN, $ASSET_FEED, \"$FEED_DESC\")…"
+    # `--constructor-args` MUST come last. It is variadic, so anything after it is swallowed as
+    # another constructor argument — put `--rpc-url` behind it and forge silently deploys to its
+    # default `localhost:8545` instead, which fails with a connection error naming a port you
+    # never asked for. Cost twenty minutes; leaving the note so it costs nobody else any.
+    DEPLOY_LOG="$(cd "$FEED_PROJECT" && forge create "$FEED_CONTRACT" \
+      --private-key "$OWNER_KEY" --rpc-url "$RPC" --broadcast \
+      --constructor-args "$VAULT_TOKEN" "$ASSET_FEED" "$FEED_DESC" 2>&1)" || true
+    FEED="$(printf '%s\n' "$DEPLOY_LOG" | sed -n 's/^Deployed to: \(0x[0-9a-fA-F]\{40\}\).*/\1/p')"
+    [ -n "$FEED" ] || {
+      echo "  x deploy produced no address for $SYMBOL. forge said:" >&2
+      printf '%s\n' "$DEPLOY_LOG" | sed 's/^/      /' >&2
+      exit 1
+    }
+    echo "    deployed at $FEED"
+  fi
+
+  # ── the check description() cannot make ──────────────────────────────────────────────────────
+  #
+  # Lane D flagged this: ETH/USD and USDC/USD are both 8-decimal aggregators, so a feed built
+  # against the WRONG underlying still describes itself correctly and still answers confidently.
+  # The magnitude is what gives it away. Compose the expected answer independently —
+  # convertToAssets(1 share) x the underlying's own answer — and require the deployed feed to
+  # agree within 1%. Wrong-underlying is off by ~1,700x here, not by 1%.
+  ASSET_ANSWER="$(cast call "$ASSET_FEED" "latestRoundData()(uint80,int256,uint256,uint256,uint80)" \
+    --rpc-url "$RPC" 2>/dev/null | sed -n 2p | sed 's/[^0-9].*//')"
+  FEED_ANSWER="$(cast call "$FEED" "latestRoundData()(uint80,int256,uint256,uint256,uint80)" \
+    --rpc-url "$RPC" 2>/dev/null | sed -n 2p | sed 's/[^0-9].*//')"
+  UNDERLYING_UNIT="$(cast call "$UNDERLYING" "decimals()(uint8)" --rpc-url "$RPC" 2>/dev/null | sed 's/[^0-9].*//')"
+  if [ -n "$ASSET_ANSWER" ] && [ -n "$FEED_ANSWER" ] && [ -n "$SHARE_VALUE" ] && [ -n "$UNDERLYING_UNIT" ]; then
+    SCALE=1; i=0
+    while [ "$i" -lt "$UNDERLYING_UNIT" ]; do SCALE=$((SCALE * 10)); i=$((i + 1)); done
+    EXPECTED=$(( SHARE_VALUE * ASSET_ANSWER / SCALE ))
+    DIFF=$(( FEED_ANSWER - EXPECTED )); [ "$DIFF" -ge 0 ] || DIFF=$(( -DIFF ))
+    if [ "$EXPECTED" -gt 0 ] && [ $(( DIFF * 100 )) -gt "$EXPECTED" ]; then
+      echo "  x $SYMBOL feed answers $FEED_ANSWER, composed expectation is $EXPECTED — >1% apart." >&2
+      echo "    That is the signature of a feed built against the wrong underlying: it would" >&2
+      echo "    describe itself correctly and price the position confidently wrong." >&2
+      exit 1
+    fi
+    echo "    answers $FEED_ANSWER against a composed expectation of $EXPECTED — agrees"
+  else
+    echo "    ! could not compose an independent expectation; registering on description() alone" >&2
+  fi
+
+  ERC4626_RESOLVED="$ERC4626_RESOLVED
+$SYMBOL $VAULT_TOKEN $FEED"
+done <<TABLE_END
+$ERC4626_VALUATIONS
+TABLE_END
+
+# Fold them into the normal tables so they go through the same verification and the same
+# registration path as everything else — a 4626 share is not a special case downstream.
+VALUATIONS="$VALUATIONS$ERC4626_RESOLVED"
+while read -r SYMBOL VAULT_TOKEN FEED; do
+  [ -n "${SYMBOL:-}" ] || continue
+  TARGETS="$TARGETS
+$SYMBOL $VAULT_TOKEN"
+done <<TABLE_END
+$ERC4626_RESOLVED
+TABLE_END
+
+echo
 
 # ── verify every address before trusting it ───────────────────────────────────────────────────────
 #
