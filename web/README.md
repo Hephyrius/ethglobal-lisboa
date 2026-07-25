@@ -218,6 +218,24 @@ resort, shown **badged `SAMPLE MANDATE`** with a note to verify against `mandate
 that route is a normal answer, not a fault: it means no mandate is stored for a vault some other
 harness deployed.
 
+## Verification status
+
+**Verified:** `pnpm build` and `tsc --noEmit` clean · all three routes rendered in a real browser ·
+every read function in `lib/chain/abis.ts` exercised by `eth_call` against Lane A's **deployed vault**
+on the fork · live integration with Lane B across all five frozen routes plus `/health`,
+`/vault/{addr}/mandate` and `/genesis/sources` · the badge correctly reads `FIXTURES` while the agent
+API is up but in fixture mode · golden fixtures parse through the zod mirror at build time.
+
+**Not verified — deposit and withdraw have never been signed.** The read path is proven against the
+real contract and the write path uses the same ABI constants, but no transaction has been submitted
+from this app: that needs a browser wallet holding a funded key, and broadcasting from an unlocked
+anvil account would mutate fork state other lanes assert against.
+
+*To close it (~2 min):* run the fork, import anvil account #0 into MetaMask, add a network on
+`http://localhost:8540` with chain id `8453`, open
+`/vault/0x0E2c0e50E67B96C9C401C94e111a3DBD00DEB5d1`, connect, deposit 1 USDC. The panel does
+approve-then-deposit and waits for each receipt.
+
 ## Visual language
 
 Institutional finance, not crypto-native: warm paper ground, serif headings, hairline rules, tabular

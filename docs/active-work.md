@@ -20,7 +20,7 @@ bottom and let the owner do it.
 | **B** | `agent/` | 🔵 in progress | Lane B instance | 2026-07-25 T+1:00 | |
 | **C** | `data/` | ✅ **MVP done** — registry, 2 Graph sources, standalone MCP server, x402; live path blocked only on `GRAPH_API_KEY` | Lane C instance | 2026-07-25 | 2026-07-25 02:13Z |
 | **D** | `venues/` | ✅ **MVP done, claim released.** Both venues behind the frozen `Venue` port; `ship()`/`dock()` verified against the **real deployed Aqua** on a Base fork. Allowlist now read from `deployments/base-fork.json`, reconciled against Lane A's deployed list. Only outstanding item is the Uniswap Developer Feedback Form, which needs a human. | Lane D instance | 2026-07-25 02:10 | 2026-07-25 04:10Z |
-| **E** | `web/` | 🔵 in progress | Lane E instance (Claude Code) | 2026-07-25 | |
+| **E** | `web/` | ✅ **MVP done** — all 3 routes live, verified in a real browser and against Lane A's deployed vault + Lane B's live API. One gap, stated in [web/README.md](../web/README.md) §Verification status: **deposit/withdraw have never been signed** (needs a browser wallet with a funded key). | Lane E instance (Claude Code) | 2026-07-25 | 2026-07-25 04:25Z |
 
 To claim: change 🟡 unclaimed → 🔵 in progress, add your name and a timestamp. On finish:
 ✅ done plus a release timestamp.
