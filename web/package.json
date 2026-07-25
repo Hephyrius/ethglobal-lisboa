@@ -9,7 +9,8 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "audit:deps": "node scripts/audit-dependency-age.mjs"
+    "audit:deps": "node scripts/audit-dependency-age.mjs",
+    "verify:write-path": "node scripts/verify-vault-write-path.mjs"
   },
   "dependencies": {
     "@curator/schema": "workspace:*",

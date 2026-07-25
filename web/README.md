@@ -226,15 +226,24 @@ on the fork · live integration with Lane B across all five frozen routes plus `
 `/vault/{addr}/mandate` and `/genesis/sources` · the badge correctly reads `FIXTURES` while the agent
 API is up but in fixture mode · golden fixtures parse through the zod mirror at build time.
 
-**Not verified — deposit and withdraw have never been signed.** The read path is proven against the
-real contract and the write path uses the same ABI constants, but no transaction has been submitted
-from this app: that needs a browser wallet holding a funded key, and broadcasting from an unlocked
-anvil account would mutate fork state other lanes assert against.
+**The write path is verified on-chain** — approve, deposit and redeem all landed against the
+deployed vault on the fork, minting 100.004782308691914570 shares for 100 USDC and redeeming them
+back. Reproduce with:
 
-*To close it (~2 min):* run the fork, import anvil account #0 into MetaMask, add a network on
-`http://localhost:8540` with chain id `8453`, open
-`/vault/0x0E2c0e50E67B96C9C401C94e111a3DBD00DEB5d1`, connect, deposit 1 USDC. The panel does
-approve-then-deposit and waits for each receipt.
+```sh
+pnpm --filter @curator/web verify:write-path              # deposit, verify, redeem
+pnpm --filter @curator/web verify:write-path -- --keep    # leave the position in place
+```
+
+It issues the same three calls with the same ABI fragments and argument shapes as the deposit
+panel, and leaves the vault as it found it — the shared-fork delta was 1 wei of USDC (ERC-4626
+rounding, in the vault's favour) and zero shares. Tx hashes are in
+[docs/handoff.md](../docs/handoff.md).
+
+**Still not exercised: the browser wallet handshake.** Connecting MetaMask and having it sign is
+`@wagmi/core` plus the extension rather than our code, and needs a human with a wallet installed.
+*~2 min:* import anvil account #0 into MetaMask, add a network on `http://localhost:8540` with chain
+id `8453`, open `/vault/0x0E2c0e50E67B96C9C401C94e111a3DBD00DEB5d1`, connect, deposit 1 USDC.
 
 ## Visual language
 

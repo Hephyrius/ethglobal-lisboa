@@ -57,17 +57,36 @@ time.
 - The fixture-mode genesis chat is a scripted interviewer, not a model. It only runs when Lane B is
   unreachable.
 
+### ✅ The write path is verified on-chain — phase 2 §3.5 is closed
+
+Ran after Lane B landed its `executeBatch`, against the shared fork:
+
+```
+approve   0x2a30080a856ea28828ada8c05089326599505dbb6c68048ca50cceb9a5f8dbaa   gas 55,425
+deposit   0x03cba9d04d77d60dc6b7195023bf4213d9b091bc5cbd09d62cb7dff0c90086b3   gas 111,242
+redeem    0xcd955921e40ec99cfa628e2037e683d6b5293beaf26b21d2ccb983730c98d34f   gas 111,528
+
+100 USDC in -> 100.004782308691914570 shares minted, worth 99.999999 USDC
+vault totalAssets  2499.880448 -> 2599.880448 -> 2499.880449
+```
+
+Reproduce with `pnpm --filter @curator/web verify:write-path`. It issues the same three calls with
+the same ABI fragments and argument shapes as the deposit panel, waiting for each receipt the way
+the UI does.
+
+**It leaves the vault as it found it**: deposit, verify, then redeem exactly the shares just minted.
+Net effect on the shared fork was **1 wei of USDC** (0.000001) and a shares delta of exactly zero —
+that wei is ERC-4626 rounding in the vault's favour, which is the correct direction. Pass `--keep`
+if you want the position left in place.
+
 ### What is known-broken / unverified
 
-**Deposit and withdraw have never been signed.** This is the one real gap and the top item to close.
-The read path is proven against the deployed vault and the write path uses the same ABI constants,
-but no transaction has been submitted from this app — it needs a browser wallet holding a funded
-key, and broadcasting from an unlocked anvil account would have mutated fork state other lanes
-assert against.
-
-*To close it (~2 min):* start the fork, import anvil account #0 into MetaMask, add a network on
+**The browser wallet handshake itself has not been exercised.** The write path above proves the
+calldata and the share accounting; what it does not cover is connecting MetaMask and having it sign
+— that is `@wagmi/core` plus the extension rather than our code, and it needs a human with a wallet
+installed. *~2 min:* import anvil account #0 into MetaMask, add a network on
 `http://localhost:8540` with chain id `8453`, open `/vault/0x0E2c0e50E67B96C9C401C94e111a3DBD00DEB5d1`,
-connect, deposit 1 USDC. The panel does approve-then-deposit and waits for each receipt.
+connect, deposit 1 USDC.
 
 Smaller notes:
 
@@ -175,6 +194,14 @@ Ollama tags are **exact** — pull the exact tag in `.env` or `/health` reports 
 
 ### Gotchas that will cost you an hour
 
+- **Set `OLLAMA_KEEP_ALIVE=30m` before the demo.** Ollama evicts an idle model after ~5 minutes, and
+  the next tick then pays a ~2 GB reload before generating. A warm decision is ~33s; the first cold
+  one exceeded a 120s budget and surfaced as `ModelUnavailable` — which reads as "the server is
+  down" when it is merely slow. This fires exactly when the stack has been idle while someone
+  explains the architecture. `model_timeout_s` now defaults to 300s so a cold load completes, but
+  keeping the model warm is the real fix. **`keep_alive` in the request body does not work** —
+  Ollama's OpenAI-compatible endpoint ignores it, verified. `curl localhost:11434/api/ps` shows
+  what is resident and when it expires.
 - **`AGENT_PRIVATE_KEY` must hold `AGENT_ROLE`.** On this fork that is anvil account **#1**
   (`0x7099…79C8`), not #0. The wrong key reads state perfectly and reverts every write on an
   AccessControl check — healthy-looking right until the first `executeBatch`. Compare the address the

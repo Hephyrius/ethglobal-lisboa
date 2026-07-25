@@ -114,6 +114,55 @@ localhost. Point `forge test` and `forge script` at the anvil endpoint, not at t
 
 ---
 
+## 2026-07-25 — Lane E phase 2: the write path lands, and two things the feed left implicit
+
+**What changed.** Phase 2 §3.2 and §3.5 for this lane: `venue_intents` (including SwapVM program
+parameters) and a multi-protocol yield comparison now render in the decision feed, and the vault
+write path is verified on-chain.
+
+**The write path is no longer the project's last untested link.** Phase 2 §5 sequenced Lane E after
+Lane B because a deposit mutates the vault Lane B asserts against; once their `executeBatch` landed,
+approve → deposit → redeem all went through against the deployed vault. 100 USDC in →
+`100.004782308691914570` shares worth `99.999999` USDC → redeemed back. Hashes in `docs/handoff.md`.
+
+*Why a script and not the browser.* Signing needs a wallet extension and a headless environment has
+none. Driving one over CDP would have meant hand-rolling a WebSocket client — Node 20 has no global
+`WebSocket` — to test a layer that is `@wagmi/core` plus MetaMask rather than our code.
+`web/scripts/verify-vault-write-path.mjs` instead issues the same three calls with the same ABI
+fragments and argument shapes as the deposit panel. It is a reusable tool rather than a one-off
+(Rule 6): parameterised on rpc/vault/amount/key, wired as `pnpm --filter @curator/web
+verify:write-path`, and re-runnable by whoever takes the lane over. The honest boundary is stated in
+all three docs: this proves the calldata and the share accounting, not the wallet handshake.
+
+**It leaves the shared fork as it found it.** Deposit, verify, then redeem exactly the shares just
+minted — net effect 1 wei of USDC and zero shares, with the wei being ERC-4626 rounding in the
+vault's favour, which is the correct direction. Three other lanes are working against that fork and
+Lane D still needs a clean vault for a taker fill; `--keep` opts out when a position is wanted.
+
+**Why `venue_intents` needed rendering at all.** They were not displayed anywhere, which meant the
+most distinctive part of the 1inch integration — the agent choosing a SwapVM program shape and maker
+fee — was something a judge had to take on faith. A ship now reads "SwapVM · constant-product (xyc)
+curve · 30 bps maker fee" beside the tokens committed. Phase 2 §3.2 asks for exactly this: they
+score SwapVM usage higher, so make it legible rather than implied.
+
+**Why the yield comparison is a table.** Individual fact cards render each observation faithfully but
+scatter the comparison across six of them — a reader holds "moonwell 12.74%" in their head while
+scrolling to "moonwell $14.5M TVL" and then to the Aave pair. The interesting fact is a
+*relationship*: the highest headline yield is not the deepest market. A list cannot render a
+relationship, so yields are pulled together, sorted, with TVL and utilization beside each and the
+spread stated. That is the reasoning the mandate literally asks for — "prefer lending markets with
+deep liquidity … over the highest headline APY" — and this is where a reader checks the agent
+actually did it. Built only from facts already in the snapshot, so it invents nothing and adds no
+data dependency, and it hides itself below two yields because one row is not a comparison.
+
+**Intent amounts have no declared scale.** `AquaShipIntent.amounts` are base-unit strings with no
+decimals attached. The scale comes from the vault's own holdings — it is sole custodian, so its
+holdings are authoritative for any token an intent can mention. Where a token is not held, the raw
+value renders labelled "base units" rather than divided by a guess. Same principle as the
+`share_price` decision below.
+
+---
+
 ## 2026-07-25 — Lane E: trad-fi visual language, and three integration corrections
 
 **What changed.** The dApp was restyled from dark-with-accent to an institutional light theme, and
