@@ -34,6 +34,7 @@ from typing import Any
 from curator_schema import Holding, Mandate, VaultState
 from eth_account import Account
 from web3 import AsyncHTTPProvider, AsyncWeb3
+from web3.logs import DISCARD
 
 from ..config import Settings
 from .abi import ERC20_ABI, load_abi
@@ -220,7 +221,12 @@ class Web3VaultClient:
 
         tx_hash = await self._send(factory.functions.createVault(params))
         receipt = await self._w3.eth.get_transaction_receipt(tx_hash)
-        events = factory.events.VaultCreated().process_receipt(receipt)
+        # DISCARD, not the default WARN: creating a vault also emits the clone's
+        # own initialization events, which cannot decode against the factory ABI
+        # and are not supposed to. The default prints a MismatchedABI warning per
+        # undecodable log — four scary paragraphs during a genesis demo, for
+        # nothing.
+        events = factory.events.VaultCreated().process_receipt(receipt, errors=DISCARD)
         if not events:
             raise RuntimeError(f"createVault in {tx_hash} emitted no VaultCreated event")
         return events[0]["args"]["vault"], tx_hash
