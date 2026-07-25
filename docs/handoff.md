@@ -154,6 +154,14 @@ delivered — 0.035% off, well inside tolerance), submitted by this lane as a si
 | `0x789066d4…` | plan submitted directly | ✅ the gate: 2,500 USDC → 1,750 USDC + 0.4034 WETH |
 | `0x129da1a0…` | **fully autonomous tick**, 0 retries | ⚠️ right diagnosis, **wrong direction** — sold the underweight asset, 70/30 → 79/21 |
 | `0x704f54a2…` | **fully autonomous tick**, 0 retries | ⚠️ right direction, **`pct_of_holdings: 1.0`** — 79/21 → **0/100**, breaching two mandate limits |
+| `0xd10d560d…` | autonomous tick | ⚠️ **reverted on-chain.** Recorded as `failed` with the hash, vault untouched — that path had only ever been exercised by a stubbed test |
+| `0x533e8e61…` | corrective, submitted directly | ✅ restored the book to **50.0% / 50.0%** |
+
+**Vault left at 50.0% USDC / 50.0% WETH, total 2,498.51** — compliant with its stored mandate
+(30% cash floor, 60% position ceiling), and holding both legs so Lane D can ship into Aqua. The
+mandate for this vault lives in `.agent-state/mandates/` and is *not* the golden fixture: it sets
+`max_slippage_bps: 300`, because Uniswap reports its 250 bps default tolerance and the golden
+mandate's 50 would reject every plan (request #26).
 
 The loop demonstrably runs end to end on its own. It also produced two bad trades in a row, and
 **every validation layer then in place passed both** — correctly, because each decision was
