@@ -7,6 +7,7 @@ import { MandateDraft } from '@/components/genesis/MandateDraft'
 import { DeployPanel } from '@/components/genesis/DeployPanel'
 import { PresetCards } from '@/components/genesis/PresetCards'
 import { UniverseStrip } from '@/components/genesis/UniverseStrip'
+import { VenueStrip } from '@/components/venues/VenueStrip'
 import { suggestionsFor } from '@/lib/mandate/suggestions'
 import { ModeNotice } from '@/components/ui/ModeBadge'
 import { useGenesisChat, useGenesisSources } from '@/lib/api/genesis-queries'
@@ -94,6 +95,8 @@ export default function CreatePage() {
       <PresetCards onSelect={loadPreset} selectedKey={presetKey} />
 
       <UniverseStrip available={available} />
+
+      <VenueStrip />
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
         <ChatPanel

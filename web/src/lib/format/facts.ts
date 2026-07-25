@@ -25,6 +25,10 @@ const KIND_LABELS: Record<Fact['kind'], string> = {
   // model) mistakes one for a rate. See the same table in the curator prompt.
   sentiment: 'Sentiment',
   gas: 'Gas',
+  // A prediction market's implied odds. Forward-looking and a *consensus about
+  // the future*, which is a different kind of claim from every backward-looking
+  // rate beside it — labelling it distinctly is what stops it being read as one.
+  probability: 'Implied odds',
 }
 
 export function kindLabel(kind: Fact['kind']): string {
@@ -45,6 +49,11 @@ export function factValue(fact: Fact): string {
       // second as the first is exactly the misread the kind labels exist for.
       if (fact.kind === 'sentiment') {
         return `${fact.value.toFixed(2)} / 1.00`
+      }
+      // Odds read as a chance, not as a share of anything: "62% chance" rather
+      // than a bare "62%" sitting in a column of utilisation figures.
+      if (fact.kind === 'probability') {
+        return `${formatPercent(fact.value, 0)} chance`
       }
       // Utilization and similar ratios read far better as percentages.
       return formatPercent(fact.value, fact.value >= 0.1 ? 1 : 2)

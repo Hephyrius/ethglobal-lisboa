@@ -27,36 +27,27 @@ const SOURCE_NOTES: Record<string, string> = {
   peers: 'What comparable vaults are doing',
   feargreed: 'Market sentiment index',
   gas: 'Base gas price — what an action costs to take',
+  morpho: "Base's largest lending market by TVL",
+  prediction: 'Implied odds from prediction markets — a forward-looking view, unlike every rate beside it',
 }
 
-const VENUE_NOTES: Record<string, string> = {
-  uniswap: 'Swap execution — rotates what the vault holds',
-  aqua: 'Market-making as a maker. Tokens never leave the vault',
-  aave: 'Lending supply — puts idle capital to work',
-  morpho: 'Lending supply',
-}
-
+/**
+ * Sources only. Venues moved to `VenueStrip`, which renders Lane D's capability
+ * manifest — what each one does to the tokens, not just its name. Listing them
+ * in both places put two different answers to the same question on one screen.
+ */
 export function UniverseStrip({ available }: { available: AvailableGrants }) {
-  if (available.sources.length === 0 && available.venues.length === 0) return null
+  if (available.sources.length === 0) return null
 
   return (
     <section className="rounded border border-line bg-raised/40 p-4">
-      <div className="grid gap-5 md:grid-cols-2">
-        <Group
-          title="Data it could consult"
-          caption="The agent can only reason about markets it is granted. This list is exhaustive."
-          keys={available.sources}
-          notes={SOURCE_NOTES}
-          tone="data"
-        />
-        <Group
-          title="Venues it could use"
-          caption="Where it may execute. A venue not granted here is one it can never reach."
-          keys={available.venues}
-          notes={VENUE_NOTES}
-          tone="agent"
-        />
-      </div>
+      <Group
+        title="Data it could consult"
+        caption="The agent can only reason about markets it is granted. This list is exhaustive — anything absent from a mandate, it cannot see."
+        keys={available.sources}
+        notes={SOURCE_NOTES}
+        tone="data"
+      />
     </section>
   )
 }

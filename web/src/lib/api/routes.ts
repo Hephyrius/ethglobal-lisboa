@@ -55,10 +55,39 @@ export const GenesisSources = z
   .object({ sources: z.array(z.string()), venues: z.array(z.string()) })
   .passthrough()
 
+/**
+ * Lane D's venue capability manifest (cross-lane note #61), as it would arrive
+ * over HTTP. `.passthrough()` because D owns the shape and may add fields.
+ *
+ * `custody` is the load-bearing one and D said so explicitly: `virtual` means
+ * the tokens never leave the vault (that *is* the Pattern 1 claim), `claim`
+ * means the underlying really moved and the vault holds a receipt token, and
+ * `rotational` means no position is held at all. A reader who flattens those
+ * three concludes `totalAssets()` is broken when it is exactly right.
+ */
+export const VenueManifestRow = z
+  .object({
+    key: z.string(),
+    role: z.string().optional(),
+    summary: z.string().optional(),
+    intents: z.array(z.string()).default([]),
+    tokens: z.array(z.string()).default([]),
+    custody: z.enum(['virtual', 'claim', 'rotational']).optional(),
+    custody_note: z.string().optional(),
+    requires: z.array(z.string()).default([]),
+    available: z.boolean().default(true),
+    unavailable_reason: z.string().nullable().optional(),
+  })
+  .passthrough()
+
+export const VenueManifest = z.array(VenueManifestRow)
+
 export const routes = {
   genesisChat: () => '/genesis/chat',
   genesisFinalize: () => '/genesis/finalize',
   genesisSources: () => '/genesis/sources',
+  /** Requested from Lane B in note #68; degrades cleanly until it exists. */
+  venues: () => '/venues',
   vaultState: (address: string) => `/vault/${address}/state`,
   vaultMandate: (address: string) => `/vault/${address}/mandate`,
   vaultDecisions: (address: string, limit = 20) => `/vault/${address}/decisions?limit=${limit}`,
@@ -78,4 +107,5 @@ export const schemas = {
   vaultPerformance: { response: VaultPerformance },
   health: { response: AgentHealth },
   genesisSources: { response: GenesisSources },
+  venues: { response: VenueManifest },
 } as const
