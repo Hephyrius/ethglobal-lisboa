@@ -548,6 +548,62 @@ is distinctive enough that a collision needs the number to appear in another fie
 
 ---
 
+## 2026-07-25 — Lane A: closing the loop on `minOut`, and the cost of an open oracle interface
+
+**What changed.** `SECURITY.md` §6 replaced with Lane D's verified answer on swap `minOut`; new §5.1
+covering what it means that a registered price feed need not be Chainlink; three tests behind it;
+cross-lane #74 filed. 101 → 104 tests.
+
+**§6 was stale the moment D answered, and stale security documentation is worse than none.** It said
+"NOT verified from this lane, treat front-running as unverified". D decoded the real calldata (#60)
+and then **corrected their own answer** (#64) before I wrote it up, which is the part worth recording:
+
+Their first answer said "every leg carries a non-zero `amountOutMin`". True of the route they
+decoded — and false minutes later on the same pair, where a mixed V3+V4 route had **every leg at
+zero** and a single trailing `SWEEP` enforcing the minimum on the accumulated total instead. Both
+routes are fully protected. So the only safe statement is about the **aggregate**, and the document
+now says that rather than the per-leg version.
+
+This property has now produced a wrong reading in *both* directions, which is why it gets a
+reviewer's note rather than a one-liner: grepping the calldata for the quoted minimum finds nothing
+and suggests no protection at all (false negative), while decoding the legs and finding zeros
+suggests a free lunch (false alarm). A reviewer who checks one leg concludes there is a hole.
+
+**The more interesting item is what #66 changed underneath me.** Lane D wanted a MetaMorpho share
+priced, asked whether I would add an ERC-4626 valuation kind to the vault (#63), then withdrew the
+question after noticing something I had not: **`priceFeed(token)` never required a Chainlink-operated
+feed, only a contract answering `IAggregatorV3`.** So they wrote one. That is a better outcome than
+what they asked me for — same exactness, zero change to the custody contract, and it stays in the
+lane that owns the integration.
+
+It also quietly widens this lane's trust surface, and that part *is* mine. `SECURITY.md` §5 said "the
+vault trusts Chainlink". That is now false, and the consequence is specific: **the vault cannot tell a
+derived feed from a native one**, so its staleness protection is only as good as each feed's honesty
+about its own age.
+
+The failure mode is the kind that reviews cleanly. A wrapper feed is recomputed on every call, so
+stamping `block.timestamp` as `updatedAt` *feels* correct — it genuinely was computed this block. But
+the price it wraps was not, and stamping now makes the feed permanently self-certify as fresh:
+`priceMaxAge` becomes a **no-op for that token** while every other token in the same vault stays
+protected. Nothing reverts. Nothing looks wrong.
+
+So I demonstrated it rather than describing it. `MockDerivedFeed` is switchable between propagating
+its upstream's timestamp and stamping now, and the vault prices a **ten-year-old** answer without
+complaint in the second case. The correct version still trips the bound. Three tests, and §5.1 now
+states the requirements on anything registered into a valuation set: propagate the oldest input's
+timestamp, match `decimals()` to the answer's scale, never substitute a fabricated fallback for a
+non-positive answer.
+
+**Why a requirement rather than a fix.** The vault could reject feeds it does not recognise — an
+allowlist of aggregators — but that would break the exact capability #66 depends on, and the whole
+reason `execute` takes opaque calldata is that this lane does not get to decide what a venue looks
+like. The same reasoning applies here: the contract cannot inspect what it is given, by design. What
+it *can* do is state the contract precisely and prove the failure mode is real, so the registrar knows
+what they are promising. Confirming Lane D's implementation propagates rather than stamps is #74 —
+theirs to answer, and invisible on the fork because `priceMaxAge` is 0 there.
+
+---
+
 ## 2026-07-25 — Lane A Wave 2: the tests that found bugs were all in the tests
 
 **What changed.** `contracts/SECURITY.md` — nine attack vectors, each ending with the test that
@@ -1746,6 +1802,38 @@ schema instead, in which case it degrades into `errors[]` and `verify-live` name
 one-line config edit, which is exactly why the table is data. The Token API's exact path layout is
 also unconfirmed — its docs now redirect to Pinax — so that source tries a short ordered list of known
 path shapes and remembers the first that answers.
+
+---
+
+## 2026-07-25 — Lane D: R5 is green because the drift points the friendly way
+
+**What changed.** The `V3TooLittleReceived` entry in `venues/reverts.py` now records that the failure
+is **direction-dependent**, and request 74 asks for `UNISWAP_SLIPPAGE_BPS=150` on fork runs.
+
+**Why this is worth a second entry.** Wave 1 closed R5 with the reasonable conclusion that *"whatever
+produced that revert was environmental and is gone"*. Environmental, yes. Gone, no — and the
+difference decides whether it reappears during the demo.
+
+The mechanism is fork staleness (previous entry), and its sign is set by which way ETH has moved
+since the fork block. Selling USDC→WETH only reverts when WETH is **pricier on the fork than live**,
+because that is when the fork under-delivers against a minimum computed on live prices. Right now the
+fork reads $1,858.98 against $1,872.43 live — WETH is *cheaper* on the fork, so the swap
+over-delivers and passes with room to spare.
+
+**So the green run is evidence about the market, not about the code.** Nothing was fixed between the
+failing run and the passing one. A ~50 bps move the other way brings back the identical revert, and
+today's drift magnitude already exceeds what a 50 bps band can absorb — it passes only because the
+sign is favourable.
+
+**The general shape, which is the reusable part:** *a test that passes because an uncontrolled
+variable happens to point the right way is indistinguishable from a test that passes because the bug
+is fixed.* The distinguishing question is whether anything changed in between. Here nothing did, so
+"it works now" was never available as a conclusion. Checking the sign took one `eth_call` against two
+endpoints.
+
+The fix stays a one-line environment change owned by whoever runs the stack, not a code change here —
+but it is now recorded where someone hitting the error will actually read it, with the direction
+caveat attached, rather than as a note that the failure is behind us.
 
 ---
 

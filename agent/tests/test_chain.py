@@ -70,6 +70,38 @@ def test_share_price_matches_the_golden_fixture():
     assert _share_price(50_000_000000, 49_875 * 10**18, 6, 18) == "1002506265664160401"
 
 
+def test_the_api_value_is_convert_to_assets_scaled_by_ten_to_the_twelve():
+    """Request #50: the frozen interface disagrees with itself about this field.
+
+    `vault-state.schema.json` describes it as `convertToAssets(1e18)` — 6-decimal
+    for a USDC vault — while `fixtures/vault-state.json` carries the
+    dimensionless ratio × 1e18. This API follows the fixture, and Lane A asked
+    only that the two agree, so what is pinned here is the **transform between
+    them**: anyone cross-checking the API against the chain divides by 10¹².
+
+    Note it is not a clean multiple in the other direction. The chain value is
+    this one truncated, which is the practical argument for keeping the
+    precision: at 6 decimals a USDC vault's share price cannot move until it has
+    gained 0.0001%, so early performance renders as a flat line.
+    """
+    total_assets, total_supply = 50_000_000000, 49_875 * 10**18
+    api = _share_price(total_assets, total_supply, 6, 18)
+    on_chain = 10**18 * total_assets // total_supply  # convertToAssets(1e18)
+
+    assert api is not None
+    assert on_chain == 1_002_506
+    assert int(api) // 10**12 == on_chain
+
+
+def test_the_fork_vaults_share_price_reconciles_with_request_27():
+    """#27 reported the fork vault at `999952` where #11 had said `1e18`, and
+    both were right in their own units. 2,499.88 USDC over 2,500 shares."""
+    api = _share_price(2_499_880000, 2_500 * 10**18, 6, 18)
+
+    assert api == "999952000000000000"
+    assert int(api) // 10**12 == 999_952
+
+
 def test_an_empty_vault_has_no_share_price():
     """Division by zero is not a price of zero — the field is omitted."""
     assert _share_price(0, 0, 6, 18) is None

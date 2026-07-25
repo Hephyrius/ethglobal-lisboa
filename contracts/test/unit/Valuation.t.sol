@@ -3,9 +3,11 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 
+import {CuratedVault} from "../../src/CuratedVault.sol";
 import {IAggregatorV3} from "../../src/interfaces/IAggregatorV3.sol";
 import {ChainlinkPriceLib} from "../../src/libraries/ChainlinkPriceLib.sol";
 import {MockAggregatorV3} from "../mocks/MockAggregatorV3.sol";
+import {MockDerivedFeed} from "../mocks/MockDerivedFeed.sol";
 import {VaultTestBase} from "./VaultTestBase.sol";
 
 /// @dev `ChainlinkPriceLib`'s functions are `internal`, so calling them from a test inlines them
@@ -178,5 +180,75 @@ contract VaultValuationTest is VaultTestBase {
 contract MockERC20Stub {
     function decimals() external pure returns (uint8) {
         return 18;
+    }
+}
+
+/// @notice What the vault guarantees when the registered feed is **not** a Chainlink aggregator.
+///
+/// @dev The valuation set accepts any contract answering `IAggregatorV3`. That is deliberate and
+///      useful — Lane D uses it to price a MetaMorpho share as `convertToAssets(1 share)` × the
+///      underlying's USD price, which no Chainlink feed exists for (cross-lane #66). It also means
+///      the vault's staleness protection is only ever as good as the registered feed's honesty about
+///      its own age, and that is a security property worth pinning rather than assuming.
+contract DerivedFeedValuationTest is VaultTestBase {
+    MockDerivedFeed internal derived;
+
+    function setUp() public override {
+        super.setUp();
+        derived = new MockDerivedFeed(IAggregatorV3(address(ethFeed)), "wstETH-ish / USD");
+    }
+
+    /// @dev The vault does not care who operates the feed. This is the capability #66 relies on.
+    function test_aNonChainlinkFeedIsAcceptedAndPricesCorrectly() public {
+        CuratedVault derivedVault = _vaultPricingWethWith(address(derived));
+
+        derived.setExchangeRate(1.1e18); // one unit is worth 1.1 ETH
+        weth.mint(address(derivedVault), 1e18);
+
+        // 1 unit x 1.1 x $3,000 = $3,300
+        assertEq(derivedVault.totalAssets(), 3_300e6, "derived feed priced incorrectly");
+    }
+
+    /// @dev The good case: a wrapper that propagates its upstream's `updatedAt` inherits the
+    ///      upstream's staleness, so the vault's bound still protects it.
+    function test_aDerivedFeedThatPropagatesItsUpstreamStaysProtected() public {
+        CuratedVault derivedVault = _vaultPricingWethWith(address(derived));
+        weth.mint(address(derivedVault), 1e18);
+
+        assertGt(derivedVault.totalAssets(), 0, "healthy before the upstream goes stale");
+
+        vm.warp(block.timestamp + 2 * PRICE_MAX_AGE); // upstream answer ages out
+
+        vm.expectRevert();
+        derivedVault.totalAssets();
+    }
+
+    /// @dev **The finding.** A wrapper that stamps `block.timestamp` — which feels correct, because
+    ///      it *is* recomputed on every call — self-certifies as permanently fresh. The vault then
+    ///      keeps pricing that holding from an arbitrarily old upstream answer while every other
+    ///      token in the same vault remains protected. Nothing reverts and nothing looks wrong.
+    ///
+    ///      This is not a vault bug: the vault cannot tell a derived feed from a native one, by
+    ///      design. It is a **requirement on anything registered into the valuation set**, and it is
+    ///      written down in SECURITY.md §5 because it is invisible from this side.
+    function test_aDerivedFeedThatStampsNowDefeatsStalenessEntirely() public {
+        CuratedVault derivedVault = _vaultPricingWethWith(address(derived));
+        weth.mint(address(derivedVault), 1e18);
+
+        derived.setStampNowInsteadOfPropagating(true);
+
+        vm.warp(block.timestamp + 3650 days); // the upstream answer is now ten years old
+
+        // No revert. The vault prices a ten-year-old number as though it arrived this block.
+        assertEq(derivedVault.totalAssets(), 3_000e6, "expected the stale price to be used silently");
+    }
+
+    /// @notice Builds a vault whose WETH is priced by `feed`, leaving the shared fixture untouched.
+    function _vaultPricingWethWith(address feed) internal returns (CuratedVault) {
+        vm.startPrank(platform);
+        factory.setDefaultValuation(address(weth), feed);
+        vm.stopPrank();
+
+        return CuratedVault(factory.createVault(_createParams()));
     }
 }

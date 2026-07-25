@@ -79,6 +79,30 @@ Every shape is imported from `packages/schema` — none are redefined here. `Man
 The request/response envelopes (`GenesisChatRequest`, `MandateDraft`, …) live in
 [`agent/api/schemas.py`](api/schemas.py) and mirror the zod definitions exactly.
 
+#### `VaultState.share_price` is a ratio × 10¹⁸, not `convertToAssets(1e18)`
+
+The frozen interface disagrees with itself here, so this states which half this API follows
+(cross-lane request #50). `vault-state.schema.json` *describes* the field as `convertToAssets(1e18)`
+— 6-decimal for a USDC vault — while `fixtures/vault-state.json` *carries*
+`1002506265664160401` for 50,000 USDC over 49,875 shares, which is the dimensionless
+assets-per-share ratio scaled by 10¹⁸. **This API follows the fixture**, because every lane's tests
+validate against fixtures and nothing validates against prose.
+
+| | 50,000 USDC / 49,875 shares | fork vault at 0.999952 |
+|---|---|---|
+| this API, and the golden fixture | `1002506265664160401` | `999952000000000000` |
+| `convertToAssets(1e18)` on-chain | `1002506` | `999952` |
+
+Neither is wrong — they are the same number in different units, and the second is the first
+truncated at 12 digits. **Both are ~10¹² apart but not exactly**, which is the practical argument
+for the 18-decimal form: at 6 decimals a USDC vault's share price cannot move until it has gained
+0.0001%, so early performance reads as a flat line.
+
+To compare against the chain, divide by 10¹². To go the other way, don't — the precision is gone.
+`agent/performance/recorder.py` does this conversion in one place (`share_price_in_asset_units`),
+because `PerformancePoint.share_price` **is** specified in asset units, and conflating the two once
+already cost a 10¹² error.
+
 ### Two wire-format guarantees Lane E can rely on
 
 These are enforced by tests, because both are legal JSON Schema and still break zod in a browser:

@@ -128,34 +128,87 @@ and **refuses to deploy to a non-fork network with it disabled** (`StalenessChec
 | `test_zeroBalanceSkipsTheFeed` | A token with a zero balance is skipped **before** its feed is read, so a broken feed only blocks the vault while it actually holds that token. |
 | `test_rejectsStalenessCheckingDisabled` | The deploy script refuses a real network with the check off. |
 
-**Residual risk, unmitigated by design:** the vault trusts Chainlink. A compromised or manipulated
-feed reprices every share. Mitigating that needs a second oracle and a divergence check, which is out
-of scope here — though the *agent* now reads Chainlink and the Graph Token API independently, so a
-disagreement is visible off-chain even though the contract does not act on it.
+**Residual risk, unmitigated by design:** the vault trusts its registered feeds. A compromised or
+manipulated feed reprices every share. Mitigating that needs a second oracle and a divergence check,
+which is out of scope here — though the *agent* now reads Chainlink and the Graph Token API
+independently, so a disagreement is visible off-chain even though the contract does not act on it.
+
+### 5.1 · Registered feeds need not be Chainlink — and that is a security surface
+
+`priceFeed(token)` accepts **any contract answering `IAggregatorV3`**, not only a Chainlink-operated
+aggregator. That is deliberate and load-bearing: Lane D prices a MetaMorpho share as
+`convertToAssets(1 share) × the underlying's USD price`, for which no Chainlink feed exists
+(cross-lane #66). Without it, supplying into a 4626 yield-bearing token would collapse the share
+price, because the vault would hold something `totalAssets()` cannot value.
+
+The cost is that **the vault cannot tell a derived feed from a native one**, so its staleness
+protection is only as good as each feed's honesty about its own age. Requirements on anything
+registered into a valuation set:
+
+| Requirement | Why |
+|---|---|
+| **`updatedAt` must propagate the oldest input**, never `block.timestamp` | A wrapper is recomputed on every call, so stamping "now" feels correct and is trivially defensible in review. It makes the feed permanently self-certify as fresh, silently disabling `priceMaxAge` for that token while every other token in the same vault stays protected. |
+| **`decimals()` must match the answer's scale** | The conversion maths trusts it. ETH/USD and USDC/USD are both 8-decimal aggregators, so a wrong-asset feed cannot be caught by decimals alone — `description()` is the real guard. |
+| **A non-positive answer must be a revert or a non-positive answer**, never a fabricated fallback | `readPrice` rejects `<= 0`; a feed substituting a stale-but-positive value defeats that. |
+
+| Test | What it proves |
+|---|---|
+| `test_aNonChainlinkFeedIsAcceptedAndPricesCorrectly` | The capability itself: a derived feed is accepted and prices a holding correctly. |
+| `test_aDerivedFeedThatPropagatesItsUpstreamStaysProtected` | A wrapper that propagates its upstream's `updatedAt` inherits its staleness, so the bound still bites. |
+| `test_aDerivedFeedThatStampsNowDefeatsStalenessEntirely` | **The failure mode, demonstrated:** a wrapper stamping `block.timestamp` prices a **ten-year-old** upstream answer without reverting and without looking wrong. |
+
+This is not a vault defect — the vault cannot inspect what it is given, by the same design that lets a
+new venue ship without touching these contracts. It is a **requirement on the registrar**, and it is
+written here because it is invisible from the contract side. Confirming that Lane D's
+`ERC4626PriceFeed` propagates rather than stamps is tracked as cross-lane **#74**.
 
 ---
 
-## 6 · Sandwiching the agent's rebalance — **NOT verified from this lane**
+## 6 · Sandwiching the agent's rebalance — **mitigated, verified by Lane D**
 
-**Status: open, owned by Lane D, tracked as cross-lane request #60.**
+**Answered by cross-lane request #60, corrected by #64. Verified by decoding real calldata, not by
+reading documentation.**
 
 The vault executes opaque calldata against an allowlisted target. That is the seam that lets a venue
 adapter be built without touching these contracts — and it means **the vault cannot inspect a
 `minOut` it never parses.** Adding that inspection would require the vault to understand every venue's
-calldata format, which is precisely the coupling the design exists to avoid.
+calldata format, which is precisely the coupling the design exists to avoid. So the protection lives
+in the calldata Lane D builds, and only Lane D can attest to it. They have:
 
-So the protection has to live in the calldata Lane D builds, and this document cannot honestly claim
-it. What must be true:
+> The swap transaction guarantees a minimum output equal to the quoted minimum, derived from the
+> mandate's `max_slippage_bps`; depending on route shape this is enforced either as per-leg
+> `amountOutMin` values or as a single `SWEEP` minimum on the total.
 
-- the Uniswap `/swap` calldata carries a non-zero `amountOutMinimum`, and
-- it is derived from the mandate's `max_slippage_bps` rather than the API's default tolerance.
+Measured on the demo path (1,000 USDC → WETH): the effective guarantee is a haircut of **exactly
+0.5000%** against the expected output — the **50 bps** in the golden mandate's `max_slippage_bps`.
+Shown to be causal rather than coincidental by requesting 10 bps and 200 bps and observing the floor
+move correspondingly. Request #26's concern (the API reporting its *default* 250 bps) is closed by
+#32: `UNISWAP_SLIPPAGE_BPS=50` is now sent as `slippageTolerance`.
 
-That second point is not hypothetical: request #26 records that the Trading API reports its **default
-250 bps**, not a mandate-derived figure. A `minOut` of zero in a public-mempool transaction is a free
-lunch for a searcher.
+### Reviewer's note — this property has produced a false reading in **both** directions
 
-**This section will be replaced with Lane D's answer verbatim when it lands.** Until then, treat
-front-running of the swap leg as unverified.
+Worth stating because checking it naively fails twice over:
+
+- **Grepping the calldata for the quoted minimum finds nothing**, which looks like no protection at
+  all. The value is not present as a word — it is split across route legs. You have to decode the
+  `UniversalRouter.execute(bytes commands, bytes[] inputs, uint256 deadline)` command stream.
+- **Decoding the legs and finding zeros looks like a free lunch.** On V3-only split routes each leg
+  carries its own non-zero `amountOutMin`. On **mixed V3+V4 routes every leg's `amountOutMin` is 0**,
+  and a single trailing `SWEEP` (`0x04`) enforces `amountMin` on the accumulated total instead.
+  Verified: `SWEEP.amountMin` exactly equals the quoted minimum.
+
+**Only the aggregate is meaningful** — `max(sum of leg minimums, SWEEP minimum)`. Do not assert
+"every leg has a non-zero minOut"; it is false on V4-mixed routes, and a reviewer checking a single
+leg would believe they had found a hole.
+
+Pinned by 5 live tests in Lane D's `venues/tests/test_uniswap_minout.py`, computed shape-agnostically.
+
+**Residual risk, and it is real:** the slippage bound is applied **per process**
+(`UNISWAP_SLIPPAGE_BPS`), not per mandate. A second vault whose mandate specifies a *tighter* ceiling,
+running in the same harness process, would be protected only at the process-wide bound rather than at
+its own. Tracked in #33; the fix is a per-intent field, which is a frozen-schema change. With one
+vault on the demo path this is latent rather than active, but it is exactly the kind of thing that
+becomes wrong the moment a second vault exists.
 
 ---
 
