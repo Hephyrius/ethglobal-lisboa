@@ -40,6 +40,7 @@ __all__ = [
     "idle_fraction",
     "idle_capital_fact",
     "best_lending_rate",
+    "idle_drag_for",
 ]
 
 #: Provenance for facts the harness derives about the vault, as opposed to
@@ -52,17 +53,6 @@ IDLE_FACT_ID = "vault:idle-capital"
 
 #: Below this the surplus is rounding, not a position worth a transaction.
 _MATERIAL = 0.01
-
-
-def _weights(vault: VaultState) -> dict[str, float]:
-    total = int(vault.total_assets or 0)
-    if total <= 0:
-        return {}
-    return {
-        h.symbol: int(h.value_in_asset) / total
-        for h in vault.holdings
-        if h.value_in_asset is not None
-    }
 
 
 def idle_fraction(mandate: Mandate, vault: VaultState | None) -> float | None:
@@ -163,3 +153,23 @@ def best_lending_rate(
             best = (fact.value, where)
 
     return best
+
+
+def idle_drag_for(mandate: Mandate, vault: VaultState | None, snapshot: MarketSnapshot, hours):
+    """Assemble the `IdleDrag` the reflection renders, or None.
+
+    Returns None whenever any leg is unknown rather than substituting a zero:
+    "we could not price the drag" and "the drag is nothing" are different
+    statements, and only one of them is true when there is no yield in the
+    snapshot.
+    """
+    from .reflection import IdleDrag
+
+    fraction = idle_fraction(mandate, vault)
+    if not is_material(fraction):
+        return None
+    best = best_lending_rate(snapshot, mandate)
+    if best is None:
+        return None
+    rate, where = best
+    return IdleDrag(idle_pct=fraction, best_rate=rate, where=where, hours=hours)

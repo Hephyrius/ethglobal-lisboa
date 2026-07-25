@@ -91,6 +91,57 @@ class Outcome:
 
 
 @dataclass(frozen=True)
+class IdleDrag:
+    """What the idle balance forwent by not being deployed.
+
+    The third leg of Wave 2's idle-capital work, and the one that closes the
+    loop: a prompt line tells the agent that holding costs something, but its own
+    track record *showing* the cost is a stronger steer than being told.
+
+    Reported as an annualised rate first and an accumulated figure second. Over a
+    hackathon's timescale the accumulated number is vanishingly small — a few
+    hours of 4% APY on half a book is single-digit basis points — and leading
+    with it would teach exactly the wrong lesson, that idling is free. The rate
+    is the honest headline; the accumulation is the evidence that it is real.
+    """
+
+    #: Share of the vault earning nothing, above the mandate's cash floor.
+    idle_pct: float
+    #: Best lending yield available for a permitted asset, as a fraction.
+    best_rate: float
+    #: Where that rate was on offer, for the model to cite.
+    where: str
+    #: How long the book has looked like this. None when there is no history.
+    hours: float | None
+
+    @property
+    def annualised_pct(self) -> float:
+        """Yield given up per year by leaving this share idle."""
+        return self.idle_pct * self.best_rate
+
+    @property
+    def forgone_pct(self) -> float | None:
+        """Yield actually given up over the observed window."""
+        if self.hours is None:
+            return None
+        return self.annualised_pct * (self.hours / 8760.0)
+
+    def render(self) -> str:
+        head = (
+            f"{self.idle_pct:.1%} of the book is idle while {self.where} pays "
+            f"{self.best_rate:.2%} a year. Leaving it there gives up about "
+            f"{self.annualised_pct:.2%} a year of vault return"
+        )
+        forgone = self.forgone_pct
+        if forgone is not None and self.hours is not None:
+            head += (
+                f", and has already cost roughly {forgone * 100:.4f}% of share price "
+                f"over the {self.hours:.1f}h it has sat there"
+            )
+        return head + "."
+
+
+@dataclass(frozen=True)
 class Reflection:
     """The agent's own track record, as it will be shown to the model."""
 
@@ -99,10 +150,16 @@ class Reflection:
     max_drawdown_pct: float | None
     rejections: int
     executions: int
+    idle_drag: IdleDrag | None = None
 
     def render(self) -> str:
         """The prompt block. Empty string when there is nothing honest to say."""
-        if not self.outcomes and self.return_pct is None and not self.rejections:
+        if (
+            not self.outcomes
+            and self.return_pct is None
+            and not self.rejections
+            and self.idle_drag is None
+        ):
             return ""
 
         lines = ["", "HOW YOUR RECENT DECISIONS HAVE WORKED OUT."]
@@ -118,6 +175,10 @@ class Reflection:
                 f"You have executed {self.executions} time(s) and had {self.rejections} "
                 f"decision(s) rejected by validation."
             )
+
+        if self.idle_drag is not None:
+            lines.append("")
+            lines.append("THE COST OF SITTING STILL. " + self.idle_drag.render())
 
         if self.outcomes:
             lines.append("")
@@ -232,6 +293,7 @@ def build_reflection(
     points: list[PerformancePoint],
     *,
     limit: int = MAX_OUTCOMES,
+    idle_drag: IdleDrag | None = None,
 ) -> Reflection:
     """Join the decision journal to the share-price series.
 
@@ -295,4 +357,5 @@ def build_reflection(
         max_drawdown_pct=drawdown,
         rejections=sum(1 for a in actions if a.status == "rejected"),
         executions=sum(1 for a in actions if a.status == "executed"),
+        idle_drag=idle_drag,
     )

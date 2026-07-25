@@ -45,7 +45,7 @@ from ..mandate.store import MandateNotFound, MandateStore
 from ..model.openai_compat import ModelUnavailable
 from ..model.validation import DecisionRejected
 from .engine import LlmDecisionEngine
-from .idle import with_idle_fact
+from .idle import idle_drag_for, with_idle_fact
 from .planning import PlanRejected, build_execution_plan
 from .reflection import build_reflection
 from .store import ActionJournal
@@ -119,7 +119,7 @@ class DecisionCycle:
         # ── the model ─────────────────────────────────────────────────────
         try:
             result = await self._engine.decide_in_full(
-                mandate, snapshot, state, self._reflect(vault)
+                mandate, snapshot, state, self._reflect(vault, mandate, snapshot, state)
             )
         except DecisionRejected as exc:
             return record.rejected(
@@ -182,7 +182,23 @@ class DecisionCycle:
                 errors=[SourceError(source="registry", message=str(exc))],
             )
 
-    def _reflect(self, vault: str) -> str:
+    @staticmethod
+    def _hours_since_deploy(history: list[AgentAction]) -> float | None:
+        """How long the book has looked the way it does now.
+
+        Measured from the last cycle that actually moved capital. Holds and
+        rejections changed nothing, so counting them would reset the clock on a
+        position that never moved and make idle capital look freshly parked.
+        None when nothing has ever executed — the vault has no history to price
+        the drag against, and inventing a window would invent the cost too.
+        """
+        executed = [a for a in history if a.status == "executed"]
+        if not executed:
+            return None
+        latest = max(to_utc(a.timestamp) for a in executed)
+        return max(0.0, (utcnow() - latest).total_seconds() / 3600.0)
+
+    def _reflect(self, vault: str, mandate: Mandate, snapshot, state) -> str:
         """The agent's own track record, rendered for the prompt.
 
         Never allowed to break a tick. Reflection is an *input to judgement*, not
@@ -196,9 +212,13 @@ class DecisionCycle:
         if self._performance is None:
             return ""
         try:
+            history = self._journal.recent(vault, limit=_REFLECTION_HISTORY)
             reflection = build_reflection(
-                self._journal.recent(vault, limit=_REFLECTION_HISTORY),
+                history,
                 self._performance.read(vault),
+                idle_drag=idle_drag_for(
+                    mandate, state, snapshot, self._hours_since_deploy(history)
+                ),
             )
             return reflection.render()
         except Exception as exc:  # noqa: BLE001 - a missing memory is not a failed tick
