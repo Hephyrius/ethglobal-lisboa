@@ -31,6 +31,13 @@ load_dotenv() {
 
   # `|| [ -n "$_line" ]` so a final line without a trailing newline is not dropped.
   while IFS= read -r _line || [ -n "$_line" ]; do
+    # Strip a trailing CR. .env is gitignored, so .gitattributes cannot normalise it, and it is
+    # edited on Windows by several people — it WILL come back as CRLF. Without this the CR rides
+    # along inside the value and produces failures that look like anything but a line ending:
+    # curl reported "no node at http://localhost:8540" while the same URL worked by hand, because
+    # it was really requesting $'http://localhost:8540\r'.
+    _line="${_line%$'\r'}"
+
     case "$_line" in
       '' | '#'*) continue ;;
       *=*) ;;

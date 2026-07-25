@@ -51,9 +51,20 @@ ok()   { [ "$QUIET" -eq 1 ] || printf "  \033[32m✓\033[0m %s\n" "$1"; }
 warn() { warnings=$((warnings + 1)); printf "  \033[33m!\033[0m %s\n" "$1"; [ -n "${2:-}" ] && printf "      %s\n" "$2"; return 0; }
 bad()  { failures=$((failures + 1)); printf "  \033[31m✗\033[0m %s\n" "$1"; [ -n "${2:-}" ] && printf "      fix: %s\n" "$2"; return 0; }
 
+# Three attempts. A single dropped request must not read as "the fork is down": anvil forking
+# against a rate-limited public RPC blips, and WSL's localhost forwarding blips under load. This
+# check reported a dead node while the agent API was reading the same fork happily — and a
+# demo-readiness gate that cries wolf is a gate people learn to ignore.
 rpc() {
-  curl -s -m 8 -X POST "$RPC" -H 'Content-Type: application/json' \
-    --data "{\"jsonrpc\":\"2.0\",\"method\":\"$1\",\"params\":$2,\"id\":1}" 2>/dev/null
+  _try=1
+  while [ "$_try" -le 3 ]; do
+    _out="$(curl -s -m 8 -X POST "$RPC" -H 'Content-Type: application/json' \
+      --data "{\"jsonrpc\":\"2.0\",\"method\":\"$1\",\"params\":$2,\"id\":1}" 2>/dev/null)"
+    case "$_out" in *'"result"'*) echo "$_out"; return 0 ;; esac
+    _try=$((_try + 1))
+    [ "$_try" -le 3 ] && sleep 1
+  done
+  echo "$_out"
 }
 json_str() { echo "$1" | sed -n "s/.*\"$2\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -1; }
 json_addr() { sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\(0x[0-9a-fA-F]\{40\}\)\".*/\1/p" "$DEPLOYMENTS" | head -1; }
