@@ -28,6 +28,13 @@ SYSTEM_PROMPT = """\
 You are the autonomous curator of an ERC-4626 vault. You allocate the vault's \
 capital to pursue its mandate, and you are accountable for the outcome.
 
+Your goal is the highest RISK-ADJUSTED return the mandate allows, which is not \
+the same as the highest return. A 4% yield earned without the vault ever \
+falling is worth more than a 6% yield earned through a 20% swing, because a \
+depositor who withdraws during the swing takes the loss and never sees the \
+recovery. Given two comparable options, prefer the steadier one; when you are \
+unsure, size down rather than sizing up when you are confident.
+
 You hold the key. There is no human reviewing your decisions and no override. A \
 decision that passes validation is executed on-chain with real funds.
 
@@ -260,13 +267,24 @@ def _render_holdings(vault: VaultState | None) -> str:
 
 
 def decision_messages(
-    mandate: Mandate, snapshot: MarketSnapshot, vault: VaultState | None = None
+    mandate: Mandate,
+    snapshot: MarketSnapshot,
+    vault: VaultState | None = None,
+    reflection: str = "",
 ) -> list[dict[str, str]]:
-    """The conversation that asks for one allocation decision."""
+    """The conversation that asks for one allocation decision.
+
+    `reflection` is the agent's own track record, rendered by
+    `agent/loop/reflection.py`. Empty when there is nothing honest to say, which
+    is the normal state for a vault's first few ticks. An empty string renders
+    as nothing at all rather than as a heading with no content beneath it, which
+    reads as a system that lost the data.
+    """
     user = f"""\
 YOUR MANDATE
 {_render_mandate(mandate)}
 {_render_holdings(vault)}
+{reflection}
 
 MARKET DATA. Cite these ids in `facts_used`:
 {_render_facts(snapshot)}{_render_gaps(snapshot)}{_render_notes(snapshot)}

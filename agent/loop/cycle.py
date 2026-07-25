@@ -46,11 +46,17 @@ from ..model.openai_compat import ModelUnavailable
 from ..model.validation import DecisionRejected
 from .engine import LlmDecisionEngine
 from .planning import PlanRejected, build_execution_plan
+from .reflection import build_reflection
 from .store import ActionJournal
 
 __all__ = ["DecisionCycle"]
 
 log = logging.getLogger(__name__)
+
+#: How far back the reflection block looks. Wider than the five outcomes it
+#: renders, because the journal is mostly holds and rejections and we want five
+#: *executed* decisions if the vault has them.
+_REFLECTION_HISTORY = 40
 
 
 class DecisionCycle:
@@ -66,6 +72,7 @@ class DecisionCycle:
         mandates: MandateStore,
         journal: ActionJournal,
         settings: Settings,
+        performance=None,
     ) -> None:
         self._engine = engine
         self._registry = registry
@@ -74,6 +81,10 @@ class DecisionCycle:
         self._mandates = mandates
         self._journal = journal
         self._settings = settings
+        # Optional: a cycle with no performance store still runs, it just has no
+        # memory of how its past decisions worked out. That is the pre-Wave-1
+        # behaviour, and it is the correct degraded state rather than a failure.
+        self._performance = performance
 
     # ── entry point ───────────────────────────────────────────────────────
 
@@ -101,7 +112,9 @@ class DecisionCycle:
 
         # ── the model ─────────────────────────────────────────────────────
         try:
-            result = await self._engine.decide_in_full(mandate, snapshot, state)
+            result = await self._engine.decide_in_full(
+                mandate, snapshot, state, self._reflect(vault)
+            )
         except DecisionRejected as exc:
             return record.rejected(
                 str(exc),
@@ -162,6 +175,29 @@ class DecisionCycle:
                 facts=[],
                 errors=[SourceError(source="registry", message=str(exc))],
             )
+
+    def _reflect(self, vault: str) -> str:
+        """The agent's own track record, rendered for the prompt.
+
+        Never allowed to break a tick. Reflection is an *input to judgement*, not
+        a precondition for acting — a vault whose performance file is missing or
+        unreadable should still be curated, just amnesiacally, which is exactly
+        how it behaved before this existed.
+
+        Returns "" when there is nothing honest to say, which the prompt renders
+        as nothing at all.
+        """
+        if self._performance is None:
+            return ""
+        try:
+            reflection = build_reflection(
+                self._journal.recent(vault, limit=_REFLECTION_HISTORY),
+                self._performance.read(vault),
+            )
+            return reflection.render()
+        except Exception as exc:  # noqa: BLE001 - a missing memory is not a failed tick
+            log.warning("could not build reflection for %s: %s", vault, exc)
+            return ""
 
     def _cooldown_reason(self, vault: str, mandate: Mandate) -> str | None:
         """Whether the mandate's rebalance cooldown is still running.

@@ -8,6 +8,87 @@ the hackathon window.
 
 ---
 
+## 2026-07-25 — Wave 1 P4/P5: the agent can act on what it reads, and remember how it went
+
+**What changed.** `SupplyIntent` / `WithdrawIntent` and an Aave venue; `Holding.represents`;
+`agent/loop/reflection.py` feeding the curator prompt; the objective restated as risk-adjusted.
+26 new tests, **608 passing**. R5 closed.
+
+### P4 — the incoherence at the centre of the product
+
+Across the first 36 ticks the `aave` data source contributed **204 facts about lending yields** and
+**no intent type could act on any of them.** The agent read *"Aave pays 3.5% on USDC"* and its only
+possible response was a Uniswap swap between USDC and WETH. Every other gap in this wave was a
+missing feature; this one was the system arguing with itself.
+
+The three venues now do genuinely different jobs — **Uniswap rotates what the vault holds, Aqua
+earns fees on it, Aave earns interest on it.** Only the first changes exposure, and that turned out
+to matter structurally: the target-closing rule in `check_projected_outcome` compares where a trade
+lands against the declared target, and a supply leaves *every weight exactly where it was*. Without
+a gate, layer 6 would have rejected every deploy into a lending market on any vault not sitting
+precisely on its target. The rule is "if you claim to be closing a gap, close it", and an intent
+that was never about allocation makes no such claim.
+
+**The valuation trap, which would have destroyed the share price.** `totalAssets()` counts the base
+asset plus *registered* valued tokens. Supply USDC and the vault receives `aBasUSDC` — so a vault
+that does not know that token sees its reported worth **fall by exactly the amount supplied**. Every
+depositor's share price drops and nothing errors. No new contract was needed to fix it: an aToken is
+a 1:1 rebasing claim, so the **underlying's own Chainlink feed** prices it exactly. `AaveVenue`
+refuses at plan time when the aToken is missing from the manifest allowlist, and the refusal names
+the fix.
+
+**`Holding.represents` is the piece that makes it coherent downstream.** `aBasUSDC` represents
+`USDC`, so weights, mandate targets and the allocation chart all fold it back. Without it a mandate
+allowing `["USDC","WETH"]` sees a vault holding 50% of an asset it never permitted, and every
+constraint layer fights a position that is exactly what the mandate asked for.
+
+### R5 is green, and #46's diagnosis of why it was blocked was wrong
+
+All 7 ship tests pass. Request #46 concluded the undecodable `ContractCustomError 0x39d35496` came
+from deployed Aqua/SwapVM bytecode we have no source for, making a request to 1inch the unblock. I
+ran the diagnostic #46 itself suggested and nobody had run — pull every push operand out of
+`eth_getCode` and search. **The selector is absent from all six deployed contracts**, searched as
+PUSH4 operands, as a **left-aligned PUSH32 word** (the form solc actually emits for a custom error,
+which a PUSH4-only scan misses — my own first pass made exactly that mistake), and as raw bytes.
+Neither contract is an EIP-1967 proxy. 1,340 generated signatures did not hash to it.
+
+So R5 was never blocked on a third party. If the revert returns, `debug_traceCall` with `callTracer`
+names the reverting address; another signature sweep will not.
+
+### P5 — reflection, and the reward hack it is built to avoid
+
+Every tick was amnesiac. The model could not learn that its rotations kept costing more in slippage
+than the spread they chased, because nothing ever told it.
+
+The easy version hands the model *"this trade made +0.3%"* and lets it optimise. That is a reward
+hack waiting to happen — it would learn to trade before favourable drift and claim credit. So the
+two numbers are reported **separately and labelled**:
+
+- **cost** — the share-price drop across the executing tick. Slippage, fees and gas in the units a
+  depositor feels. Unambiguously the agent's.
+- **drift** — what the book did afterwards. On any vault holding a volatile asset this is mostly the
+  market, and over a few hours it is noise.
+
+`verdict` is `"too early to tell"` until there are six hours of evidence and a move above 10 bps.
+The only verdict allowed to be sharp is the actionable one: *the book has fallen since, by more than
+the trade cost.* And the prompt says outright: *"Do not conclude a trade was good because the price
+rose after it."*
+
+Real output on the demo vault, first run: three executions, nine rejections, the Aqua ship costing
+**0.000%** (correct — a ship moves no tokens), two swaps at 1.7 and 0.6 bps.
+
+**An ASCII leak the existing guard could not catch.** `test_prompt_rendering` asserts the prompt is
+pure ASCII, because Windows consoles are cp1252 and `agent.bench` prints it. But it renders
+*fixtures* — and reflection text arrives at runtime from a venue's `expected_effect`, which really
+did contain `"tokens stay in the vault —"` and `"0xd1f99f37…"`. Coerced at the boundary, with its
+own test.
+
+**The objective is now stated, not implied.** The system prompt says the goal is the highest
+*risk-adjusted* return the mandate allows, and says why: a depositor who withdraws during a 20%
+swing takes the loss and never sees the recovery.
+
+---
+
 ## 2026-07-25 — Wave 1 P6: the charts, and the 1e12 error the operator caught before I did
 
 **What changed.** `PerformancePanel` on the vault page: headline return / 24h / max drawdown /

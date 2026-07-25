@@ -45,6 +45,7 @@ class LlmDecisionEngine:
         mandate: Mandate,
         snapshot: MarketSnapshot,
         vault: VaultState | None = None,
+        reflection: str = "",
     ) -> ValidatedDecision:
         """As `decide`, but keeping how many attempts it took.
 
@@ -56,10 +57,15 @@ class LlmDecisionEngine:
         `vault` is passed so the prompt can state current holdings. A model asked
         to rebalance without being told what is already held will happily propose
         buying something the vault is full of.
+
+        `reflection` is the agent's own track record — what its last decisions
+        cost and what the book did afterwards. Passed as pre-rendered text rather
+        than as objects so this engine stays ignorant of the journal and the
+        performance store, exactly as it is ignorant of the chain.
         """
         return await generate_validated_decision(
             self._backend,
-            decision_messages(mandate, snapshot, vault),
+            decision_messages(mandate, snapshot, vault, reflection),
             mandate=mandate,
             snapshot=snapshot,
             vault=vault,

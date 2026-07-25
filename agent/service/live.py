@@ -78,6 +78,9 @@ class LiveVaultService:
             mandates=self._mandates,
             journal=self._journal,
             settings=settings,
+            # The same store the /performance route serves, so the reflection
+            # the model reads and the chart a depositor reads are the same data.
+            performance=self._performance,
         )
 
     async def state(self, vault: str) -> VaultState:
