@@ -371,10 +371,97 @@ off on the fork.
 
 ---
 
-## 6. What I would cut if time runs short
+## 6. Bounty compliance audit — checked against the literal prize text
 
-In order of what to drop first: ENS subnames → taker fill → mainnet run (the fork demo is honest and
-works) → SwapVM params in the UI.
+Re-read [the prize page](https://ethglobal.com/events/lisbon2026/prizes) and checked each
+deliverable against the exact wording rather than from memory. One item is a real scope problem, one
+turned out to be much less of a problem than assumed.
 
-**Never cut:** the on-chain write (§2.1), the Uniswap feedback form, the README rewrite, or the demo
-video. Those are the difference between a working project and a scored one.
+### ✅ The 1inch mainnet worry was overblown — read the parenthetical
+
+> *"Onchain execution of token transfers **should** be presented during the final demo
+> **(local forks are ok)**."*
+
+**Local forks are explicitly acceptable, and it says "should", not "must".** The mainnet run is
+therefore *polish, not a gate* — demote it accordingly (§7).
+
+One subtlety that still matters: **an Aqua `ship()` transfers no tokens.** That is the entire point
+of virtual balances. So a ship alone does not satisfy "onchain execution of token transfers" — the
+qualifying event is either the **Uniswap swap** through the vault or a **taker filling** the Aqua
+position. Lane B's §2.1 write closes this on the fork, with no mainnet needed.
+
+Everything else here is already met: official Aqua/SwapVM contracts ✅, SwapVM used (scored higher)
+✅, 65+ commits with no final-day squash ✅.
+
+### 🔴 The MCP server does not install outside this workspace — and that is 25% of Track 1
+
+Verified empirically, simulating what a judge does:
+
+```
+$ uv pip install ./data/curator_mcp        # in a clean venv, outside the repo
+× No solution found when resolving dependencies:
+╰─▶ Because curator-data was not found in the package registry and
+    curator-mcp==0.1.0 depends on curator-data, ...unsatisfiable.
+```
+
+The chain is `curator-mcp → curator-data → curator-schema`, and **none are published**. Anyone
+following the `uvx curator-mcp` invocation in our own `SKILL.md` hits this immediately.
+
+This is not cosmetic. Track 1's published judging criteria are **Usefulness to builders 30% ·
+Reusability & completeness 25% · Effective use of The Graph 20% · Technical execution 15% ·
+Innovation 10%**. An uninstallable package fails the second-heaviest criterion outright, and the
+track's defining requirement is *"reusable tooling or infrastructure … not a single end-user app."*
+A server nobody but us can run is, functionally, part of our app.
+
+**Fix — publish to PyPI. All three names are free** (verified: `curator-mcp`, `curator-data`,
+`curator-schema` all return 404 on PyPI). Publish bottom-up: `curator-schema` → `curator-data` →
+`curator-mcp`, then verify `uvx curator-mcp` from a clean machine. That works regardless of repo
+visibility, which matters because the repo stays private until submission.
+
+*Alternatives considered:* `[tool.uv.sources]` git refs only work once the repo is public, so they
+cannot be tested before submission day. Vendoring `curator-data` into the server duplicates the code
+the registry design exists to share. Publishing is both the cleanest fix and the strongest possible
+evidence of reusability. **Owner: Lane C.**
+
+### 🟠 Smaller gaps
+
+| Gap | Requirement | State |
+|---|---|---|
+| `LICENSE` | Track 1: *"Open-source the code"* | ✅ **Added** (MIT, matching what `curator_mcp/pyproject.toml` already declared) |
+| Demo video | **All three** Graph tracks: *"a 2–4 minute demo video"* | ❌ Not started. Note the length is specified — 2–4 minutes, not 5. |
+| Uniswap Feedback Form | *"a completed submission to the Uniswap Developer Feedback Form"* — *"Submissions without it will be reviewed and audited before winners are finalized"* | ❌ **Needs a human** |
+| Public repo | Graph (all tracks) + Uniswap | ⏳ Private by choice until submission. **Flip before submitting** — it is a stated requirement everywhere. |
+
+### Requirements already satisfied — no action
+
+*"Build the project during the event"* (all commits 24–25 July) · *"Consume live data from a Graph
+provider; mocked or static data does not qualify"* (verified live Messari facts in Lane B's tick) ·
+*"an AI/agent component that reasons over or acts on the data, not just prints a raw query result"* ·
+*"compose two or more of The Graph's products"* (Messari standardized subgraphs + Aave + Token API +
+x402) · *"README clearly points to the relevant contracts and lines of code"* (done, 29 links
+verified) · `FEEDBACK.md` ✅ · valid Uniswap API key ✅.
+
+One wording note for the submission form: Track 2 asks you to *"briefly describe how The Graph is
+used (which Subgraphs, endpoints, tools)"*. Name the specific subgraph IDs — that is a cheap point
+on a 10% "demo & clarity" criterion.
+
+---
+
+## 7. What I would cut if time runs short
+
+Revised after the compliance re-read (§6). **The mainnet run moved sharply down** — 1inch accepts
+local forks in writing, and no other sponsor asks for mainnet at all. It is credibility polish now,
+not a gate, and it is the most expensive remaining item in both time and risk.
+
+Drop in this order: ENS subnames → SwapVM params in the UI → **mainnet run** → taker fill.
+
+**Never cut, in priority order:**
+
+1. **The on-chain write** (§2.1) — the only thing standing between "every part is tested" and "the
+   thing works". Also what satisfies 1inch's token-transfer requirement, on the fork.
+2. **Publishing the MCP server** (§6) — 25% of the $5K track's score, and currently a hard fail.
+3. **The Uniswap Feedback Form** — a stated requirement, and it needs a human.
+4. **A 2–4 minute demo video** — required by all three Graph tracks.
+5. **Flipping the repo public** before submitting.
+
+Note the top two are cheap and the bottom three are the ones that get forgotten at 3am.
