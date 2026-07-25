@@ -246,6 +246,35 @@ knowable once a venue has quoted. A plan whose quote has expired is refused rath
 A plan's steps go to the chain as a single `executeBatch`, so a tick lands complete or not at all —
 the vault is never left in a half-applied state no decision authored.
 
+## The six validation layers
+
+The only thing between a 3B model's output and a signed transaction. Each layer emits a *different*
+retry hint, because a message naming the breach and its limit gets fixed on the next attempt while
+"invalid output, try again" burns the tick.
+
+| # | Catches | Told to the model |
+|---|---|---|
+| 1 extract | fences, prose, `<think>`, trailing commas | "return only a JSON object" |
+| 2 schema | wrong types, unknown fields, bad enums | the pydantic error, compacted, **naming only the union variant it attempted** |
+| 3 mandate | forbidden asset, weights ≠ 1, too many actions | the breach *and* the limit |
+| 4 grounding | citing facts absent from its snapshot | the invented ids *and* the real ones |
+| 5 direction | selling an asset already below target | which side is past target, and which way to swap |
+| 6 outcome | where the trade **lands** — cash floor, position cap, overshoot | the resulting weight vs the limit |
+
+**Layers 5 and 6 exist because the loop executed real transactions that were wrong and layers 1–4
+passed them, correctly.** The decisions were internally consistent in every respect except the one
+that decides whether they make money: mandate limits were being checked against what the model
+*declared it wanted*, never against what its trade would *do*. Both compare the decision to reality
+using the vault's own `value_in_asset` — the Chainlink figure `totalAssets()` is built from — so they
+agree with the contract rather than forming a second opinion.
+
+Both stay silent where they cannot judge honestly: no `target_allocations`, an unpriced holding, an
+empty vault, an Aqua ship (which posts liquidity rather than changing composition), or a swap sized
+in token units, which cannot be projected without a price.
+
+All six have been observed rejecting live, each producing a journaled `AgentAction(status="rejected")`
+with no plan and no transaction.
+
 ## What fixture mode serves
 
 Fixture mode is the default and is a first-class path, not a placeholder.
@@ -297,7 +326,7 @@ model/
   openai_compat.py   one HTTP client for every OpenAI-compatible endpoint
   backends/          ollama · vllm · scripted (tests) — one line each in the table
   extraction.py      recovering JSON from fences, prose and <think> blocks
-  validation.py      * five-layer validation + reject-and-retry
+  validation.py      * six-layer validation + reject-and-retry
   prompts/           curator and genesis prompts, kept out of the calling code
 mandate/
   hashing.py         canonical JSON → keccak256 (identical in both modes)
@@ -347,7 +376,7 @@ from rather than agreement with ourselves.
 
 ## Status and known gaps
 
-**Complete:** all frozen routes in both modes · five-layer output validation with reject-and-retry ·
+**Complete:** all frozen routes in both modes · six-layer output validation with reject-and-retry ·
 mandate store, hashing and amendment · the decision cycle with cooldown, slippage and stale-quote
 enforcement · the append-only journal · `VaultClient` on web3.py against Lane A's published ABIs ·
 live genesis. 192 tests green, ruff clean, no network or model needed to run them.

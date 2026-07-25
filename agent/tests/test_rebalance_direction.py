@@ -338,19 +338,39 @@ def test_the_correctly_sized_half_is_accepted():
     assert check_projected_outcome(decision, _mandate_5030(), all_weth) == []
 
 
-def test_a_book_already_on_target_may_still_trade():
-    """The golden fixture declares a 70/30 target on a 70/30 book and then
-    trades. That is legal — it is expressing a view, not correcting a drift —
-    and only the floor and ceiling bound where it may land. Layer 5 skips
-    at-target assets for the same reason; the two must agree."""
+def test_a_book_already_on_target_may_not_trade_away_from_it():
+    """The exemption this rule used to have, and the trade that removed it.
+
+    An earlier version skipped assets already on target, so that the golden
+    fixture — which pairs a 70/30 target with a 70/30 book and then trades —
+    would pass. That exemption let a live tick propose selling **100% of WETH**
+    from a book sitting exactly on its 50/50 target. Layer 5 skipped (no drift),
+    layer 6 skipped the overshoot check (zero starting gap), and 100/0 breaches
+    neither the cash floor nor the position cap. Only the on-chain revert
+    stopped it.
+
+    `target_allocations` is *where you want the vault to be*, so trading away
+    from it means the stated target is not the target. There is no legitimate
+    case, so there is no exemption — and the golden fixture pairing is simply
+    incoherent, which is a fact about the fixtures rather than about this rule.
+    """
     from agent.mandate.constraints import check_projected_outcome
 
-    assert (
-        check_projected_outcome(
-            fixtures.allocation_decision(), fixtures.mandate(), fixtures.vault_state()
-        )
-        == []
+    on_target = _vault(1_248_161392, 1_248_161392)  # exactly 50/50
+    liquidate = _decision("WETH", "USDC", {"USDC": 0.5, "WETH": 0.5}).model_copy(
+        update={
+            "venue_intents": [
+                SwapIntent(token_in="WETH", token_out="USDC", pct_of_holdings=1.0)
+            ]
+        }
     )
+
+    message = " ".join(
+        str(p) for p in check_projected_outcome(liquidate, _mandate_5030(), on_target)
+    )
+
+    assert "50.0% to 100.0%" in message
+    assert "0.0% away before, 50.0% after" in message
 
 
 def test_a_swap_sized_in_token_units_is_not_projected():

@@ -31,7 +31,32 @@ VAULT = "0x1111111111111111111111111111111111111111"
 
 
 def _good_decision() -> str:
-    return fixtures.allocation_decision().model_dump_json(exclude_none=True)
+    """A rebalance that is coherent with the golden vault state.
+
+    The golden *decision* fixture targets 70/30 on a vault already at 70/30 and
+    then trades, which validation layer 6 now correctly rejects: a target you
+    trade away from is not a target. The two golden files were written to
+    exercise shapes, not to be consistent as a pair. So this states a 50/50
+    target and sells the ~29% of USDC that lands there.
+    """
+    golden = fixtures.allocation_decision()
+    return golden.model_copy(
+        update={
+            "target_allocations": [
+                {"asset": "USDC", "weight": 0.5},
+                {"asset": "WETH", "weight": 0.5},
+            ],
+            "venue_intents": [
+                {
+                    "venue": "uniswap",
+                    "kind": "swap",
+                    "token_in": "USDC",
+                    "token_out": "WETH",
+                    "pct_of_holdings": 0.29,
+                }
+            ],
+        }
+    ).model_dump_json(exclude_none=True)
 
 
 def _hold_decision() -> str:

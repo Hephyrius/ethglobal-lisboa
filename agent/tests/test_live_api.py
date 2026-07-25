@@ -16,6 +16,37 @@ from fastapi.testclient import TestClient
 
 from agent import fixtures
 
+
+def _coherent_rebalance() -> str:
+    """A rebalance that closes a real gap against the golden vault.
+
+    The golden decision fixture targets the split the golden vault already holds
+    and then trades, which layer 6 rejects — the two fixtures were written to
+    exercise shapes, not to pair coherently.
+    """
+    return (
+        fixtures.allocation_decision()
+        .model_copy(
+            update={
+                "target_allocations": [
+                    {"asset": "USDC", "weight": 0.5},
+                    {"asset": "WETH", "weight": 0.5},
+                ],
+                "venue_intents": [
+                    {
+                        "venue": "uniswap",
+                        "kind": "swap",
+                        "token_in": "USDC",
+                        "token_out": "WETH",
+                        "pct_of_holdings": 0.29,
+                    }
+                ],
+            }
+        )
+        .model_dump_json(exclude_none=True)
+    )
+
+
 UNKNOWN = "0x9999999999999999999999999999999999999999"
 
 
@@ -99,7 +130,7 @@ def test_a_live_tick_is_schema_valid_and_journaled(live, assert_valid):
     mandate = json.loads(fixtures.mandate().model_dump_json(exclude_none=True))
     vault = live.post("/genesis/finalize", json={"mandate": mandate}).json()["vault"]
 
-    _script(live, [fixtures.allocation_decision().model_dump_json(exclude_none=True)])
+    _script(live, [_coherent_rebalance()])
 
     action = live.post(f"/vault/{vault}/tick").json()
     assert_valid("agent-action", action)
@@ -142,7 +173,7 @@ def test_live_responses_carry_no_nulls_and_utc_timestamps(live):
 
     mandate = json.loads(fixtures.mandate().model_dump_json(exclude_none=True))
     vault = live.post("/genesis/finalize", json={"mandate": mandate}).json()["vault"]
-    _script(live, [fixtures.allocation_decision().model_dump_json(exclude_none=True)])
+    _script(live, [_coherent_rebalance()])
 
     for label, body in {
         "tick": live.post(f"/vault/{vault}/tick").json(),

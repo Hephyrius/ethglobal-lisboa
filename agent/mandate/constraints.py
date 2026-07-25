@@ -430,13 +430,22 @@ def check_projected_outcome(
         if asset not in projected or asset not in current:
             continue
         before, after = abs(current[asset] - target), abs(projected[asset] - target)
-        if before <= _DIRECTION_TOLERANCE:
-            continue
-        # The trade must *improve* the gap, not merely avoid worsening it.
-        # Observed: a book at 0% USDC against a 50% target swapped its entire
-        # WETH position, projecting to 100% — 50pp under became 50pp over, an
-        # exact mirror image. A rule that only rejected "worse" let that through,
-        # which is the same overshoot failure wearing a symmetric mask.
+        # The trade must *close* the gap. Two earlier versions of this rule were
+        # each too weak, and each was caught by a real trade rather than by
+        # reasoning:
+        #
+        #   "reject if it gets worse"      let a 50pp-under book swing to 50pp
+        #                                  over — the same distance, mirrored.
+        #   "...unless already on target"  let a book sitting exactly on 50/50
+        #                                  liquidate 100% of one leg, because a
+        #                                  zero starting gap skipped the check
+        #                                  and 100/0 breaches no floor or cap.
+        #
+        # The second exemption existed to let the golden fixture pass, which
+        # pairs a 70/30 target with a 70/30 book and then trades. That pairing is
+        # simply incoherent — `target_allocations` is *where you want the vault
+        # to be*, so trading away from it means the stated target is not the
+        # target. There is no legitimate case for it, so there is no exemption.
         if after >= before - _DIRECTION_TOLERANCE:
             problems.append(
                 Violation(
