@@ -77,16 +77,44 @@ def create_app(config: Settings | None = None) -> FastAPI:
         cfg = get_settings()
         data = data_resolution()
         venues = venue_resolution()
-        degraded = cfg.is_live and (data.is_fixture or venues.is_fixture)
+
+        # Only asked in live mode: fixture mode never calls a model, and a
+        # 5-second probe on every health check would be pure cost.
+        model_ok: bool | None = None
+        if cfg.is_live:
+            model_ok = await _model_available(cfg)
+
+        degraded = cfg.is_live and (
+            data.is_fixture or venues.is_fixture or model_ok is not True
+        )
         return HealthResponse(
             status="degraded" if degraded else "ok",
             mode=cfg.mode,
             data_registry=data.label,
             venue_registry=venues.label,
-            model_backend=cfg.model_backend,
+            model_backend=f"{cfg.model_backend}:{cfg.model_name}",
+            model_reachable=model_ok,
         )
 
     return app
+
+
+async def _model_available(config: Settings) -> bool | None:
+    """Is the *configured model* actually served? None if we could not ask.
+
+    `False` here is the failure worth catching before a demo: Ollama running
+    with nothing pulled looks perfectly healthy to a plain ping, right up until
+    the first tick fails with `model not found`.
+    """
+    try:
+        from ..model.backends import build_backend
+
+        backend = build_backend(config)
+        checker = getattr(backend, "has_model", None)
+        return await checker() if callable(checker) else None
+    except Exception as exc:  # noqa: BLE001 - health must never be the thing that breaks
+        log.warning("model availability check failed: %s", exc)
+        return None
 
 
 app = create_app()

@@ -9,15 +9,28 @@ from a fresh clone where only `/agent` has been installed, and a neighbouring
 lane mid-edit is a normal state during the build — that is the whole reason the
 harness binds late.
 
-Nothing here needs a network, a credential or a chain. Lane C's sources degrade
-into `MarketSnapshot.errors` without `GRAPH_API_KEY`, which is exactly the
-behaviour the decision loop is built to survive, so it is asserted rather than
-worked around.
+## Two groups, because one of them touches the network
+
+Binding, port conformance and venue lookup are pure and always run — they are the
+assertions that catch a genuine integration break.
+
+Anything that calls `registry.snapshot()` reaches the real Graph gateway, and
+without `GRAPH_API_KEY` that means ~12 seconds of connection timeouts *per test*.
+Left ungated it turned this suite from 5s into 43s and made it depend on the
+machine having internet — which contradicts the "runs anywhere, including the
+macOS handoff" property the rest of the lane is built for. Those three are gated
+behind `AGENT_TEST_NETWORK=1`:
+
+    AGENT_TEST_NETWORK=1 uv run pytest agent/tests/test_integration_lanes.py
+
+They are worth running once when a credential lands, and worth skipping on every
+other run.
 """
 
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 from curator_schema.ports import DataSourceRegistry, Venue
@@ -38,6 +51,12 @@ VAULT = "0x1111111111111111111111111111111111111111"
 #: The refs a deployment sets. Documented in agent/README.md and .env.example.
 DATA_REF = "curator_data:build_registry"
 VENUE_REF = "venues:get_venue"
+
+#: Tests that reach the real Graph gateway. Opt in; see the module docstring.
+requires_network = pytest.mark.skipif(
+    os.environ.get("AGENT_TEST_NETWORK") != "1",
+    reason="hits the live Graph gateway; set AGENT_TEST_NETWORK=1 to run",
+)
 
 
 @pytest.fixture(scope="module")
@@ -78,6 +97,7 @@ def test_lane_c_offers_the_sources_a_mandate_names(lane_c):
     )
 
 
+@requires_network
 async def test_lane_c_degrades_into_errors_without_a_credential(lane_c):
     """A dead or unconfigured source must not raise — the port requires it."""
     snapshot = await lane_c.snapshot(["messari", "token_api"], ["USDC", "WETH"])
@@ -86,6 +106,7 @@ async def test_lane_c_degrades_into_errors_without_a_credential(lane_c):
     assert snapshot.facts or snapshot.errors
 
 
+@requires_network
 async def test_lane_c_never_returns_a_source_the_mandate_did_not_grant(lane_c):
     snapshot = await lane_c.snapshot(["messari"], ["USDC"])
     assert {fact.source for fact in snapshot.facts} <= {"messari"}
@@ -109,6 +130,7 @@ def test_an_unknown_venue_key_resolves_to_nothing_rather_than_raising(lane_d):
 # ── both, through a real decision cycle ───────────────────────────────────
 
 
+@requires_network
 async def test_a_cycle_runs_against_both_real_lanes(tmp_path, lane_c, lane_d):
     """The vertical slice with only the model substituted.
 

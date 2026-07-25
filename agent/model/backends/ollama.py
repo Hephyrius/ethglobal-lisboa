@@ -53,3 +53,11 @@ class OllamaBackend:
 
     async def reachable(self) -> bool:
         return await self._client.reachable()
+
+    async def has_model(self) -> bool | None:
+        """Whether this model is pulled. None if Ollama is not answering.
+
+        `ollama serve` runs happily with nothing pulled, so this is the check
+        that actually predicts whether a tick will work.
+        """
+        return await self._client.has_model()

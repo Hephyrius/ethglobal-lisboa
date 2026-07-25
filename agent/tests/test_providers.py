@@ -14,6 +14,7 @@ new *registry* needs no harness code touched.
 
 from __future__ import annotations
 
+import pytest
 from curator_schema.ports import DataSourceRegistry
 
 from agent.providers.fixture_data import FixtureDataRegistry
@@ -119,19 +120,109 @@ def test_health_shows_a_live_run_that_fell_back_to_fixtures(monkeypatch):
 def test_health_is_ok_when_the_configured_provider_resolves(monkeypatch):
     from fastapi.testclient import TestClient
 
+    from agent.api import app as app_module
     from agent.api import deps
     from agent.api.app import create_app
 
     monkeypatch.setenv("AGENT_MODE", "live")
     monkeypatch.setenv("AGENT_DATA_REGISTRY", "agent.providers.fixture_data:FixtureDataRegistry")
     monkeypatch.setenv("AGENT_VENUE_REGISTRY", "agent.providers.fixture_venue:FixtureVenueRegistry")
+
+    # Stub the model probe: this test is about provider resolution, and a real
+    # probe would make the result depend on whether Ollama happens to be running
+    # on the machine executing the suite.
+    async def _model_present(_config):
+        return True
+
+    monkeypatch.setattr(app_module, "_model_available", _model_present)
+
     deps.reset()
     try:
         body = TestClient(create_app()).get("/health").json()
         assert body["status"] == "ok"
         assert body["data_registry"].endswith("FixtureDataRegistry")
+        assert body["model_reachable"] is True
     finally:
         deps.reset()
+
+
+def test_health_is_degraded_when_the_model_is_not_pulled(monkeypatch):
+    """`ollama serve` with nothing pulled looks healthy to a plain ping.
+
+    It stays healthy right up until the first tick fails with `model not found`,
+    which is a terrible moment to discover it.
+    """
+    from fastapi.testclient import TestClient
+
+    from agent.api import app as app_module
+    from agent.api import deps
+    from agent.api.app import create_app
+
+    monkeypatch.setenv("AGENT_MODE", "live")
+    monkeypatch.setenv("AGENT_DATA_REGISTRY", "agent.providers.fixture_data:FixtureDataRegistry")
+    monkeypatch.setenv("AGENT_VENUE_REGISTRY", "agent.providers.fixture_venue:FixtureVenueRegistry")
+
+    async def _model_missing(_config):
+        return False
+
+    monkeypatch.setattr(app_module, "_model_available", _model_missing)
+
+    deps.reset()
+    try:
+        body = TestClient(create_app()).get("/health").json()
+        assert body["status"] == "degraded"
+        assert body["model_reachable"] is False
+    finally:
+        deps.reset()
+
+
+def test_fixture_mode_never_probes_the_model(monkeypatch):
+    """Fixture mode calls no model, so a 5-second probe would be pure cost."""
+    from fastapi.testclient import TestClient
+
+    from agent.api import app as app_module
+    from agent.api import deps
+    from agent.api.app import create_app
+
+    probed = False
+
+    async def _spy(_config):
+        nonlocal probed
+        probed = True
+        return True
+
+    monkeypatch.setenv("AGENT_MODE", "fixture")
+    monkeypatch.setattr(app_module, "_model_available", _spy)
+    deps.reset()
+    try:
+        body = TestClient(create_app()).get("/health").json()
+        assert body["status"] == "ok"
+        assert not probed
+        assert "model_reachable" not in body, "unset optionals must be omitted, not null"
+    finally:
+        deps.reset()
+
+
+# ── model-name matching, which must not cry wolf ──────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("wanted", "served", "expected"),
+    [
+        ("qwen2.5:3b", ["qwen2.5:3b"], True),
+        # Ollama lists the full tag but answers to the bare name.
+        ("qwen2.5:3b", ["qwen2.5:3b-instruct-q4_K_M"], True),
+        ("qwen2.5:3b-instruct-q4_K_M", ["qwen2.5:3b"], True),
+        ("qwen2.5:3b", [], False),
+        ("qwen2.5:3b", ["llama3.2:3b"], False),
+        ("qwen2.5:14b-instruct", ["qwen2.5:3b-instruct-q4_K_M"], True),
+    ],
+)
+def test_model_name_matching_tolerates_tags(wanted, served, expected):
+    """A health signal that cries wolf gets ignored on the night it is right."""
+    from agent.model.openai_compat import model_is_served
+
+    assert model_is_served(wanted, served) is expected
 
 
 # ── the mandate is what selects sources, not code ─────────────────────────

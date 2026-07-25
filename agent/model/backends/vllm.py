@@ -69,3 +69,6 @@ class VLLMBackend:
 
     async def reachable(self) -> bool:
         return await self._client.reachable()
+
+    async def has_model(self) -> bool | None:
+        return await self._client.has_model()

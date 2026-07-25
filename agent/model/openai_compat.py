@@ -26,7 +26,24 @@ from typing import Any
 
 import httpx
 
-__all__ = ["OpenAICompatClient", "ModelUnavailable"]
+__all__ = ["OpenAICompatClient", "ModelUnavailable", "model_is_served"]
+
+
+def model_is_served(wanted: str, served: list[str]) -> bool:
+    """Whether `wanted` is among `served`, tolerating tag differences.
+
+    Ollama lists models with their full tag (`qwen2.5:3b-instruct-q4_K_M`) but
+    also answers to the bare name (`qwen2.5:3b`), and vLLM reports whatever path
+    it was launched with. An exact-match-only check would report a correctly
+    pulled model as missing, which is worse than not checking — a health signal
+    that cries wolf gets ignored on the night it is right.
+
+    So: exact match, or the same base name before the tag separator.
+    """
+    if wanted in served:
+        return True
+    base = wanted.split(":")[0]
+    return any(name.split(":")[0] == base for name in served)
 
 log = logging.getLogger(__name__)
 
@@ -108,16 +125,40 @@ class OpenAICompatClient:
                 f"unexpected response shape from {self._base_url}: {str(body)[:300]}"
             ) from exc
 
-    async def reachable(self) -> bool:
-        """Whether the endpoint answers at all — surfaced on `GET /health`.
+    async def models(self) -> list[str] | None:
+        """Model ids this endpoint serves, or None if it could not be asked.
 
-        Uses the models listing rather than a completion: it is instant, and a
-        loaded-but-slow model should read as reachable rather than timing out a
+        Uses the listing rather than a test completion: it is instant, and a
+        loaded-but-slow model should read as healthy rather than timing out a
         health check.
         """
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 response = await client.get(f"{self._base_url}/models", headers=self._headers())
-                return response.status_code < 500
-        except httpx.HTTPError:
-            return False
+                response.raise_for_status()
+                body = response.json()
+        except (httpx.HTTPError, ValueError):
+            return None
+        return [entry.get("id", "") for entry in body.get("data") or []]
+
+    async def reachable(self) -> bool:
+        """Whether the endpoint answers at all."""
+        return await self.models() is not None
+
+    async def has_model(self) -> bool | None:
+        """Whether the **configured** model is actually served. None if unreachable.
+
+        A running server is not a working one. `ollama serve` answers happily
+        with nothing pulled, so a health check that only pings the endpoint
+        reports green right up until the first tick fails with
+        `model 'qwen2.5:3b' not found`. Distinguishing the two is the difference
+        between a one-line fix and debugging the harness during a demo.
+
+        Ollama reports models with their tag (`qwen2.5:3b-instruct-q4_K_M`) but
+        answers to the bare name too, so a prefix match on the colon avoids a
+        false negative from a tag suffix.
+        """
+        served = await self.models()
+        if served is None:
+            return None
+        return model_is_served(self._model, served)
