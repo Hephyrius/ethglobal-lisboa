@@ -19,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from ..config import Settings, settings
 from .deps import data_resolution, get_settings, venue_resolution
 from .errors import register_exception_handlers
-from .routes import genesis, vault
+from .routes import genesis, portfolio, vault
 from .schemas import HealthResponse
 
 __all__ = ["create_app", "app"]
@@ -61,6 +61,10 @@ def create_app(config: Settings | None = None) -> FastAPI:
 
     app.include_router(genesis.router)
     app.include_router(vault.router)
+    # Not one of the frozen Wave 0 routes. The dApp could answer "how is this
+    # vault doing?" and had no way to answer "how am I doing?", which is the
+    # first question a depositor with money in more than one vault asks.
+    app.include_router(portfolio.router)
 
     @app.get(
         "/health",

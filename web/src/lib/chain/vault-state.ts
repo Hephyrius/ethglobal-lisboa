@@ -68,6 +68,12 @@ export async function readChainVaultState(vault: `0x${string}`): Promise<VaultSt
           // know a balance backs an Aqua strategy. Null is honest here; the
           // API path is the one that can fill it in.
           committed_to_venue: null,
+          // Same reasoning for `represents`: recognising that `aBasUSDC` stands
+          // for `USDC` needs the aToken table the venue layer owns, which the
+          // browser does not have. Null means "not known to be a receipt
+          // token", so a supplied balance read on this fallback path shows as
+          // itself rather than being silently folded into the wrong asset.
+          represents: null,
         }
       } catch {
         // A token that is not an ERC-20 at this address on this chain. Skip it

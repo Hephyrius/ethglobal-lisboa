@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { PortfolioStrip } from '@/components/portfolio/PortfolioStrip'
 import { VaultList } from '@/components/vault/VaultList'
 
 export default function HomePage() {
@@ -50,6 +51,11 @@ export default function HomePage() {
           />
         </div>
       </section>
+
+      {/* Renders nothing at all when no wallet is connected — an empty panel
+          captioned "connect a wallet" occupies the space a reader is scanning
+          for content, which is worse than no panel. */}
+      <PortfolioStrip />
 
       <section>
         <div className="flex items-baseline justify-between border-b border-line pb-2">
