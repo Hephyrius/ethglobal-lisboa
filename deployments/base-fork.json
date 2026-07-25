@@ -1,0 +1,36 @@
+{
+  "_comment": "Shape only — Lane A's deploy script overwrites this with real addresses. Every other lane reads it rather than hardcoding. Do not hand-edit.",
+  "chainId": 8453,
+  "network": "base-fork",
+  "rpcUrl": "http://localhost:8540",
+  "forkBlockNumber": null,
+  "deployedAt": null,
+  "contracts": {
+    "VaultFactory": null,
+    "CuratedVaultImplementation": null
+  },
+  "vaults": [],
+  "external": {
+    "_comment": "Live Base mainnet addresses, present on the fork.",
+    "_verified": "Aqua and SwapVM taken from the official 1inch repos; USDC/WETH/Permit2 are canonical. UniswapUniversalRouter is NOT verified — see _unverified below.",
+    "Aqua": "0x499943e74fb0ce105688beee8ef2abec5d936d31",
+    "SwapVM": "0x8fdd04dbf6111437b44bbca99c28882434e0958f",
+    "USDC": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "WETH": "0x4200000000000000000000000000000000000006",
+    "Permit2": "0x000000000022D473030F116dDEE9F6B43aC78BA3"
+  },
+  "_unverified": {
+    "_comment": "Lane D: confirm before use. The Uniswap Trading API's /swap response returns the target `to` address directly, so prefer reading it from the response over hardcoding a router — versions differ across chains and have changed. Whatever it resolves to must be added to executeAllowlist, or every Uniswap plan reverts.",
+    "UniswapUniversalRouter": null
+  },
+  "executeAllowlist": {
+    "_comment": "Cross-lane request #1 — Lane A confirms by CP1. Every ExecutionPlan.steps[].target must appear here or the call reverts. Incomplete: the Uniswap router target is pending Lane D's confirmation from a live /swap response.",
+    "targets": [
+      "0x499943e74fb0ce105688beee8ef2abec5d936d31",
+      "0x8fdd04dbf6111437b44bbca99c28882434e0958f",
+      "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+      "0x4200000000000000000000000000000000000006",
+      "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+    ]
+  }
+}
