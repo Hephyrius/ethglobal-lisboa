@@ -83,6 +83,13 @@
           "minimum": 1,
           "default": 3,
           "description": "Bounds blast radius of a single decision cycle."
+        },
+        "tolerance_band_pct": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 0.5,
+          "default": 0.05,
+          "description": "Soft band on the ALLOCATION AND EXPOSURE constraints only. A decision that breaches one of them by no more than the band is ACCEPTED with a recorded warning (AgentAction.warnings) rather than rejected — landing at 61% against a 60% cap is a rounding artefact of a swap that priced a hair differently, not a breach of intent. The band is RELATIVE to the constraint's own value, never absolute percentage points: a ceiling C admits up to C*(1+band), a floor F admits down to F*(1-band), and a target allocation T admits |actual-T| <= T*band. Applies to: max_position_pct, min_cash_pct, target-allocation drift. NEVER applies to: max_slippage_bps (a ceiling already compared against a worst-case bound, not an estimate — banding it means silently paying more than the mandate's stated maximum cost); allowed_assets, permitted_venues, permitted_data_sources (not numeric — there is no 5% of an asset that isn't permitted); max_actions_per_tick and rebalance_cooldown_seconds (anti-churn limits, where a band is just a bigger limit). Set 0 to restore strict rejection. Drift must be measured against the MANDATE, never against last tick, or repeated in-band acceptances ratchet the book away from it without ever tripping a rejection."
         }
       }
     },
@@ -105,6 +112,10 @@
       "default": "balanced",
       "description": "Coarse steer for the model. Advisory; constraints are what actually bind."
     },
+    "persona": {
+      "$ref": "#/$defs/persona",
+      "description": "Optional character the agent argues in. Absent means a neutral curator."
+    },
     "update_rules": {
       "type": "string",
       "maxLength": 1000,
@@ -116,6 +127,41 @@
       "type": "string",
       "pattern": "^[A-Za-z0-9]{2,12}$",
       "description": "Token symbol resolved to an address by the venue/data layer, never hardcoded in the mandate."
+    },
+    "persona": {
+      "type": "object",
+      "description": "How the agent argues, and what it prefers among options the mandate already permits. INVARIANT, pinned by a test in agent/: a persona SKEWS PREFERENCE INSIDE the permitted set and can NEVER WIDEN IT. An aggressive persona may prefer the riskier of two permitted assets; it may not reach an asset allowed_assets omits, raise a cap, shrink the cash floor, or loosen the slippage ceiling. Persona is taste; constraints are law. If those two ever merge, 'aggressive' stops being a style and becomes an exploit.",
+      "required": ["name", "voice"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Display name, shown in the dApp beside the decision feed.",
+          "examples": ["Scam Bankman-Fried"]
+        },
+        "voice": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "How it writes its reasoning. Composed into the system prompt, so it shapes the text a depositor reads — not the bounds the harness enforces."
+        },
+        "biases": {
+          "type": "array",
+          "maxItems": 10,
+          "items": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "default": [],
+          "description": "Stated leanings, each a preference between options the mandate already allows.",
+          "examples": [["prefers the highest headline yield over the deepest market"]]
+        },
+        "conviction": {
+          "type": "string",
+          "enum": ["low", "medium", "high"],
+          "default": "medium",
+          "description": "How readily it acts on a thesis. Steers position sizing WITHIN max_position_pct and how often it holds — it does not change any bound."
+        }
+      }
     }
   }
 }

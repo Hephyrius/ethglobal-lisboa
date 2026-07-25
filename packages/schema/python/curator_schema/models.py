@@ -39,6 +39,52 @@ class MandateConstraints(Frozen):
     min_cash_pct: float = Field(default=0.0, ge=0, le=1)
     rebalance_cooldown_seconds: int = Field(default=3600, ge=0)
     max_actions_per_tick: int = Field(default=3, ge=1)
+    #: Soft band on the ALLOCATION AND EXPOSURE constraints only. A breach no
+    #: larger than the band is accepted with a warning on the `AgentAction`
+    #: instead of rejected — 61% against a 60% cap is a swap that priced a hair
+    #: differently, not a change of intent.
+    #:
+    #: RELATIVE to the constraint's own value, never absolute percentage points:
+    #: a ceiling C admits C*(1+band), a floor F admits F*(1-band), a target T
+    #: admits |actual-T| <= T*band.
+    #:
+    #: Applies to `max_position_pct`, `min_cash_pct`, target-allocation drift.
+    #: Never to `max_slippage_bps` — that ceiling was already compared against a
+    #: worst-case bound rather than an estimate, so banding it means silently
+    #: paying more than the mandate's stated maximum cost. Never to
+    #: `allowed_assets` / `permitted_venues` / `permitted_data_sources`: there is
+    #: no "5% of an asset that isn't permitted". Never to `max_actions_per_tick`
+    #: or `rebalance_cooldown_seconds`, where a band is just a bigger limit.
+    #:
+    #: Measure drift against the MANDATE, not against last tick, or in-band
+    #: acceptances ratchet the book away from it without ever being rejected.
+    #: 0 restores strict rejection.
+    tolerance_band_pct: float = Field(default=0.05, ge=0, le=0.5)
+
+
+class Persona(Frozen):
+    """How the agent argues, and what it prefers among options already permitted.
+
+    INVARIANT, pinned by a test in `agent/`: a persona **skews preference inside
+    the permitted set and can never widen it.** An aggressive persona may prefer
+    the riskier of two permitted assets; it may not reach an asset
+    `allowed_assets` omits, raise a cap, shrink the cash floor, or loosen the
+    slippage ceiling. Persona is taste; constraints are law. If the two ever
+    merge, "aggressive" stops being a style and becomes an exploit.
+    """
+
+    #: Display name, shown beside the decision feed.
+    name: str = Field(min_length=1, max_length=80)
+    #: How it writes its reasoning. Composed into the system prompt, so it shapes
+    #: the text a depositor reads — not the bounds the harness enforces.
+    voice: str = Field(min_length=1, max_length=500)
+    #: Stated leanings, each a preference between options the mandate allows.
+    biases: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(
+        default_factory=list, max_length=10
+    )
+    #: How readily it acts on a thesis. Steers sizing WITHIN `max_position_pct`
+    #: and how often it holds; it changes no bound.
+    conviction: Literal["low", "medium", "high"] = "medium"
 
 
 class Mandate(Frozen):
@@ -58,6 +104,8 @@ class Mandate(Frozen):
     permitted_venues: list[Literal["uniswap", "aqua", "aave"]] = Field(min_length=1)
     created_at: datetime | None = None
     risk_posture: Literal["conservative", "balanced", "aggressive"] = "balanced"
+    #: Optional character the agent argues in. None means a neutral curator.
+    persona: Persona | None = None
     update_rules: str | None = Field(default=None, max_length=1000)
 
 
@@ -285,6 +333,36 @@ class ModelProvenance(Frozen):
     validation_retries: int = Field(default=0, ge=0)
 
 
+class ConstraintWarning(Frozen):
+    """One banded acceptance — a constraint that bent and was allowed to.
+
+    Structured rather than a formatted sentence so the dApp can state which
+    constraint bent and by how much, and so the reflection can price the drift
+    without re-parsing prose.
+    """
+
+    #: Closed on purpose. A second warning class is a schema change, so nobody
+    #: can quietly start recording a different kind of exception in this array.
+    kind: Literal["tolerance_band"] = "tolerance_band"
+    #: The `MandateConstraints` field that bent, or "target_allocation" for
+    #: drift. Never `max_slippage_bps` or an allowlist — outside the band by
+    #: design.
+    constraint: str
+    #: Asset symbol when the constraint is per-asset; None for portfolio-wide.
+    subject: str | None = None
+    #: The mandate's own value — what the band is measured against, and what the
+    #: agent is still steering back toward.
+    limit: float
+    #: The projected post-execution value that breached the limit.
+    actual: float
+    #: The band in force when this was accepted. Recorded on the action rather
+    #: than looked up later, because the agent may amend its own mandate and a
+    #: warning must stay readable against the rules that actually applied.
+    band_pct: float = Field(ge=0, le=0.5)
+    #: One sentence for the feed.
+    message: str = Field(min_length=1, max_length=300)
+
+
 class AgentAction(Frozen):
     """One complete decision cycle. The audit trail and the demo feed.
 
@@ -306,6 +384,11 @@ class AgentAction(Frozen):
     mandate_version_after: int | None = Field(default=None, ge=1)
     model: ModelProvenance | None = None
     error: str | None = None
+    #: Constraints this cycle breached and was accepted anyway, within
+    #: `tolerance_band_pct`. Distinct from `error`, which is why a cycle stopped:
+    #: a warning rides on a *successful* action. Render these wherever the action
+    #: is rendered — an invisible band is indistinguishable from no rule at all.
+    warnings: list[ConstraintWarning] = Field(default_factory=list)
     duration_ms: int | None = Field(default=None, ge=0)
 
 
@@ -433,6 +516,8 @@ class VaultPerformance(Frozen):
 __all__ = [
     "Mandate",
     "MandateConstraints",
+    "Persona",
+    "ConstraintWarning",
     "MarketSnapshot",
     "Fact",
     "FactSubject",

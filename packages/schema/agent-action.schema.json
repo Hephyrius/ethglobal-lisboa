@@ -51,9 +51,58 @@
       "default": null,
       "description": "Populated for 'rejected' and 'failed'."
     },
+    "warnings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/constraint_warning" },
+      "default": [],
+      "description": "Constraints this cycle breached and was ACCEPTED anyway, within Mandate.constraints.tolerance_band_pct. Distinct from `error`, which is why a cycle stopped: a warning rides on a successful action. MUST be rendered wherever the action is — an in-band acceptance that is invisible in the feed is indistinguishable from there being no rule at all, and repeated silent acceptances are how a book ratchets away from its mandate without ever tripping a rejection."
+    },
     "duration_ms": { "type": "integer", "minimum": 0 }
   },
   "$defs": {
-    "address": { "type": "string", "pattern": "^0x[a-fA-F0-9]{40}$" }
+    "address": { "type": "string", "pattern": "^0x[a-fA-F0-9]{40}$" },
+    "constraint_warning": {
+      "type": "object",
+      "description": "One banded acceptance, structured so the dApp can state which constraint bent and by how much rather than re-parsing a sentence.",
+      "required": ["kind", "constraint", "limit", "actual", "band_pct", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["tolerance_band"],
+          "description": "Closed on purpose. A second warning class is a schema change, so nobody can quietly start recording a different kind of exception in the same array."
+        },
+        "constraint": {
+          "type": "string",
+          "description": "The MandateConstraints field that bent, or 'target_allocation' for drift. Never max_slippage_bps or an allowlist — those are outside the band by design.",
+          "examples": ["max_position_pct", "min_cash_pct", "target_allocation"]
+        },
+        "subject": {
+          "type": "string",
+          "description": "Asset symbol, when the constraint is per-asset. Absent for portfolio-wide ones.",
+          "examples": ["WETH"]
+        },
+        "limit": {
+          "type": "number",
+          "description": "The mandate's own value for that constraint — the number the band is measured relative to, and the number the agent is still steering back toward."
+        },
+        "actual": {
+          "type": "number",
+          "description": "The projected post-execution value that breached the limit."
+        },
+        "band_pct": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 0.5,
+          "description": "The tolerance_band_pct in force when this was accepted. Recorded on the action rather than looked up later, because the mandate is mutable by the agent and a warning must stay readable against the rules that actually applied."
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "description": "One sentence for the feed, e.g. 'WETH at 61.2% against a 60% cap — accepted inside the 5% tolerance band'."
+        }
+      }
+    }
   }
 }

@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "name": "Balanced Two-Asset",
+  "objective": "Hold roughly half USDC and half WETH, and rebalance back toward that split when it drifts. The 50/50 target is the position — trading away from it is not expressing a view, it is abandoning the mandate. Between rebalances, put the book to work rather than letting it sit: supply idle USDC above the cash floor to the best-paying permitted lending market, or earn maker fees on the pair through Aqua while the tokens stay in the vault. Rotate through Uniswap only when drift actually needs correcting, and price the cost of the correction against the drift being corrected.",
+  "base_asset": "USDC",
+  "constraints": {
+    "allowed_assets": ["USDC", "WETH"],
+    "max_position_pct": 0.6,
+    "min_cash_pct": 0.2,
+    "max_slippage_bps": 50,
+    "rebalance_cooldown_seconds": 3600,
+    "max_actions_per_tick": 2,
+    "tolerance_band_pct": 0.05
+  },
+  "permitted_data_sources": ["messari", "aave", "chainlink", "token_api"],
+  "permitted_venues": ["uniswap", "aqua", "aave"],
+  "risk_posture": "balanced",
+  "update_rules": "May widen allowed_assets only to assets with a Chainlink Base feed denominated in USD and >$50M TVL. May never reduce min_cash_pct below 0.1, may never raise max_slippage_bps above 100, and may never remove a data source that is currently the sole provider of a fact class it relies on."
+}

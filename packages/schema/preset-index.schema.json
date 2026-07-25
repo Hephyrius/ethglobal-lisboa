@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ethglobal-lisboa/schema/preset-index.schema.json",
+  "title": "MandatePresetIndex",
+  "description": "The catalogue of starting-point mandates in packages/schema/presets/. Exists so the genesis conversation and the dApp's preset cards read the SAME list: the model's recommendation and the button the user clicks cannot then diverge. Each entry points at a file that must itself validate as a Mandate — the conformance test enforces both that and the fact that this index matches the directory exactly, so a preset can never be listed-but-missing or present-but-unoffered.",
+  "type": "object",
+  "required": ["version", "presets"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Increments when an entry is added, removed or re-keyed."
+    },
+    "presets": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/preset_entry" }
+    }
+  },
+  "$defs": {
+    "preset_entry": {
+      "type": "object",
+      "required": ["key", "file", "headline", "tradeoff"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{2,40}$",
+          "description": "Stable identifier, equal to the file's stem. Named after what the mandate does, never after a firm we do not speak for."
+        },
+        "file": {
+          "type": "string",
+          "pattern": "^presets/[a-z][a-z0-9-]{2,40}\\.json$",
+          "description": "Path relative to packages/schema/."
+        },
+        "headline": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "One line for the card. What this mandate is for."
+        },
+        "tradeoff": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240,
+          "description": "What the user gives up by choosing it. Required, not optional: a preset list where every option only has upsides is a menu that helps nobody choose, and the tradeoff is the part the genesis conversation should read aloud."
+        },
+        "persona": {
+          "type": "string",
+          "maxLength": 80,
+          "description": "Persona name carried by the preset, if any. Absent means the mandate ships neutral — useful as the control when comparing two personas on the same snapshot."
+        }
+      }
+    }
+  }
+}

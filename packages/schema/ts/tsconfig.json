@@ -1,0 +1,18 @@
+{
+  "comment": "Exists so `pnpm --filter @curator/schema typecheck` can check the zod mirror on its own. Before this, that script errored with TS5057 (no tsconfig), so the only thing ever type-checking these shapes was web/'s build — which means a lane that does not own web/ had no way to verify a schema change it had just made. Settings mirror web/tsconfig.json where it matters (strict, bundler resolution, ES2022) so a shape that checks here cannot fail there for a compiler-option reason.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "strict": true,
+    "noEmit": true,
+    "declaration": false,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules"]
+}

@@ -23,12 +23,7 @@ from curator_schema import (
     MarketSnapshot,
     VaultState,
 )
-from jsonschema import Draft202012Validator
-from referencing import Registry, Resource
-from referencing.jsonschema import DRAFT202012
-
-SCHEMA_DIR = Path(__file__).resolve().parents[2]
-FIXTURE_DIR = SCHEMA_DIR / "fixtures"
+from schema_registry import FIXTURE_DIR, errors_against
 
 # fixture stem -> (schema filename, pydantic model)
 CASES = {
@@ -45,34 +40,11 @@ def _load(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _registry() -> Registry:
-    """All schemas, keyed by $id, so cross-schema $refs resolve locally.
-
-    agent-action.schema.json refs its siblings by relative filename, which
-    resolves against its own $id. Without a preloaded registry, jsonschema
-    tries to fetch https://ethglobal-lisboa/... over the network.
-    """
-    return Registry().with_resources(
-        (
-            _load(path)["$id"],
-            Resource.from_contents(_load(path), default_specification=DRAFT202012),
-        )
-        for path in SCHEMA_DIR.glob("*.schema.json")
-    )
-
-
-def _validator(schema_name: str) -> Draft202012Validator:
-    return Draft202012Validator(_load(SCHEMA_DIR / schema_name), registry=_registry())
-
-
 @pytest.mark.parametrize("stem", sorted(CASES))
 def test_fixture_matches_json_schema(stem: str) -> None:
     schema_name, _ = CASES[stem]
-    errors = sorted(
-        _validator(schema_name).iter_errors(_load(FIXTURE_DIR / f"{stem}.json")),
-        key=lambda e: list(e.path),
-    )
-    assert not errors, "\n".join(f"{list(e.path)}: {e.message}" for e in errors)
+    errors = errors_against(schema_name, _load(FIXTURE_DIR / f"{stem}.json"))
+    assert not errors, errors
 
 
 @pytest.mark.parametrize("stem", sorted(CASES))
@@ -92,8 +64,8 @@ def test_pydantic_roundtrip_is_stable(stem: str) -> None:
     schema_name, model = CASES[stem]
     obj = model.model_validate(_load(FIXTURE_DIR / f"{stem}.json"))
     emitted = json.loads(obj.model_dump_json(exclude_none=True))
-    errors = sorted(_validator(schema_name).iter_errors(emitted), key=lambda e: list(e.path))
-    assert not errors, "\n".join(f"{list(e.path)}: {e.message}" for e in errors)
+    errors = errors_against(schema_name, emitted)
+    assert not errors, errors
 
 
 def test_every_fixture_is_covered() -> None:

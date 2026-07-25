@@ -28,6 +28,42 @@ export const MandateConstraints = z
     min_cash_pct: z.number().min(0).max(1).default(0),
     rebalance_cooldown_seconds: z.number().int().min(0).default(3600),
     max_actions_per_tick: z.number().int().min(1).default(3),
+    /** Soft band on the ALLOCATION AND EXPOSURE constraints only. A breach no
+     *  larger than the band is accepted with a warning on the AgentAction rather
+     *  than rejected — 61% against a 60% cap is a swap that priced a hair
+     *  differently, not a change of intent.
+     *
+     *  RELATIVE to the constraint's own value, never absolute percentage points:
+     *  a ceiling C admits C*(1+band), a floor F admits F*(1-band), a target T
+     *  admits |actual-T| <= T*band.
+     *
+     *  Applies to max_position_pct, min_cash_pct, target-allocation drift.
+     *  NEVER to max_slippage_bps (a ceiling already compared against a
+     *  worst-case bound, so banding it silently pays more than the mandate's
+     *  stated maximum cost), never to the asset/venue/source allowlists (not
+     *  numeric), never to the anti-churn limits (a band there is just a bigger
+     *  limit). 0 restores strict rejection. */
+    tolerance_band_pct: z.number().min(0).max(0.5).default(0.05),
+  })
+  .strict()
+
+/** How the agent argues, and what it prefers among options already permitted.
+ *
+ *  INVARIANT: a persona SKEWS PREFERENCE INSIDE the permitted set and can never
+ *  widen it. An aggressive persona may prefer the riskier of two permitted
+ *  assets; it may not reach an asset allowed_assets omits, raise a cap, shrink
+ *  the cash floor, or loosen the slippage ceiling. Persona is taste; constraints
+ *  are law. Render it as character, never as authority. */
+export const Persona = z
+  .object({
+    name: z.string().min(1).max(80),
+    /** How it writes its reasoning — it shapes the text a depositor reads, not
+     *  the bounds the harness enforces. */
+    voice: z.string().min(1).max(500),
+    /** Each a preference between options the mandate already allows. */
+    biases: z.array(z.string().min(1).max(200)).max(10).default([]),
+    /** Steers sizing WITHIN max_position_pct and how often it holds. Changes no bound. */
+    conviction: z.enum(['low', 'medium', 'high']).default('medium'),
   })
   .strict()
 
@@ -44,6 +80,8 @@ export const Mandate = z
     permitted_venues: z.array(z.enum(['uniswap', 'aqua', 'aave'])).min(1),
     created_at: z.string().datetime().optional(),
     risk_posture: z.enum(['conservative', 'balanced', 'aggressive']).default('balanced'),
+    /** Optional character the agent argues in. Absent means a neutral curator. */
+    persona: Persona.optional(),
     update_rules: z.string().max(1000).optional(),
   })
   .strict()
@@ -242,6 +280,29 @@ export const ModelProvenance = z
   })
   .strict()
 
+/** One banded acceptance — a constraint that bent and was allowed to.
+ *
+ *  Structured rather than a pre-formatted sentence so the feed can state which
+ *  constraint bent and by how much, and style it as an accepted exception rather
+ *  than as a failure. `limit` is what the agent is still steering back toward. */
+export const ConstraintWarning = z
+  .object({
+    /** Closed on purpose: a second warning class is a schema change, so nobody
+     *  can quietly record a different kind of exception in this array. */
+    kind: z.literal('tolerance_band'),
+    /** The MandateConstraints field that bent, or 'target_allocation' for drift. */
+    constraint: z.string(),
+    /** Asset symbol when the constraint is per-asset; absent for portfolio-wide. */
+    subject: z.string().optional(),
+    limit: z.number(),
+    actual: z.number(),
+    /** The band in force when this was accepted — recorded on the action because
+     *  the agent may amend its own mandate afterwards. */
+    band_pct: z.number().min(0).max(0.5),
+    message: z.string().min(1).max(300),
+  })
+  .strict()
+
 /** One decision cycle. The audit trail and the demo feed. */
 export const AgentAction = z
   .object({
@@ -259,6 +320,12 @@ export const AgentAction = z
     mandate_version_after: z.number().int().min(1).optional(),
     model: ModelProvenance.optional(),
     error: z.string().nullable().default(null),
+    /** Constraints this cycle breached and was ACCEPTED anyway, inside
+     *  tolerance_band_pct. Not an error — a warning rides on a successful
+     *  action, so style it as an accepted exception, not a failure. MUST be
+     *  rendered wherever the action is: an invisible band is indistinguishable
+     *  from there being no rule at all. */
+    warnings: z.array(ConstraintWarning).default([]),
     duration_ms: z.number().int().min(0).optional(),
   })
   .strict()
@@ -394,6 +461,8 @@ export const GenesisFinalizeResponse = z
 // ── Inferred types ────────────────────────────────────────────────────────
 
 export type Mandate = z.infer<typeof Mandate>
+export type Persona = z.infer<typeof Persona>
+export type ConstraintWarning = z.infer<typeof ConstraintWarning>
 export type MarketSnapshot = z.infer<typeof MarketSnapshot>
 export type Fact = z.infer<typeof Fact>
 export type SourceNote = z.infer<typeof SourceNote>

@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "presets": [
+    {
+      "key": "conservative-income",
+      "file": "presets/conservative-income.json",
+      "headline": "Lend USDC only. No directional exposure, a quarter of the book always in cash.",
+      "tradeoff": "Gives up every source of return except lending, so it cannot earn maker fees or benefit from a move in ETH. A tight 10 bps slippage ceiling also means it will decline trades a looser mandate would take.",
+      "persona": "The Treasurer"
+    },
+    {
+      "key": "balanced-two-asset",
+      "file": "presets/balanced-two-asset.json",
+      "headline": "Half USDC, half WETH, rebalanced on drift — and the idle half put to work.",
+      "tradeoff": "Holding WETH means the vault's value moves with ETH, so a depositor can be down in USDC terms through no fault of the strategy. Rebalancing also costs slippage each time drift is corrected."
+    },
+    {
+      "key": "opportunistic",
+      "file": "presets/opportunistic.json",
+      "headline": "Chase the best risk-adjusted return across lending and Aqua market-making. Concentrates.",
+      "tradeoff": "A 5% cash floor and an 80% position cap mean a bad entry is felt in full, and a 15-minute cooldown lets it act on noise. Expect a visibly bumpier share price than the other two.",
+      "persona": "The Yield Hound"
+    }
+  ]
+}
