@@ -1416,6 +1416,69 @@ one file.
 
 ---
 
+## 2026-07-25 — Lane B: the Aqua ship reaches the feed, and a gap all six layers passed
+
+**What changed.** Lane E's #51 closed, one validation hole found and shut, and the prompt taught two
+things it could not previously express. 240 agent tests, 25 e2e.
+
+### The ship could never have come from the model, for two reasons that were both mine
+
+Lane E was right that the Aqua ship was "real but not in the feed", and right that this is *"the
+difference between the 1inch centrepiece being demonstrable and merely being true."* The cause sat
+two layers upstream of journalling:
+
+1. **The prompt's JSON template only ever showed a `uniswap:swap`.** The `aqua:ship` shape had never
+   been put in front of the model, so no mandate wording could have produced one. Both shapes are now
+   given, framed by what each is *for* — change what the vault holds, versus earn fees on what it
+   already holds.
+2. **My own decision procedure contradicted the mandate.** Step 3 read *"If they match, hold"*, which
+   hardcodes balanced ⇒ do nothing. The model followed my prompt over the mandate's ship-when-balanced
+   rule and said so in its reasoning. Step 4 now states that a balanced book is not the end of the
+   check.
+
+Ship `amounts` are in base units, which is exactly the cross-unit arithmetic this model is on record
+getting wrong, so each holding now prints its raw balance for copying rather than computing.
+
+**It still could not do it.** Three attempts: held, held, then a rebalance whose reasoning read *"The
+current allocation of 50.0% USDC and 50.0% WETH does not match the target allocations of 50.0% USDC
+and 50.0% WETH"* — it cannot compare two identical numbers. So the ship in the feed
+(`act_000020`, tx `0xa211fcf5…`) was driven by a **scripted decision through the real cycle**: live
+Graph snapshot, Lane D's plan, on-chain `executeBatch`, real journal entry. Only the decision text is
+substituted, and that is stated in `active-work.md` and the handoff so nobody narrates it as
+model-authored. Model-authored ships need a bigger model than this machine can run; the plumbing is
+proven either way.
+
+### The gap that matters more than the ship
+
+That third attempt — **liquidate 100% of WETH from a book sitting exactly on its 50/50 target** —
+**passed all six validation layers.** Only the on-chain revert stopped it.
+
+- Layer 5 skipped: no drift, so no direction to be wrong about.
+- Layer 6 skipped its overshoot check: the starting gap was zero.
+- 100/0 breaches neither the 30% cash floor nor the 60% position ceiling.
+
+**The hole was an exemption I had added myself**, so that the golden fixture would pass — it pairs a
+70/30 target with a 70/30 book and then trades, and I rationalised that as "expressing a view rather
+than correcting a drift". That reasoning was wrong. `target_allocations` is *where you want the vault
+to be*; trading away from it means the stated target is not the target. There is no legitimate case,
+so the exemption is gone and the liquidation is now rejected.
+
+This is the third time this rule has been tightened and the third time a **real trade** did the
+tightening rather than reasoning about it. The pattern is consistent enough to be worth stating: each
+version looked obviously sufficient until something executed.
+
+**A fact about the shared fixtures, for every lane:** `allocation-decision.json` and
+`vault-state.json` are **incoherent as a pair.** They were written to exercise shapes, and neither is
+the correct decision for the other. Two of my own tests had quietly relied on the pairing; they now
+use a decision that closes a real gap.
+
+### Smaller things
+
+Cleared two trivial lint errors in Wave 0's e2e tests — an unused import and a long line — which were
+failing `ruff check tests` for everyone. Shared tooling, cosmetic, cheaper to fix than to file.
+
+---
+
 ## 2026-07-25 — Lane B: unblock-by-default in practice — restarted a shared service, wrote two rungs
 
 **What changed.** Took two of the unblock plan's standing authorizations rather than filing requests:
