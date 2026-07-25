@@ -938,6 +938,109 @@ one file.
 
 ---
 
+## 2026-07-25 — Lane B phase 2: the first on-chain write, and two more model confabulations
+
+**What changed.** Phase 2 §2.1 closed — the agent signed and landed a real `executeBatch`. Lane D's
+request #17 acknowledged and pinned. Two further prompt-shaped model failures found and fixed.
+
+### §2.1 — the chain has now been run end to end
+
+```
+tx        0x789066d43ed0f54be903312dbc732a5c1b03ffb14dcdac0a5cd1e6f8ffa28a4b
+block     49077778   status 1   gas 280,971   selector 0x34fcd5be (executeBatch)
+effect    2,500.000000 USDC / 0 WETH  ->  1,750.000000 USDC / 0.403383 WETH
+          totalAssets 2500.000000 -> 2499.880448
+```
+
+Lane D's Uniswap adapter built the 3-step plan from a live quote; this lane submitted it as one
+atomic batch signed by the agent's own key. **11 logs, 4 of them ERC-20 `Transfer` events** — the
+onchain token transfer 1inch asks to see, on a fork, which their rules permit in writing.
+
+Quoted ~0.403526 WETH, delivered 0.403383: **0.035% off**. The 0.12 USDC drop in `totalAssets` is the
+execution cost, priced by the vault through Chainlink — the accounting agreeing with reality rather
+than a number we asserted.
+
+Every link in this chain was independently green before this and the chain had never been run end to
+end. That gap is the whole reason §2.1 was written as blocking, and it was right to be.
+
+**Deliberately not done: submitting to Lane A's fork beyond this.** Three lanes assert against that
+vault. One write, announced immediately in request #24 so Lane E and Lane D could sequence behind it.
+
+### Request #17 — acknowledged, and the guard is mutation-tested
+
+Lane D found that `Aqua.ship()` **succeeds with zero allowance**: it records full virtual balances and
+returns a valid hash, because shipping moves no tokens and the allowance is only consumed later when a
+taker fills. So an Aqua plan missing its approvals does not revert — it produces a position that looks
+healthy in every observable way and is **silently never fillable**.
+
+That makes it the one place in the system where an optimisation which is obviously correct everywhere
+else — "skip the approve, the allowance is already sufficient" — fails quietly rather than loudly.
+The harness never inspects, reorders, merges or skips venue steps, and `test_aqua_approvals.py` now
+asserts it. **Verified the guard actually guards**: temporarily adding a `(target, calldata)` dedup to
+`build_execution_plan` makes the test fail. A guard nobody has seen fail is a guess.
+
+### Two more confabulations, both fixed in the prompt because neither was catchable downstream
+
+**1. It invented a value for a real fact.** Shown `f6 | liquidity | uniswap-v3 USDC/WETH |
+$12,400,000`, the model reported *"the highest headline APY of 10.43%"*. Grounding validation checks
+that cited **ids** exist; it cannot check that quoted **numbers** are right.
+
+**2. It did arithmetic across units and got it wrong — and that changed the decision.** Shown
+`1,750.0000 USDC` and `0.4034 WETH`, it reported *"403.4 WETH, which is a 23.1% allocation (0.4034 /
+1750 * 100)"*, concluded the book was balanced, and declined to rebalance a 70/30 book against a
+50/50 target.
+
+The second is the more instructive. Weighing a portfolio requires a price, and asking a 3B to apply
+one to raw token balances invites exactly this. **The vault already computes it** — every holding is
+valued through the same Chainlink feed `totalAssets()` uses, and it crosses the wire on
+`Holding.value_in_asset`. So the weights are now *given*, in the units the mandate expresses targets
+in, with an explicit instruction not to recompute them. The arithmetic error disappeared and the model
+began quoting live yields correctly.
+
+The general lesson, and it generalises past this project: **when a small model has to combine two
+numbers to reach a decision, compute it for them.** Every derivation left to the model is a place it
+can be confidently wrong in prose that passes every schema check.
+
+The fact-table fix from the earlier entry and this one are both *rendering* changes, not validator
+changes, because there is no downstream defence — nothing can tell that a number in free text was
+invented. `test_prompt_rendering.py` pins the properties that stopped each.
+
+**A test that earned its place immediately:** asserting the rendered prompt is pure ASCII found three
+em dashes still in prompt-facing strings. Lane C's finding is that Windows consoles are cp1252 and
+mangle them, and the prompt reaches a terminal through `agent.bench`.
+
+### Two operational findings worth more than the code changes
+
+**Ollama evicts an idle model after ~5 minutes**, and the next tick then pays a ~2 GB reload before
+generating. A warm decision is ~33s; the first cold one blew through the 120s timeout and surfaced as
+`ModelUnavailable` — which reads as *"the server is down"* when the server is merely slow. That is a
+demo-shaped failure: it fires precisely when the stack has been idle while someone explains the
+architecture. `model_timeout_s` now defaults to 300s so a cold load completes, and
+**`OLLAMA_KEEP_ALIVE=30m` on the Ollama server** is documented in three places as a demo
+prerequisite. Passing `keep_alive` in the request body does **not** work — verified, the
+OpenAI-compatible endpoint silently ignores it and the TTL stays at 5 minutes.
+
+**Uniswap plans report `expected_slippage_bps: 250`** — the API's default *tolerance*, not expected
+impact. The harness compares that against `Mandate.max_slippage_bps`, so the golden mandate's 50 bps
+**rejects every Uniswap plan**. Filed as request #26 rather than quietly loosened: when a ceiling and
+an estimate are indistinguishable, refusing to trade is the correct default, and the right fix is a
+demo mandate that permits it or a tighter tolerance requested from the API.
+
+### Process notes
+
+**Uncommitted doc edits get attributed to whoever commits next.** My `OLLAMA_KEEP_ALIVE` note sat in
+the working tree and was swept into Lane E's commit by their `git add`. Nothing lost, but it is §2.5
+in reverse — the fix is to commit doc edits promptly, not just to stage narrowly. Every Lane B commit
+in phase 2 staged explicit paths.
+
+**`uv run` was broken repo-wide** for a period by Lane C's in-flight `pyproject.toml` edits for the
+PyPI publish (conflicting `curator-data` URLs, one editable and one not). Not this lane's to fix, and
+they were actively working in it. Worked around locally by invoking `.venv/Scripts/python.exe -m
+pytest` directly, which uses the already-installed environment and skips re-resolution — worth
+knowing, because it un-blocks any lane during someone else's dependency edit.
+
+---
+
 ## 2026-07-25 — Lane B: the model is real now — measured, and it confabulated on the first run
 
 **What changed.** Ollama landed, `qwen2.5:3b-instruct-q4_K_M` pulled, and the loop ran end to end
