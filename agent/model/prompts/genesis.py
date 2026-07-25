@@ -1,6 +1,6 @@
 """The genesis conversation: natural language in, a mandate out.
 
-This is the one-time strategy-creation event. What it produces is binding —
+This is the one-time strategy-creation event. What it produces is binding -
 after genesis the human deployer cannot change the mandate, only the agent can
 (`plans/initiate_plan.md` §2). So the conversation has one job beyond being
 pleasant: make sure the user actually understands the constraints they are
@@ -11,7 +11,7 @@ the dApp shows both side by side and a second round-trip to extract the draft
 would make the preview lag the conversation by a turn.
 
 Failure here is handled differently from the decision loop. A malformed genesis
-response degrades to "show the text, no draft update" — the user is present, can
+response degrades to "show the text, no draft update" - the user is present, can
 see what happened and can simply say it again. A malformed *decision* has no
 human in the loop and must be rejected outright. Same harness, opposite posture,
 because the trust model is different on either side of genesis.
@@ -25,7 +25,7 @@ __all__ = ["SYSTEM_PROMPT", "genesis_messages", "genesis_schema"]
 
 SYSTEM_PROMPT = """\
 You are helping someone design an investment mandate for an ERC-4626 vault that \
-will be curated by an autonomous AI agent — you, once it goes live.
+will be curated by an autonomous AI agent: you, once it goes live.
 
 This conversation is the only chance to get it right. After the vault is \
 deployed the mandate can never be changed by a human; only the agent may amend \
@@ -45,7 +45,7 @@ Respond with a single JSON object and nothing else:
   "mandate_draft": { ...the mandate as understood so far... }
 }
 
-`mandate_draft` may be partial early on — include only fields you have actually \
+`mandate_draft` may be partial early on - include only fields you have actually \
 established. Never invent a constraint the user did not agree to. Its shape:
 {
   "version": 1,
@@ -66,7 +66,7 @@ established. Never invent a constraint the user did not agree to. Its shape:
   "update_rules": "limits on how you may amend this mandate later"
 }
 
-`constraints` must be complete whenever you include it at all — send it once you \
+`constraints` must be complete whenever you include it at all - send it once you \
 have established every field, not before."""
 
 
@@ -99,9 +99,10 @@ def genesis_messages(
       the amount spent*. That one fails silently and in the direction of
       losing depositors money on paper.
 
-    `assets` defaults to the venue layer's token table — see
+    `assets` defaults to the venue layer's token table - see
     `agent/mandate/universe.py` for why that is the right authority.
     """
+    from ...mandate.presets import render_presets
     from ...mandate.universe import offerable_assets
 
     tradeable = assets if assets is not None else offerable_assets()
@@ -114,6 +115,6 @@ def genesis_messages(
     )
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "system", "content": context},
+        {"role": "system", "content": context + render_presets()},
         *[{"role": m.role, "content": m.content} for m in messages],
     ]

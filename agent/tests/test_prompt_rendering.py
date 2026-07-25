@@ -179,3 +179,43 @@ def test_the_prompt_is_ascii_so_no_console_mangles_it(snapshot, vault):
     text = "\n".join(m["content"] for m in decision_messages(fixtures.mandate(), snapshot, vault))
     offenders = sorted({ch for ch in text if ord(ch) > 127})
     assert not offenders, f"non-ASCII in the rendered prompt: {offenders}"
+
+
+# ── the genesis prompt gets the same guarantees ───────────────────────────
+#
+# The decision prompt has been ASCII-guarded since Wave 1, and that guard has
+# caught three regressions. The genesis prompt had none — and it now embeds
+# preset prose written in Lane F's files, which is exactly the kind of text that
+# arrives with a smart quote in it.
+
+
+def test_the_genesis_prompt_is_ascii():
+    from agent.model.prompts.genesis import genesis_messages
+
+    text = "\n".join(
+        m["content"] for m in genesis_messages([], ["messari", "aave"], ["uniswap", "aqua"])
+    )
+    offenders = sorted({ch for ch in text if ord(ch) > 127})
+    assert not offenders, f"non-ASCII in the genesis prompt: {offenders}"
+
+
+def test_genesis_offers_every_preset_with_its_tradeoff():
+    """A genesis flow that lists benefits and omits costs is a sales page, and
+    this one produces a mandate no human can change afterwards."""
+    from agent.mandate.presets import load_presets
+    from agent.model.prompts.genesis import genesis_messages
+
+    text = "\n".join(m["content"] for m in genesis_messages([], ["messari"], ["aqua"]))
+
+    for preset in load_presets():
+        assert preset.key in text
+        assert preset.tradeoff[:40] in text, f"{preset.key} offered without its tradeoff"
+
+
+def test_genesis_does_not_recommend_one_preset_over_another():
+    """Which tradeoff is acceptable is the user's judgement. A default framed as
+    "the safe choice" is the model making a risk decision on their behalf."""
+    from agent.model.prompts.genesis import genesis_messages
+
+    text = "\n".join(m["content"] for m in genesis_messages([], ["messari"], ["aqua"]))
+    assert "do not present one as the safe or obvious choice" in text
