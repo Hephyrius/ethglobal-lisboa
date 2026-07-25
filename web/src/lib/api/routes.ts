@@ -102,12 +102,19 @@ export const ArchetypeDeployResponse = z
     vault: z.string(),
     mandate: Mandate.optional(),
     mandate_hash: z.string().optional(),
-    tx_hash: z.string().optional(),
+    /** Lane B's name for it. Verified against the live route — NOT `tx_hash`. */
+    deploy_tx: z.string().optional(),
+    archetype: z.string().optional(),
+    /**
+     * The rotating emphasis this generation was given, from the envelope's
+     * `emphases[]`. Worth rendering: it is *why* two clicks differ, so showing
+     * it turns structural uniqueness from a claim into something visible.
+     */
+    emphasis: z.string().optional(),
     attempts: z.number().int().min(1).optional(),
-    /** Populated when a generation escaped the envelope and was regenerated. */
-    rejected: z
-      .array(z.object({ reason: z.string() }).passthrough())
-      .default([]),
+    /** Plain strings, one per discarded generation. */
+    rejections: z.array(z.string()).default([]),
+    collided: z.boolean().optional(),
   })
   .passthrough()
 

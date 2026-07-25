@@ -29,6 +29,8 @@ export type ArchetypeDeployResult = {
   mandateName?: string
   mandateHash?: string
   txHash?: string
+  /** The rotating emphasis this generation was given — why two clicks differ. */
+  emphasis?: string
   attempts: number
   rejections: string[]
   elapsedMs: number
@@ -67,9 +69,10 @@ export function useArchetypeDeploy() {
         vault: parsed.vault as `0x${string}`,
         mandateName: parsed.mandate?.name,
         mandateHash: parsed.mandate_hash,
-        txHash: parsed.tx_hash,
+        txHash: parsed.deploy_tx,
+        emphasis: parsed.emphasis,
         attempts: parsed.attempts ?? 1,
-        rejections: parsed.rejected.map((entry) => entry.reason),
+        rejections: parsed.rejections,
         elapsedMs: Math.round(performance.now() - startedAt),
       }
     },

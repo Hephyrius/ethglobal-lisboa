@@ -212,21 +212,33 @@ function ProducedVault({ result, onOpen }: { result: ArchetypeDeployResult; onOp
         {result.mandateName ?? 'New vault'} →
       </button>
 
+      {/* The emphasis this generation was given, from the envelope's own
+          `emphases[]`. This is the mechanism that makes two clicks differ, so
+          showing it turns structural uniqueness from a claim into something a
+          reader can see varying between two cards. */}
+      {result.emphasis ? (
+        <p className="mt-1 text-2xs leading-relaxed text-muted">
+          <span className="text-faint">asked to emphasise: </span>
+          {result.emphasis}
+        </p>
+      ) : null}
+
       <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-2xs text-faint">
         <span className="font-mono">{shortHash(result.vault)}</span>
         <span>·</span>
         <span>{(result.elapsedMs / 1000).toFixed(1)}s</span>
-        {/* Attempts above one is the envelope refusing to deploy something
-            unvetted. That is the gate working, so it is reported as evidence
-            rather than buried as a retry. */}
+        {/* Attempts above one means a generation was discarded and rewritten —
+            an envelope escape, or a strategy too close to one this archetype
+            already deployed. Either way the gate is working, so it is reported
+            as evidence rather than buried as a retry. Labelled "regenerated"
+            rather than "rejected by the envelope" because the live route
+            rejects duplicates far more often than escapes, and naming the wrong
+            cause would be a confident guess about someone else's code. */}
         {result.attempts > 1 ? (
           <>
             <span>·</span>
-            <span
-              className={cn('text-warn/90')}
-              title={result.rejections.join('\n') || undefined}
-            >
-              {result.attempts - 1} rejected by the envelope
+            <span className={cn('text-warn/90')} title={result.rejections.join('\n\n') || undefined}>
+              {result.attempts - 1} regenerated
             </span>
           </>
         ) : null}
