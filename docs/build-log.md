@@ -8,6 +8,112 @@ the hackathon window.
 
 ---
 
+## 2026-07-25 — Lane A: the vault, and what "no human override" costs you
+
+**What changed.** `contracts/` MVP complete. `CuratedVault` (ERC-4626, sole custodian, agent
+`execute` surface, Chainlink valuation), `VaultFactory` (EIP-1167 clones), 69 unit tests with no
+network dependency, 7 fork tests against real Base, a deploy script that publishes
+`deployments/base-fork.json`, and flat ABIs in `contracts/abis/`. Usage doc at `contracts/README.md`.
+
+**The central decision: how do you build an allowlist when nobody is allowed to hold the keys?**
+
+The locked trust model ([initiate_plan §2](../plans/initiate_plan.md)) is that no human can override
+the agent after genesis. Read literally, that means no `DEFAULT_ADMIN_ROLE` holder at all — which
+also freezes the `execute` target allowlist forever. That collided with reality within the hour: the
+Uniswap router address was still unconfirmed (cross-lane request #7, which Lane D resolved only by
+reading a live API response), and an immutable list missing one address means every plan reverts and
+the demo dies.
+
+The resolution splits the difference along the line that actually matters — *can this power reach the
+money?*
+
+- `AGENT_ROLE` — the only role that can move value. Fixed at genesis.
+- `GUARDIAN_ROLE` — can edit the target allowlist and **nothing else**.
+- `DEFAULT_ADMIN_ROLE` — granted to nobody. `grantRole`, `revokeRole` and `renounceRole` all revert.
+
+Widening the allowlist grants the guardian nothing it could exploit alone, because only the agent can
+call `execute`. So the mutable thing is a blast-radius limiter, not a custody control. The residual
+risk is real and is documented rather than hidden: a guardian *narrowing* the list can grief a
+rebalance. That is liveness, not custody, and it was the right trade at 3am with a demo to make.
+
+Renouncing needed closing explicitly. AccessControl lets any holder renounce its own role by default,
+so the agent could have bricked the vault it curates. That is the one path where "no admin" is not
+enough on its own.
+
+**Valuation got the opposite answer, and that asymmetry is the point.** There is no setter for price
+feeds at all, for anyone. That is the one place a mutable setting *is* exploitable — register a bogus
+feed and you reprice every share, minting or redeeming at a number you chose. Same instinct
+("operational flexibility") would have been a live vulnerability here rather than a convenience.
+
+`VaultFactory` is where the flexibility went instead: it holds a **mutable default config** that each
+vault snapshots and then freezes. Editable in the template, immutable in the instance holding
+depositor money.
+
+**Alternatives considered.** Making the allowlist agent-mutable — rejected, it makes the boundary
+decorative, since the agent could allowlist anything it liked. Granting the deployer
+`DEFAULT_ADMIN_ROLE` "just for the allowlist" — rejected, AccessControl's admin can grant *any* role
+including `AGENT_ROLE`, so it is a human override wearing a hat. Restricting token targets to
+`approve` only — genuinely attractive (it would stop `USDC.transfer(attacker, …)`), but rejected: the
+trust model already grants the agent full latitude, it is not in the spec, and it would have blocked
+Lane D at 4am with no one awake to unblock them. Cost of the boundary chosen: the allowlist bounds
+*which contracts* the agent may reach, not what it may do there. Stated plainly in the README rather
+than implied.
+
+**Three smaller decisions worth recording.**
+
+*`_decimalsOffset() = 12`.* OpenZeppelin's virtual-shares defence against the first-depositor
+inflation attack, and it makes shares 18-decimal over a 6-decimal asset, which is what wallets
+expect. The cost is a genuine trap for Lanes B and E: `convertToAssets(1e18)` returns a **6-decimal**
+number. Documented loudly, asserted in tests, and flagged in `active-work.md` — including that the
+Wave 0 `vault-state.json` fixture's `share_price` is 10^12 off its own totals.
+
+*`totalAssets()` reverts on a bad price rather than valuing at zero.* Reverting blocks deposits and
+withdrawals, which is unpleasant; valuing a held token at zero silently misprices shares and lets a
+withdrawal drain value from everyone still in. Chose the loud failure. Softened where it is free:
+a token with a zero balance is skipped before its feed is read, so a broken feed only blocks the
+vault while it actually holds that token.
+
+*`priceMaxAge = 0` disables the staleness check, and fork deploys use 0.* Not laziness — on a pinned
+anvil fork the forked feed's `updatedAt` is frozen at the fork block while `block.timestamp` keeps
+advancing, so any real bound starts failing minutes into a dev session and takes the whole vault down
+with it. This is the sort of thing that eats an hour at 4am, so it is commented at the definition,
+in the README, and in the deploy script.
+
+**Dependencies: vendored, not submodules.** `forge install` uses git submodules, which live in the
+repository-root `.gitmodules` — a shared file Lane D also writes for `venues/aqua/solidity/`, and
+exactly the concurrent-edit collision Rule 7 exists to prevent. Vendored sources also mean a plain
+`git clone` compiles on macOS at handoff with no `--recursive` and no half-empty `lib/`. Cost: ~2MB
+committed. Lane D then found the real bill — vendored paths crossed Windows' 260-character
+`MAX_PATH` and **aborted a fresh clone entirely** (request #11). Fixed at the source rather than
+telling every teammate and judge to set `core.longpaths`: shortened `lib/openzeppelin-contracts*` to
+`lib/oz*` and pruned the trees nothing compiles. 130 → 105 chars, 480 → 240 files, 3.7M → 2.2M.
+Rejected soldeer (another registry to be down at 4am) and `core.longpaths` (pushes the problem onto
+everyone who clones).
+
+**Testing: two suites, deliberately.** The unit suite is 100% mock-based and needs no network,
+because `forge test` has to be green on a fresh macOS clone at 10:00 where `BASE_RPC_URL` may not
+exist — `.env` still has no archive RPC. The fork suite skips itself cleanly when there is no
+endpoint. Three test bugs found and worth remembering: `vm.expectRevert` binds to the next
+**external** call, so `vault.grantRole(vault.AGENT_ROLE(), x)` had the cheatcode matching the getter
+and four role tests were passing without testing anything; `ChainlinkPriceLib` is `internal`, so it
+inlines into the test contract and `expectRevert` has no call frame to attach to; and re-entering
+`execute` is caught by the *role* check, not the reentrancy guard, so the guard's real job is the
+permissionless entry points — a venue re-entering `deposit()` mid-rebalance to mint shares against
+an understated `totalAssets()`.
+
+**Verified against real state, not mocks.** Deployed to a live Base fork: 5,000 real USDC → `5000e18`
+shares at a share price of exactly `1000000`; the agent set a real USDC allowance to real Permit2
+through the vault (the exact first step of every Lane D Uniswap plan); non-agent `execute` reverted;
+redeem returned 2,500 USDC. Every address in the deploy script was confirmed with `cast code` before
+being written down, which caught an Aqua constant I had transcribed by hand into a different address.
+
+**Environment note for whoever hits it next.** `cast` and `forge` making *direct* external HTTPS
+calls hang indefinitely in this WSL setup, while `curl` to the same endpoint returns instantly. It is
+not a blocker: `anvil --fork-url` works fine, and once anvil holds the fork everything else talks to
+localhost. Point `forge test` and `forge script` at the anvil endpoint, not at the upstream RPC.
+
+---
+
 ## 2026-07-25 — Lane E: the dApp — three routes, and the decision feed as the product
 
 **What changed.** `web/` MVP complete: `/` (thesis + vault list), `/create` (genesis chat → live
