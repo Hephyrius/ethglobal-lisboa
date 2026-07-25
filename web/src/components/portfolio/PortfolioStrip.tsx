@@ -95,6 +95,13 @@ export function PortfolioStrip() {
           <p className="mt-1.5 text-sm text-muted">
             No positions yet. Deposit into a vault below and it will appear here.
           </p>
+          {/* Said explicitly because the archetype flow produces exactly this
+              state: a vault you deployed, holding nothing, so this panel is
+              empty while the one below is not. Without the sentence that pair
+              reads as the deployment having failed. */}
+          <p className="mt-1 text-2xs text-faint">
+            Deploying a vault does not create a position — that is tracked separately below.
+          </p>
         </CardBody>
       </Card>
     )

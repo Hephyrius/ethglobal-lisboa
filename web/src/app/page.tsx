@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { PortfolioStrip } from '@/components/portfolio/PortfolioStrip'
+import { DeployedVaults } from '@/components/portfolio/DeployedVaults'
 import { VaultList } from '@/components/vault/VaultList'
 
 export default function HomePage() {
@@ -52,10 +53,17 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Renders nothing at all when no wallet is connected — an empty panel
-          captioned "connect a wallet" occupies the space a reader is scanning
-          for content, which is worse than no panel. */}
-      <PortfolioStrip />
+      {/* Both render nothing at all when no wallet is connected — an empty
+          panel captioned "connect a wallet" occupies the space a reader is
+          scanning for content, which is worse than no panel.
+
+          Two panels rather than one merged list, deliberately: shares held and
+          vaults deployed are different claims about someone, and an archetype
+          vault appears only in the second until it is funded. */}
+      <div className="space-y-4">
+        <PortfolioStrip />
+        <DeployedVaults />
+      </div>
 
       <section>
         <div className="flex items-baseline justify-between border-b border-line pb-2">
