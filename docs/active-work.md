@@ -19,7 +19,7 @@ bottom and let the owner do it.
 | **A** | `contracts/` | 🔵 in progress | Lane A instance (Claude Code) | 2026-07-25 01:35Z | |
 | **B** | `agent/` | 🔵 in progress | Lane B instance | 2026-07-25 T+1:00 | |
 | **C** | `data/` | ✅ **MVP done** — registry, 2 Graph sources, standalone MCP server, x402; live path blocked only on `GRAPH_API_KEY` | Lane C instance | 2026-07-25 | 2026-07-25 02:13Z |
-| **D** | `venues/` | 🔵 in progress | Lane D instance | 2026-07-25 02:10 | |
+| **D** | `venues/` | ✅ **MVP done** — both venues behind the frozen `Venue` port; `ship()`/`dock()` verified against the **real deployed Aqua** on a Base fork. Claim held open only until Lane A answers requests 7/8 (the vault allowlist). | Lane D instance | 2026-07-25 02:10 | 2026-07-25 03:45Z |
 | **E** | `web/` | 🔵 in progress | Lane E instance (Claude Code) | 2026-07-25 | |
 
 To claim: change 🟡 unclaimed → 🔵 in progress, add your name and a timestamp. On finish:
