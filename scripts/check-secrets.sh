@@ -304,17 +304,27 @@ scan() {
 emit_staged() {
   # Added lines only. What is already in the file is someone else's problem to rotate; what you
   # are adding right now is the thing still worth stopping.
-  git diff --cached --unified=0 --no-color --diff-filter=ACMR | awk '
-    /^\+\+\+ b\// { path = substr($0, 7); next }
-    /^@@/ {
-      # @@ -a,b +c,d @@ — c is the first new line number.
-      match($0, /\+[0-9]+/); lineno = substr($0, RSTART + 1, RLENGTH - 1) + 0; next
-    }
-    /^\+/ && path != "" {
-      printf "%s\t%s\t%s\n", path, lineno, substr($0, 2)
-      lineno++
-    }
-  '
+  #
+  # Skips the same paths `--tree` skips, and it did not always: this mode read the whole cached
+  # diff in one pass with no `is_skipped_path` filter, so a `forge build` staged alongside real
+  # work produced ~1,900 findings from `contracts/out/*.json`. Those are solc metadata IPFS CIDs
+  # — public by construction, and already excluded in tree mode. A pre-commit hook that fires
+  # thousands of false positives is a hook every lane learns to bypass, which is worse than not
+  # having one. Filtering per file rather than post-hoc also keeps the two modes honest against
+  # ONE list instead of two that can drift.
+  git diff --cached --name-only --diff-filter=ACMR | while IFS= read -r FILE; do
+    is_skipped_path "$FILE" && continue
+    git diff --cached --unified=0 --no-color -- "$FILE" | awk -v path="$FILE" '
+      /^@@/ {
+        # @@ -a,b +c,d @@ — c is the first new line number.
+        match($0, /\+[0-9]+/); lineno = substr($0, RSTART + 1, RLENGTH - 1) + 0; next
+      }
+      /^\+/ && $0 !~ /^\+\+\+/ {
+        printf "%s\t%s\t%s\n", path, lineno, substr($0, 2)
+        lineno++
+      }
+    '
+  done
 }
 
 emit_tree() {
