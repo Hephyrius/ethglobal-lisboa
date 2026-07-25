@@ -23,6 +23,15 @@ pnpm --filter @curator/web dev          # http://localhost:3000
 | `pnpm --filter @curator/web build` | production build (also type-checks) |
 | `pnpm --filter @curator/web typecheck` | types only |
 | `pnpm --filter @curator/web audit:deps` | supply-chain check — see [Dependencies](#dependencies) |
+| `pnpm --filter @curator/web lint:imports` | fails on imports this app must never contain. Runs automatically as `prebuild`. |
+| `pnpm --filter @curator/web verify:write-path` | approve → deposit → redeem against a running fork |
+
+> **`lint:imports` exists for one specific bug and is worth understanding before you delete it.**
+> `'wagmi'` is not a dependency of this app, but a stale copy sits at the *workspace root*
+> `node_modules/`, so Node and webpack resolve it happily — the import compiles, builds, and then
+> throws `WagmiProviderNotFoundError` in the browser, because nothing here mounts a `WagmiProvider`.
+> That took the whole homepage down once (#58) and neither `tsc` nor `next build` can catch it.
+> Use `@/lib/chain/account` for account state and `@wagmi/core` for actions.
 
 **It runs with nothing else running.** No agent API, no anvil, no deployed contracts. Every screen
 falls back to the golden fixtures and says so. See
@@ -56,7 +65,9 @@ No `NEXT_PUBLIC_WALLETCONNECT_ID` — this lane is injected-wallet only, on purp
 |---|---|
 | `/` | Thesis, and the list of known vaults (created here, deployed by Lane A, or the sample). |
 | `/create` | Genesis. Chat → mandate assembles live → deploy → redirect to the new vault. |
-| `/vault/[address]` | Vault state, holdings, mandate, deposit/withdraw, and the decision feed. |
+| `/create` | Also: preset archetypes from `packages/schema/presets/`, one-tap example replies, and the source/venue universe rendered *before* the first question. |
+| `/vault/[address]` | Vault state, holdings donut, open Aqua positions, mandate, deposit/withdraw, and the decision feed. |
+| `/docs` | How it works — the trust model, **where the mandate actually lives**, the custody model, and what this deliberately is not. Linked from the header and from the vault page. |
 
 ## What it consumes
 
@@ -71,8 +82,25 @@ GET  /vault/{addr}/decisions?limit=        → AgentAction[]
 POST /vault/{addr}/tick                    → AgentAction
 ```
 
+Plus these, which are Lane B's own endpoints rather than part of the Wave 0 freeze, so they are
+declared here with `.passthrough()` schemas and may gain fields without breaking this app:
+
+```
+GET  /health                               → {status, mode, …}   provenance badge
+GET  /vault/{addr}/mandate                 → Mandate             mandate viewer
+GET  /vault/{addr}/performance?window=     → VaultPerformance    track record
+GET  /genesis/sources                      → {sources[], venues[]}
+GET  /venues                               → VenueManifest[]     ⚠️ not implemented yet (#73)
+```
+
 Every response is parsed with the zod mirror from `@curator/schema` before it reaches a component.
 Unvalidated JSON never enters the UI.
+
+`GET /venues` is the one route the app asks for that does not exist. Lane D's capability manifest is
+live in Python (#61) but nothing serves it over HTTP, so the venue strip degrades to the bare venue
+keys `/genesis/sources` returns and says capability detail is unavailable. **It does not guess** —
+writing "aqua is virtual" into the UI would be right today and is exactly the habit that hid the
+fully-built Aave venue for an entire wave.
 
 **Lane A — the chain.** Reads addresses from `deployments/base-fork.json` (never hardcoded) and
 calls the **standard ERC-4626 / ERC-20 surface** declared in
@@ -142,20 +170,43 @@ that surfaces as an amber badge plus a legible zod error, not a white screen.
 src/
   app/                     routes + providers + global styles
   components/
-    decision/              THE CENTREPIECE — DecisionCard is the three-stage causal chain
-    vault/                 header, stats, holdings, deposit/withdraw, dashboard shell
+    decision/              THE CENTREPIECE — DecisionCard is the three-stage causal chain,
+                           plus venue intents (SwapVM params), yield comparison, banded warnings
+    vault/                 header, stats, holdings donut, Aqua positions, deposit/withdraw, shell
     mandate/               mandate viewer + the data-source grant list
-    genesis/               chat panel, live mandate draft, deploy panel
-    ui/                    Badge, Card, Button, Stat, AddressChip, ModeBadge
+    genesis/               chat panel, live mandate draft, deploy panel, preset cards, universe strip
+    venues/                venue capability strip (Lane D's manifest)
+    performance/           track-record charts — hand-rolled SVG, no charting dependency
+    portfolio/             cross-vault strip for a connected wallet
+    layout/                header + the persistent disclaimer
+    ui/                    Badge, Card, Button, Stat, AddressChip, ModeBadge, TokenMark
     wallet/                connect button
   lib/
     api/                   frozen routes, fetch+fallback client, fixtures, query hooks, mode context
     chain/                 wagmi config, React account bindings, ABIs, deployments, explorer
     format/                units (bigint-safe), facts, time
-    mandate/               client-side mandate cache (workaround for request #6)
+    mandate/               presets, suggested replies, client-side mandate cache
 scripts/
-  audit-dependency-age.mjs supply-chain policy check
+  audit-dependency-age.mjs   supply-chain policy check, over the whole lockfile
+  check-forbidden-imports.mjs imports this app must never contain (runs as prebuild)
+  verify-vault-write-path.mjs approve → deposit → redeem against a running fork
 ```
+
+### Two components worth knowing about before you change them
+
+**`vault/HoldingsDonut.tsx`** — zero balances are filtered (a `0.00` row is a permitted asset the
+agent chose not to hold, which belongs in the mandate) and slices are sized by `value_in_asset`, the
+only field that makes two tokens comparable. A holding the API could not value is listed *below* the
+chart rather than given an invented share. `committed_to_venue` survives the redesign deliberately —
+see invariant 5.
+
+**`vault/AquaPositions.tsx`** — an open Aqua strategy is the least self-explanatory thing on the
+page: the vault is quoting as a maker, yet `totalAssets()` has not moved and the tokens are still in
+holdings. Unexplained, that reads as double-counting. The curve and maker fee come from the
+*decision* that shipped it, not from vault state — they were a choice, not chain state. **Ships whose
+intent omits `program` render "parameters not recorded" rather than defaulting to `xyc`**: the schema
+defaults `shape` *inside* a program object, which is not the same as an absent program meaning `xyc`,
+and a real model-authored ship (`act_000036`) omitted it.
 
 ### The decision card
 
