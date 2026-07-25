@@ -129,9 +129,45 @@ avoid, and it holds a key.
 | `aave` | `yield`, `tvl`, `utilization` | Aave V3 on Base, via **Aave's own** subgraph schema | ✅ verified live (3.41% USDC APY on $174.9M, 0.84 utilization) |
 | `chainlink` | `price` | Chainlink feeds, read **on-chain** over JSON-RPC | ✅ verified live (WETH $1,858.98, USDC $0.9999). **Needs no credential** |
 | `token_api` | `price` | The Graph Token API — prices derived from executed DEX swaps | ✅ verified live (WETH $1,857.95). Needs its own Graph Market JWT, *not* `GRAPH_API_KEY` |
+| `defillama` | `yield`, `tvl` | Every Base pool DefiLlama tracks, in one unauthenticated call | ✅ verified live — 47 facts across ~20 protocols. **No credential** |
+| `feargreed` | `sentiment` | Crypto Fear & Greed index, normalised to 0–1 | ✅ verified live (0.27 — "Fear"). **No credential** |
+| `gas` | `gas` | Base gas price and the USD cost of one rebalance, read on-chain | ✅ verified live ($0.74 per rebalance at 1 gwei). **No credential** |
 
 All subgraph IDs live in [`curator_data/sources/protocols.py`](curator_data/sources/protocols.py),
 including a list of candidates **rejected after live testing**, so nobody re-adds them.
+
+### Four sources need no credential, and that is the point
+
+Before the last three, every registered source needed a Graph key: a fresh clone produced an empty
+snapshot and four error lines. `defillama`, `feargreed`, `gas` and `chainlink` need none, so cloning
+the repo and running `curator-data snapshot` returns real data in one command.
+
+### DefiLlama is breadth. The Graph is depth. Do not confuse them
+
+The subgraph sources stay the sources of record: queried per-protocol against indexed chain state,
+verifiable, and what the Graph integration actually *is*. DefiLlama is a third-party aggregator
+reporting numbers it computed from someone else's data, so its facts carry a lower `Fact.confidence`
+and the curator prompt prefers a subgraph where the two disagree.
+
+What it buys is a real gap closed. Before it, the agent compared Aave against Moonwell and we called
+that a multi-protocol comparison. Two protocols is not a market.
+
+**Yields are `apyBase`, never the headline.** The first live run put `aerodrome-slipstream USDC-CBBTC
+at 91.14%` above `aave-v3 USDC at 3.50%`, and an agent told to pursue yield would read that as Aave
+being 26× worse. It is not: 91% was `apyBase + apyReward`, and the reward leg is a token emission —
+a bet on the emitted token's price, with a different risk profile and an expiry date, not interest.
+The base figure was 14.66%. Where DefiLlama publishes no split, the headline is used and a
+`MarketSnapshot.notes` entry says so.
+
+### `sentiment` and `gas` are new `Fact.kind`s, not overloaded old ones
+
+`_KIND_LABELS` in the curator prompt exists because a 3B model once read `f6 | liquidity | $12.4M`
+as *"the highest headline APY of 10.43%"*. A utilization of 0.78 and a sentiment of 0.78 mean
+entirely different things, so they get different kinds and render differently. Extending the enum is
+what the schema comment asks for; overloading a kind is how that misread happens again.
+
+`gas` closes a blind spot with real consequences: the agent could see a 3 bps yield edge and had no
+way to know that capturing it costs more than it earns.
 
 ### Two independent price sources, on purpose
 

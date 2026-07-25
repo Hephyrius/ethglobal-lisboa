@@ -58,8 +58,8 @@
         },
         "kind": {
           "type": "string",
-          "enum": ["yield", "price", "tvl", "liquidity", "volatility", "utilization", "volume"],
-          "description": "Extend this list rather than overloading an existing kind."
+          "enum": ["yield", "price", "tvl", "liquidity", "volatility", "utilization", "volume", "sentiment", "gas"],
+          "description": "Extend this list rather than overloading an existing kind. 'sentiment' is a normalised 0-1 market-mood index (0 = extreme fear); 'gas' is the cost of transacting, which is what makes a small yield edge not worth chasing."
         },
         "subject": {
           "type": "object",

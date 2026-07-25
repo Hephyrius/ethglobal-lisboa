@@ -61,7 +61,18 @@ class Mandate(Frozen):
 # ── MarketSnapshot ────────────────────────────────────────────────────────
 
 FactKind = Literal[
-    "yield", "price", "tvl", "liquidity", "volatility", "utilization", "volume"
+    "yield",
+    "price",
+    "tvl",
+    "liquidity",
+    "volatility",
+    "utilization",
+    "volume",
+    #: Normalised 0-1 market-mood index; 0 is extreme fear, 1 extreme greed.
+    "sentiment",
+    #: What it costs to transact. A 3 bps edge is not an edge if the
+    #: rebalance that captures it costs more than it earns.
+    "gas",
 ]
 FactUnit = Literal["apy_fraction", "usd", "ratio", "bps", "token_amount"]
 

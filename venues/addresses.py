@@ -50,6 +50,20 @@ PERMIT2: Final[str] = "0x000000000022D473030F116dDEE9F6B43aC78BA3"
 USDC: Final[str] = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 WETH: Final[str] = "0x4200000000000000000000000000000000000006"
 
+# ── Wave 1 universe expansion ─────────────────────────────────────────────
+#
+# Verified live against the running Base fork: `symbol()` and `decimals()` read
+# off each contract, and each has a Chainlink USD feed confirmed by its own
+# `description()`. An asset the vault cannot price is an asset it cannot hold,
+# so a token with no verified feed does not go in this file.
+#
+# cbBTC is **8 decimals**, not 18. That is the trap in this group: an amount
+# computed as if it were 18-decimal is off by 10^10, and the vault would be
+# asking to swap a hundred million bitcoin.
+CBBTC: Final[str] = "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf"
+DAI: Final[str] = "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb"
+AERO: Final[str] = "0x940181a94A35A4569E4529A3CDfB74e38FD98631"
+
 #: Symbol → address, for resolving the symbols a mandate and an LLM speak in.
 #: VenueIntent carries symbols ("USDC"), not addresses, because that is what a
 #: model reliably produces; resolution to an address happens here and nowhere
@@ -59,11 +73,17 @@ TOKENS: Final[dict[str, str]] = {
     "USDC": USDC,
     "WETH": WETH,
     "ETH": WETH,  # the vault holds wrapped ETH; native ETH is never a position
+    "CBBTC": CBBTC,
+    "DAI": DAI,
+    "AERO": AERO,
 }
 
 DECIMALS: Final[dict[str, int]] = {
     USDC.lower(): 6,
     WETH.lower(): 18,
+    CBBTC.lower(): 8,
+    DAI.lower(): 18,
+    AERO.lower(): 18,
 }
 
 
@@ -109,6 +129,12 @@ FALLBACK_ALLOWLIST: Final[frozenset[str]] = frozenset(
         PERMIT2,
         WETH,
         USDC,
+        # Tokens are `execute()` targets because an approval step targets the
+        # token, not the venue (cross-lane request #8). Every asset in TOKENS
+        # therefore has to be here, or its first swap reverts on step 1.
+        CBBTC,
+        DAI,
+        AERO,
     )
 )
 

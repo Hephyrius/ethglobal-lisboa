@@ -58,6 +58,10 @@ export const FactKind = z.enum([
   'volatility',
   'utilization',
   'volume',
+  /** Normalised 0-1 market-mood index; 0 is extreme fear, 1 extreme greed. */
+  'sentiment',
+  /** What it costs to transact — why a 3 bps edge may not be worth chasing. */
+  'gas',
 ])
 
 export const FactUnit = z.enum(['apy_fraction', 'usd', 'ratio', 'bps', 'token_amount'])
