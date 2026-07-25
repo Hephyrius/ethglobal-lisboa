@@ -6,13 +6,18 @@ says so; a limitation a judge finds for themselves is worth less than one we wro
 Scope: `CuratedVault` and `VaultFactory`. Reproduce everything with:
 
 ```bash
-cd contracts && forge test                      # 101 tests, no network
+cd contracts && forge test                      # 142 tests, no network
 FOUNDRY_PROFILE=deep forge test --match-path "test/invariant/*"
 ```
 
-**Deep run, as of this document:** all nine invariants green at 512 runs × 128 depth — **65,536 calls
-each, 589,824 in total, zero failures**, in 189s on a CPU-only i5-8265U. The default profile runs the
-same properties at 2,048 calls each so the normal suite stays under five seconds.
+**Deep run, measured for this document:** all **twelve** invariants green at 512 runs × 128 depth —
+**65,536 calls each, 786,432 in total, zero failures**, in 279s on a CPU-only i5-8265U. The default
+profile runs the same properties at 2,048 calls each so the normal suite stays under twelve seconds.
+
+The campaign pauses and unpauses the vault at moments of its own choosing and keeps attempting
+purchases throughout, so §12's rule is exercised across interleavings rather than in one scripted
+sequence. That the paused state is actually *reached* — the failure a ghost counter cannot see in
+itself — is pinned deterministically by `test_windDownRefusesPurchasesAndPermitsSalesUnderTheHandler`.
 
 ---
 
@@ -343,16 +348,109 @@ harness to behave; they have a door of their own.
 
 ---
 
+## 11 · Deployer attribution is a claim, not a signature — **disclosed, and load-bearing**
+
+`VaultFactory` records who a vault was created for: `CreateParams.deployer`, the `deployer` topic on
+`VaultCreated`, and the `vaultsOf` / `deployerOf` views. The dashboard needs it because a vault
+someone deployed and never deposited into is invisible to any ownership check based on `balanceOf` —
+which is exactly the one-click archetype case.
+
+**It is asserted by whoever submits the transaction. There is no signature behind it.** At genesis
+the *agent* submits `createVault`, so what the chain records is the agent's assertion about who asked.
+Anyone may call `createVault` with any `deployer` and attribute a vault to a stranger.
+
+That is tolerable for precisely one reason: **it confers nothing.** No code path reads it, the vault
+never learns it, and it is stored on the factory rather than on the vault specifically so it cannot
+quietly become a permission later. It is safe for "show me the vaults I deployed" and unsafe for
+anything that decides who may do what.
+
+| Test | What it proves |
+|---|---|
+| `test_deployerIsAClaimAndGrantsNoPowers` | Bob attributes a vault to Alice unilaterally; Alice then cannot `execute`, cannot `pause`, cannot `setTargetAllowed`, and holds no shares. |
+| `test_deployerIsIndexedOnTheEvent` | The topic carries the deployer, with `msg.sender` deliberately a different address so the two cannot collapse. |
+| `test_deployerDefaultsToTheSubmitter` | `address(0)` records `msg.sender`, so the mapping is never null. |
+| `test_deployerIsRecordedAndQueryable` | `vaultsOf` agrees with the event, and finds a vault whose deployer holds zero shares. |
+
+---
+
+## 12 · The guardian's pause — **what it can and cannot do**
+
+The header used to say there was no pause. That was already not quite true: `setTargetAllowed` is
+`onlyRole(GUARDIAN_ROLE)`, so **a guardian who flipped every target off had already stopped all
+trading** — one transaction at a time, with no event a dashboard could explain and no way for the
+agent to unwind afterwards. `pause()` makes that atomic, legible, and *narrower*.
+
+**The boundary, exactly:**
+
+| Paused | Never pausable |
+|---|---|
+| Buying anything (`execute`/`executeBatch` are checked, not blocked) | `withdraw`, `redeem`, `redeemInKind` |
+| — | `deposit`, `mint` |
+
+**A pause that blocked withdrawals would be a rug vector, not a safety feature** — a guardian able to
+freeze depositor exits holds strictly more power than the agent it exists to contain. That boundary is
+a test, not a promise.
+
+**The wind-down rule.** While paused the agent may still trade, but the contract reads the balances
+afterwards: the base-asset balance must not have fallen, and no registered non-base balance may have
+risen. Measured once at the *end* of the call, so a multi-hop route holding an intermediate token is
+fine. Two things follow, and both matter more than the headline:
+
+- **It constrains direction, not price.** A batch that dumps WETH for one wei of USDC satisfies it.
+  What bounds execution quality is `minOut` in the calldata and the harness's slippage gate, exactly
+  as when unpaused. Anything stronger would be an overclaim.
+- **It is compositional.** Each paused call individually leaves cash non-decreasing and every holding
+  non-increasing, so *any sequence* of them does. The book can only converge on cash.
+
+**Why "must not fall" rather than the stricter "must strictly increase".** Aqua's `dock()` moves no
+tokens at all under Pattern 1 — it releases an encumbrance against balances that never left the vault
+— and it is the **first step of every Aqua unwind**. A strict-increase rule rejects it, and would
+have made the pause unable to start the unwind it exists to enable.
+
+**What the guardian still cannot do.** Name a trade, choose a route or a size, or pick the moment a
+position is sold. It flips a flag; the *agent* trades, under the same allowlist and the same
+off-chain plan. A guardian able to force a liquidation at a moment of its choosing could trade ahead
+of it — a worse power than the one the pause contains.
+
+**Residual, stated rather than hidden.** `approveVenue` is deliberately *not* subject to the
+direction rule, because selling through a router requires approving it first and a wind-down that
+cannot approve cannot unwind. So a compromised agent in wind-down can still grant an allowance to an
+allowlisted venue and have it pulled in a later transaction, which the direction rule never sees.
+**That exposure is identical paused or not** — it is bounded by the allowlist, which is §3 — but it
+is the reason the claim here is "can only convert the book to cash" rather than "can do nothing".
+
+| Test | What it proves |
+|---|---|
+| `test_withdrawalSucceedsWhilePaused` | **The boundary.** A paused vault still pays a withdrawal. |
+| `test_redeemSucceedsWhilePaused`, `test_redeemInKindWorksWhilePaused` | Both other exits, likewise. |
+| `test_depositSucceedsWhilePaused` | Deposits are allowed on purpose; pinned so changing it is deliberate. |
+| `test_onlyGuardianMayPause`, `test_onlyGuardianMayUnpause` | Agent, platform owner and a stranger are all refused. |
+| `test_guardianStillCannotNameATrade` | The guardian calling `execute` on a paused vault is refused for want of `AGENT_ROLE`. |
+| `test_windDownRefusesToIncreaseAHolding` | A gift that raises WETH and spends no cash still reverts — direction alone fails it. |
+| `test_windDownRefusesToSpendTheBaseAsset` | The purchase leg. |
+| `test_windDownPermitsASale` | The unwind path actually works. |
+| `test_windDownMeasuresTheBatchNotEachStep` | The *same two calls* are rejected individually and accepted as one batch. |
+| `test_windDownPermitsAValueNeutralCall` | The `dock()` shape — the reason the rule is not "strictly increase". |
+| `test_windDownConstrainsDirectionNotPrice` | 6,000 USDC of WETH sold for one wei, and the contract permits it. |
+| `test_windDownRuleLiftsWhenUnpaused` | The rule binds only while paused. |
+| `test_pausedVaultPricesExactlyAsBefore` | `totalAssets`, share price and the quoted claim are untouched by a pause. |
+| `test_bothTransitionsEmitAndAreReadableOnChain` | `paused()` backs `VaultState.paused`; both transitions emit. |
+| `invariant_windDownOnlyMovesTowardCash` | Across every interleaving the fuzzer reaches — pausing and unpausing at moments of its own choosing while continuing to attempt purchases — no paused call ever moved the book away from cash. |
+
+---
+
 ## What is deliberately not defended
 
 | | |
 |---|---|
-| **A malicious or compromised agent** | The agent is trusted with the assets by design. The allowlist limits blast radius; it does not constrain intent. A compromised key cannot be revoked. |
+| **A malicious or compromised agent** | The agent is trusted with the assets by design. The allowlist limits blast radius; it does not constrain intent. A compromised key cannot be revoked — but §12 means a guardian can reduce it to *selling only*, at whatever price it likes, while every depositor's exit stays open. |
 | **Mandate violations** | The mandate is soft and off-chain. Nothing on-chain enforces allocation limits — that is the harness's job, in six validation layers. |
 | **Oracle compromise** | The vault trusts Chainlink. No second source, no divergence check. |
 | **Sandwiching around a rebalance** | §7. Disclosed, not fixed. |
 | **Tokens the vault cannot price** | A token held but absent from the valuation set is invisible to `totalAssets()`. The mandate must confine the agent to tokens with a registered feed. `invariant_totalAssetsEqualsValuedHoldings` pins the accounting; nothing pins the mandate. |
-| **Withdrawal liquidity** | §10. The vault can be solvent and still unable to pay a redemption. Held off by the mandate's `min_cash_pct`, not by the contract. |
+| **Withdrawal liquidity on `redeem`** | §10. The vault can be solvent and still unable to pay a *base-asset* redemption; held off by the mandate's `min_cash_pct`, not by the contract. What is no longer undefended is being **trapped** — `redeemInKind` always pays. |
+| **Execution price during a wind-down** | §12. The paused-mode rule reads balances, so it forbids buying and permits selling at any price. Quality is `minOut`'s job, paused or not. |
+| **Attribution of a vault to its deployer** | §11. `deployer` is asserted by the transaction's submitter, not signed. Safe for display, never for authorization. |
 | **A dishonest registered price feed** | §5.1. The vault cannot distinguish a derived feed from a native one, so a feed that misreports its own age silently disables staleness checking for that token. A requirement on the registrar, demonstrated by test, not enforceable here. |
 
 ---
