@@ -222,13 +222,21 @@ here imports `agent/`, `venues/`, `web/` or `contracts/`.
 ## The MCP server
 
 [`curator_mcp/`](curator_mcp/) is a **separate distribution** — its own `pyproject.toml`,
-`README.md` and [`SKILL.md`](curator_mcp/SKILL.md), installable and runnable with no part of this
-repo:
+`README.md` and [`SKILL.md`](curator_mcp/SKILL.md). It installs standalone from a clone:
+
+```bash
+uv pip install ./data/curator_mcp     # siblings resolve from the repo; verified in a clean 3.10 venv
+```
 
 ```jsonc
-{ "mcpServers": { "curator": { "command": "uvx", "args": ["curator-mcp"],
-                               "env": { "GRAPH_API_KEY": "..." } } } }
+{ "mcpServers": { "curator": {
+    "command": "uv", "args": ["run", "--directory", "/abs/path/to/repo", "curator-mcp"],
+    "env": { "GRAPH_API_KEY": "..." } } } }
 ```
+
+Publishing to PyPI turns that into `uvx curator-mcp` with no clone at all. The distributions are
+built and verified to install from wheels alone; only the upload is outstanding — see
+[PUBLISHING.md](PUBLISHING.md).
 
 Tools: `compare_protocols`, `get_market_yields`, `list_markets`, `get_token_price`.
 

@@ -1,7 +1,21 @@
 [project]
 name = "curator-data"
-version = "0.1.0"
+# 0.2.0: gained the `aave` and `chainlink` sources plus the `chain` subpackage.
+# Bumping is not ceremony here — uv caches built wheels by name+version, so
+# reusing 0.1.0 serves a stale wheel missing the new modules and fails with a
+# confusing ModuleNotFoundError.
+version = "0.2.0"
 description = "Pluggable market-data registry: mandate-named sources merged into a source-agnostic MarketSnapshot"
+readme = "README.md"
+license = { text = "MIT" }
+keywords = ["defi", "thegraph", "subgraph", "chainlink", "market-data", "agent-tools"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3.10",
+  "Topic :: Software Development :: Libraries",
+]
 # 3.10 floor matches curator-schema, and is also the MCP SDK's minimum.
 requires-python = ">=3.10"
 dependencies = [

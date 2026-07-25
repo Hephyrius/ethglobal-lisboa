@@ -14,14 +14,24 @@ one, which is the only relationship it has to the vault curator that first used 
 
 ## Install
 
-```bash
-uvx curator-mcp                  # run without installing
-# or
-pip install curator-mcp
-```
-
 Requires Python ≥ 3.10 and a free Graph API key from
 [thegraph.com/studio](https://thegraph.com/studio) → API Keys.
+
+**From a clone** — works today:
+
+```bash
+git clone <this-repo> && cd <this-repo>
+uv pip install ./data/curator_mcp
+```
+
+The two sibling packages (`curator-data`, `curator-schema`) resolve from the repo automatically.
+
+**From PyPI** — once published (see [PUBLISHING.md](../PUBLISHING.md); the packages are built and
+verified, the upload needs a token):
+
+```bash
+uvx curator-mcp                  # run without installing
+```
 
 ## Configure your MCP client
 
@@ -29,16 +39,18 @@ Requires Python ≥ 3.10 and a free Graph API key from
 {
   "mcpServers": {
     "curator": {
-      "command": "uvx",
-      "args": ["curator-mcp"],
+      "command": "uv",
+      "args": ["run", "--directory", "/abs/path/to/repo", "curator-mcp"],
       "env": { "GRAPH_API_KEY": "your-key-here" }
     }
   }
 }
 ```
 
-That is the whole setup. Claude Desktop, Claude Code, Cursor, Zed and anything else speaking MCP
-over stdio will pick the tools up.
+Once published, that becomes simply `"command": "uvx", "args": ["curator-mcp"]`.
+
+Either way, Claude Desktop, Claude Code, Cursor, Zed and anything else speaking MCP over stdio will
+pick the tools up.
 
 ---
 
