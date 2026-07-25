@@ -35,11 +35,20 @@ every lending market. Adding a protocol is one line of configuration in
 [`sources/protocols.py`](curator_data/sources/protocols.py) — no adapter, no schema change. That
 claim is asserted by a test (`test_one_query_shape_serves_every_lending_protocol`), not just stated.
 
-**Where it stops, honestly:** the published *Aave V3 Base* subgraph is **not** Messari-standardized —
-it exposes `reserves`, not `markets`. We searched all 381 active Base subgraphs via The Graph's own
-network subgraph and found no standardized Aave on Base, so Aave got its own adapter and its own
-registry key. It is a separate key rather than a branch inside the Messari adapter because
-`Fact.source` is **provenance**, and labelling Aave's own subgraph as "messari" would be false.
+**Where it stops, honestly.** Two protocols do not fit the standardized story, and saying so is
+better than having a judge find it:
+
+- The published *Aave V3 Base* subgraph is **not** Messari-standardized — it exposes `reserves`, not
+  `markets`. We searched every active Base subgraph via The Graph's own network subgraph and found
+  no standardized Aave on Base, so Aave has its own adapter and its own registry key. Separate key
+  rather than a branch inside the Messari adapter because `Fact.source` is **provenance**, and
+  labelling Aave's own subgraph as "messari" would be false.
+- **Morpho is not read through The Graph at all.** It is Base's largest lending market (~$1.4bn),
+  and there is **exactly one** Morpho Base subgraph on the network — it indexes a dead deployment
+  whose largest market holds **$448**, with names like `MINITIMEBOTALPHAXXXXXXXXXXXXXX`. Verified
+  twice, a wave apart. It uses Morpho's own free API instead. The Graph remains the source of record
+  for Moonwell and the Token API; claiming coverage it does not have on this chain would be worth
+  less than saying this plainly.
 
 ---
 
@@ -64,19 +73,33 @@ consumer.
 
 ## Two or more Graph products, composed (Track 3)
 
-Four sources merge into one **source-agnostic** `MarketSnapshot`:
+**Ten sources** merge into one **source-agnostic** `MarketSnapshot`:
 
 ```
-Messari standardized subgraphs ─┐
-Aave V3 subgraph               ─┼─► MarketSnapshot (flat facts, each carrying its own provenance)
+Messari standardized subgraphs ─┐   The Graph
+Aave V3 subgraph               ─┤
 Graph Token API                ─┤
-Chainlink (on-chain, non-Graph)─┘
+x402 pay-per-query             ─┘
+Chainlink (on-chain, JSON-RPC) ─┐   non-Graph, and deliberately so
+Morpho Blue API                ─┤
+DefiLlama · Fear&Greed · gas   ─┼─► MarketSnapshot (flat facts, each with its own provenance)
+Polymarket (forward-looking)   ─┘
 ```
+
+The non-Graph sources are not filler. They are the evidence that the composition is **real** rather
+than a list: a contract read over JSON-RPC and a GraphQL subgraph land in the same snapshot without
+either knowing the other exists, which is what "source-agnostic" has to mean to be worth claiming.
 
 Sources never see each other and never agree on coverage; each contributes a *partial* list of facts
-and the registry merges them. That is what makes the composition real rather than a list — and the
-fourth source is deliberately **not** an HTTP API at all: it reads a contract over JSON-RPC, showing
-the port abstracts *kinds of provider* rather than endpoints.
+and the registry merges them. Adding one is a single file plus a single registration line — a claim
+this repo has now exercised four times on real providers rather than on test doubles.
+
+### The forward-looking source
+
+Every Graph product here is **backward-looking** — an APY is what a market paid, TVL is what is
+there now. `prediction` reads Polymarket's public API for implied probabilities, which is what
+people *expect*, priced by people with money on it. Live: **75.2% no change in Fed rates, 24.1% a
+25bp hike**. For a book made of lending yield, that is material information no APY series contains.
 
 A live snapshot, exactly as an agent tick runs it (6.3s):
 

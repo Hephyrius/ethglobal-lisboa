@@ -1379,6 +1379,63 @@ so what is installed is what was audited here.
 
 ---
 
+## 2026-07-25 — Lane C: a release that broke the public artifact, and why
+
+Answering "anything unaddressed" found four gaps. Two are ordinary; two are worth recording because
+they are about *release discipline*, which this repo had not been tested on before.
+
+**The staking yield the feedback asked for was not actually there.** wstETH appeared in snapshots
+with a 0.08% yield — but that is the rate for *lending* wstETH, not the ~2% the token accrues simply
+for being held. DefiLlama carries it, and my source was filtering it out because it filters to Base
+and the canonical Lido pool is on Ethereum. **A staking rate attaches to the token, not the venue**:
+wstETH held on Base earns exactly the Lido rate, so this is the one yield here that is deliberately
+not chain-scoped. It also needed a symbol alias — a mandate names `wstETH`, Lido publishes `STETH`,
+and searching for a pool called WSTETH finds nothing and quietly concludes wstETH is a bad asset.
+The note says explicitly that the two rates **stack**, because an agent reading them as alternatives
+draws exactly the wrong conclusion.
+
+**`verify-live` was checking four of ten sources.** Six added across two waves never reached the
+gate, so it reported "6/7 green" while ignoring most of the data layer — a gate that only knows
+about what existed when it was written. Now generic over the registry. Worth noting the first
+attempt hardcoded the covered set in `verify.py`, and `test_source_agnostic` failed the build for
+it, correctly: a second list of source keys is a list that goes stale.
+
+### The release lesson: a version number is a promise about bytes
+
+Publishing 0.3.0 broke `uvx curator-mcp` for everyone, and the cause is worth stating plainly
+because it is not obvious and it will recur.
+
+`curator-schema` is still version `0.1.0`. Wave 1 added `SourceNote` and `MarketSnapshot.notes` to
+it without bumping that number. PyPI therefore serves **pre-Wave-1 bytes under `0.1.0`**, while the
+repo has post-Wave-1 bytes under the same `0.1.0`. `curator-data` imports `SourceNote`, so the
+published stack cannot import.
+
+**My release check could not see it.** The dry run installs from `--find-links dist`, which resolves
+every dependency from the freshly built local wheels — including `curator-schema`, whose local
+`0.1.0` *does* have the new content. The check was verifying the code against itself. `publish.sh`
+now also resolves against the real index and warns when the published stack stops importing.
+
+*Alternative rejected:* pinning `curator-schema>=0.2.0` in `curator-data`. It converts an import-time
+crash into an install-time resolution failure, which is marginally better, but it does not fix
+anything and it makes `curator-data` uninstallable until the schema is published anyway.
+
+Two smaller findings from the same release:
+
+- **`datetime.UTC` is 3.11+**, and `sentiment.py` used it while the package promises 3.10 (the MCP
+  SDK's floor). It imported fine on this machine and failed outright in a clean 3.10 venv. Ruff
+  cannot catch this — `target-version` governs which *rewrites* it suggests, not which runtime APIs
+  exist — so there is now an explicit test banning 3.11+ APIs.
+- **A release script has to be idempotent.** The first `--publish` run aborted on `curator-schema`
+  because that version already existed, and never reached the two packages that had changed. Skipping
+  an already-published version is the normal case, not an edge case.
+
+**The fix is one line in another lane's file** — bump `packages/schema/python/pyproject.toml` to
+`0.2.0` and republish — so it is filed as request #75 rather than taken. §2 of the unblock-by-default
+plan delegates *additive fixture* changes after 30 minutes; a version bump is a release decision for
+the package's owner, and Lane F is active. **Last known-good for a judge is 0.2.0.**
+
+---
+
 ## 2026-07-25 — Lane C, Wave 2: diagnoses, Morpho, LSTs, and forward-looking odds
 
 Three deliverables from §6. Each one was reshaped by live data rather than by the plan, which is
