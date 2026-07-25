@@ -37,7 +37,7 @@ each. Claim yours before you write code; each lane's continuation prompt is in t
 | **C** | `data/` | 🟡 unclaimed — diagnostic source notes · prediction-market odds · Morpho + LST breadth | | | |
 | **D** | `venues/` | 🟡 unclaimed — venue capability manifest (do first, unblocks E) · prediction-market venue (90-min gate) · Morpho · verify swap `minOut` | | | |
 | **E** | `web/` | 🟡 unclaimed — responsive · token logos · holdings donut · genesis presets + example buttons · disclaimer · docs drawer · `'wagmi'` lint rule | | | |
-| **F** | `packages/schema/`, `scripts/`, `tests/e2e/`, `docs/`, root, **the running stack** | 🟡 unclaimed — **NEW LANE.** Schema delta first (30 min, four lanes blocked on it) · model bake-off · secrets audit · request-queue sweep · rehearsal. **Builds no product feature.** | | | |
+| **F** | `packages/schema/`, `scripts/`, `tests/e2e/`, `docs/`, root, **the running stack** | 🔵 **in progress** — **NEW LANE.** Schema delta first (30 min, four lanes blocked on it) · model bake-off · secrets audit · request-queue sweep · rehearsal. **Builds no product feature.** Plan: [plans/2026-07-25-lane-f-integration.md](../plans/2026-07-25-lane-f-integration.md). Schema requests go in the table below — **30-minute turnaround, ping by adding a row.** | Lane F instance (Claude Code) | 2026-07-25 T+0:00 | |
 
 **Two Wave 2 rules that are new:**
 
