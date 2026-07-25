@@ -294,7 +294,48 @@ def test_an_overshoot_within_the_limits_is_still_caught():
         }
     )
     message = " ".join(str(p) for p in check_projected_outcome(decision, relaxed, SEVENTY_NINE))
-    assert "further away than it started" in message
+    assert "no closer than it started" in message
+
+
+def test_a_mirror_image_overshoot_is_caught():
+    """The failure a "did it get worse?" rule cannot see.
+
+    Observed live: a book at 0% USDC against a 50% target swapped its **entire**
+    WETH position, projecting to 100% USDC. Fifty points under became fifty
+    points over — exactly as far away, so a rule that only rejected *worse*
+    passed it. It is the same overshoot wearing a symmetric mask, so the rule
+    demands improvement rather than the absence of harm.
+    """
+    from agent.mandate.constraints import check_projected_outcome
+
+    all_weth = _vault(0, 2_499_327844)
+    decision = _decision("WETH", "USDC", {"USDC": 0.5, "WETH": 0.5}).model_copy(
+        update={
+            "venue_intents": [
+                SwapIntent(token_in="WETH", token_out="USDC", pct_of_holdings=1.0)
+            ]
+        }
+    )
+
+    message = " ".join(str(p) for p in check_projected_outcome(decision, _mandate_5030(), all_weth))
+
+    assert "0.0% to 100.0%" in message
+    assert "50.0% away before, 50.0% after" in message
+
+
+def test_the_correctly_sized_half_is_accepted():
+    """Selling half the WETH from an all-WETH book lands exactly on 50/50."""
+    from agent.mandate.constraints import check_projected_outcome
+
+    all_weth = _vault(0, 2_499_327844)
+    decision = _decision("WETH", "USDC", {"USDC": 0.5, "WETH": 0.5}).model_copy(
+        update={
+            "venue_intents": [
+                SwapIntent(token_in="WETH", token_out="USDC", pct_of_holdings=0.5)
+            ]
+        }
+    )
+    assert check_projected_outcome(decision, _mandate_5030(), all_weth) == []
 
 
 def test_a_book_already_on_target_may_still_trade():

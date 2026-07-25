@@ -432,13 +432,19 @@ def check_projected_outcome(
         before, after = abs(current[asset] - target), abs(projected[asset] - target)
         if before <= _DIRECTION_TOLERANCE:
             continue
-        if after > before + _DIRECTION_TOLERANCE:
+        # The trade must *improve* the gap, not merely avoid worsening it.
+        # Observed: a book at 0% USDC against a 50% target swapped its entire
+        # WETH position, projecting to 100% — 50pp under became 50pp over, an
+        # exact mirror image. A rule that only rejected "worse" let that through,
+        # which is the same overshoot failure wearing a symmetric mask.
+        if after >= before - _DIRECTION_TOLERANCE:
             problems.append(
                 Violation(
                     "venue_intents",
                     f"this trade moves {asset} from {current[asset]:.1%} to {projected[asset]:.1%} "
-                    f"against a {target:.1%} target, ending further away than it started. "
-                    "Size the swap to land on the target",
+                    f"against a {target:.1%} target, which is no closer than it started "
+                    f"({before:.1%} away before, {after:.1%} after). Size the swap to land "
+                    "on the target",
                 )
             )
 
