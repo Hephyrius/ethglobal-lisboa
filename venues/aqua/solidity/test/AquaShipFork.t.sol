@@ -55,7 +55,7 @@ contract AquaShipForkTest is Test {
             vm.skip(true);
         }
 
-        builder = new SwapVMProgramBuilder();
+        builder = new SwapVMProgramBuilder(address(AQUA));
         vault = makeAddr("curated-vault");
 
         deal(address(WETH), vault, WETH_AMOUNT);

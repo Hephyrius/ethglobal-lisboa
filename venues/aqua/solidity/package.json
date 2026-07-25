@@ -8,12 +8,20 @@
     "is how 1inch ship swap-vm and aqua (their remappings.txt points at",
     "node_modules/). It also avoids writing to the repo-root .gitmodules, which",
     "Lane A's Foundry project would be writing to at the same time.",
-    "Pinned to the same versions swap-vm itself declares."
+    "",
+    "swap-vm is PINNED TO v1.0.1 because that is what is actually deployed on",
+    "Base at 0x8fDD04Dbf6111437B44bbca99C28882434e0958f. Tracking the default",
+    "branch was silently wrong: main renumbered the entire instruction set from",
+    "positional array indices into a banked hex enum (XYCSwap 18 -> 0x50), so a",
+    "program compiled against main encodes instructions the deployed contract",
+    "cannot execute. Verified by selector: the deployed contract exposes",
+    "swap(Order,address,address,uint256,bytes) (v1.0.x) and NOT main's",
+    "swap(Order,uint256,bytes). Do not unpin without re-checking the deployment."
   ],
   "dependencies": {
     "@1inch/aqua": "github:1inch/aqua#v1.0.0",
     "@1inch/solidity-utils": "6.9.10",
-    "@1inch/swap-vm": "github:1inch/swap-vm",
+    "@1inch/swap-vm": "github:1inch/swap-vm#v1.0.1",
     "@openzeppelin/contracts": "5.4.0",
     "forge-std": "github:foundry-rs/forge-std#v1.11.0"
   }

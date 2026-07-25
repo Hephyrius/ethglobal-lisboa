@@ -106,7 +106,7 @@ contract VaultRelayForkTest is Test {
             vm.skip(true);
         }
 
-        builder = new SwapVMProgramBuilder();
+        builder = new SwapVMProgramBuilder(address(AQUA));
 
         // Exactly the allowlist Lane A publishes in deployments/base-fork.json.
         address[] memory targets = new address[](3);

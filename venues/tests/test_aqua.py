@@ -250,10 +250,18 @@ class TestAgainstAnvil:
         from venues.aqua.program import ProgramBuilder
 
         program = await ProgramBuilder(anvil_rpc).build_program(fee_bps=30, salt=42)
-        # opcode ‖ argLen ‖ args, three times over.
-        assert program.startswith("0x70" "04"), "expected FlatFeeAmountIn with a uint32 arg"
-        assert program[14:18] == "5000", "expected XYCSwap with no args"
-        assert program[18:22] == "0220", "expected Salt with a 32-byte arg"
+        # `opcode ‖ argLen ‖ args`, three times over.
+        #
+        # The opcode numbers are POSITIONS in AquaOpcodes._opcodes() at swap-vm
+        # v1.0.1 — 21 = FlatFeeAmountIn, 17 = XYCSwap, 20 = Salt. They are
+        # derived by the Solidity builder from 1inch's own instruction table and
+        # never hardcoded there; pinned here so a dependency bump that renumbers
+        # the table fails in CI. See venues/aqua/solidity/package.json for why
+        # the version is pinned, and AquaTakerFillFork.t.sol for the open
+        # question about the deployed table.
+        assert program.startswith("0x15" "04"), "expected FlatFeeAmountIn (21) with a uint32 arg"
+        assert program[14:18] == "1100", "expected XYCSwap (17) with no args"
+        assert program[18:22] == "1420", "expected Salt (20) with a 32-byte arg"
 
     async def test_builder_returns_a_real_strategy_and_hash(self, anvil_rpc):
         from venues.aqua.program import ProgramBuilder

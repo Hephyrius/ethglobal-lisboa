@@ -697,6 +697,77 @@ path shapes and remembers the first that answers.
 
 ---
 
+## 2026-07-25 — Lane D: our SwapVM programs were compiled against the wrong version of SwapVM
+
+**What changed.** `@1inch/swap-vm` pinned from the default branch to **v1.0.1**;
+`SwapVMProgramBuilder` rewritten to inherit `AquaOpcodes` and pass function pointers instead of enum
+constants; artifact regenerated; opcode assertions updated in both suites. 25 Foundry tests pass, 1
+skipped and documented. 59 Python tests green.
+
+**The bug.** Phase 2 asked for a taker fill. Building it surfaced something much worse than a missing
+feature: **the programs this lane produced could not have been executed correctly by the contract
+deployed on Base.**
+
+`package.json` depended on `github:1inch/swap-vm` with no ref, which resolves to the default branch.
+That branch has moved past what is deployed, and the two encode instructions in fundamentally
+different ways:
+
+| | deployed (v1.0.x) | default branch |
+|---|---|---|
+| Opcode numbering | **positions in `AquaOpcodes._opcodes()`**, an ordered array of function pointers | a banked hex enum in a new `OpcodeList.sol` |
+| `XYCSwap` | 17 | `0x50` |
+| Taker entry point | `swap(Order, address tokenIn, address tokenOut, uint256, bytes)` | `swap(Order, uint256, bytes)` |
+| Token pair | passed to `swap()` | baked into the order via `MakerTraitsLib.Args` |
+
+So we were emitting `0x50` where the VM expects `17`. `0x50` is 80 — far past the end of a 35-entry
+table.
+
+**Why every test we had still passed.** `Aqua.ship()` stores the strategy as **opaque bytes** and
+never interprets it. Our fork tests exercised Aqua — ship, dock, virtual balances, custody, contract
+makers — all of which are genuinely correct and remain so. Nothing in that path ever asks SwapVM to
+*run* the program. The first execution of a program is a **taker fill**, which is precisely the thing
+we had not built. A whole class of bug sat behind the one untested door.
+
+**How it was found.** The fill reverted at 299 gas — a missing-selector signature, not a logic
+failure. Extracting `PUSH4` selectors from the deployed runtime bytecode showed `hash(Order)` and
+`AQUA()` present (so the address is SwapVM) but neither `swap` overload from the default branch.
+Regenerating candidate signatures against the deployed dispatcher matched the v1.0.x form exactly.
+
+**The fix, and why it is structurally better than what it replaces.** The builder now inherits
+`AquaOpcodes` and calls `p.build(XYCSwap._xycSwapXD)` with real function pointers;
+`ProgramBuilder.findOpcode` resolves each to its index in 1inch's own table at compile time. **No
+opcode number appears anywhere in our source.** If 1inch reorder their table, a recompile follows
+them. That is what "use their official builder" should have meant from the start — the previous
+version imported their `Opcode` enum, which looks equally official and silently encoded a different
+scheme.
+
+**What is still open, stated plainly.** The deployed table does not match v1.0.1 either. Probed
+empirically: a program of `[17,0][20,32,salt]` reverts with
+`DecayShouldBeCalledBeforeSwapAmountsComputation`, so the deployed VM reads index 20 as **Decay**,
+where v1.0.1 puts Decay at 19 — one extra entry ahead of it. And no index we probed produced a real
+constant-product quote; every one returned `amountOut == amountIn`, the VM's pass-through default,
+meaning no pricing instruction ran at all.
+
+`AquaTakerFillFork.t.sol` is therefore committed but `vm.skip`ped, with the evidence and the next
+step in its header. **Deliberately not guessing the indices**: a wrong opcode yields a position that
+ships successfully, looks healthy, and misprices on fill — strictly worse than no position. The next
+step is to get the exact deployed source or ABI from 1inch, which is a five-minute question at the
+venue and hours of probing otherwise.
+
+**What this does and does not invalidate.** Unaffected and still verified against real contracts:
+ship, dock, virtual balances, the zero-token-movement custody invariant, contract-maker support, and
+the whole Uniswap path. Not verified: that the strategy **prices correctly when executed**. The
+README now says exactly that rather than implying the integration is complete.
+
+**The lesson worth carrying.** An unpinned dependency on a protocol's default branch is not
+"latest" — it is "whatever they are working on", which is by definition not what is deployed. For
+anything that must interoperate with a live contract, pin to the deployed release and verify the
+pin against the chain, not against the docs. The selector check that found this (extract `PUSH4`s
+from runtime bytecode, match against candidate signatures) took two minutes and should probably be
+the first thing done against any third-party integration.
+
+---
+
 ## 2026-07-25 — Lane D: a contract maker works, and an Aqua ship can fail silently
 
 **What changed.** `venues/aqua/solidity/test/VaultRelayFork.t.sol` — 7 fork tests running a complete

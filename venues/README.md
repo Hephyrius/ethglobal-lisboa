@@ -277,8 +277,28 @@ venues/
 (`opcode ‖ argLength ‖ args`). Reimplementing that in Python would mean a second,
 unverified copy of 1inch's instruction format, and any drift yields a program
 that encodes cleanly and behaves wrongly with real money behind it. The builder
-imports 1inch's own `ProgramBuilder`, `MakerTraitsLib`, `Opcode` and
-`FeeArgsBuilder` unmodified, and Python treats the output as opaque bytes.
+inherits 1inch's `AquaOpcodes` and passes **function pointers** to their
+`ProgramBuilder`, which resolves each to its index in their own instruction
+table at compile time — so no opcode number appears in our source at all.
+
+> ### ⚠️ Verification status of the Aqua program
+>
+> **Verified against the real deployed contracts on a Base fork:** `ship()`,
+> `dock()`, virtual balances, the zero-token-movement custody invariant, and
+> contract-maker support (`useAquaInsteadOfSignature`). These are solid.
+>
+> **Not yet verified: that the strategy prices correctly when executed.**
+> `Aqua.ship()` stores the strategy as opaque bytes and never runs it — the
+> first execution is a taker fill. The deployed SwapVM's instruction table does
+> not match any published swap-vm source we can find: it reads index 20 as
+> `Decay` where v1.0.1 puts `Salt`, and no probed index produced a real
+> constant-product quote. Details, evidence and the next step are in the header
+> of `aqua/solidity/test/AquaTakerFillFork.t.sol`, which is committed but
+> skipped rather than passing on a claim we cannot support.
+>
+> `@1inch/swap-vm` is **pinned to v1.0.1** because the default branch encodes
+> instructions completely differently (`XYCSwap` = `0x50` there, `17` in the
+> deployed positional scheme). Do not unpin without re-checking the deployment.
 
 ---
 
