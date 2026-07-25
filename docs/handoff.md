@@ -33,6 +33,27 @@ falls back and says so in the header badge. Nothing to stand up first just to se
 macOS needs nothing extra: Node 20+, `corepack enable`, no native modules, no webfont fetch at build
 time.
 
+### Wave 2 additions
+
+- **`/docs`** — the constitutional text moved out of the vault view, plus the thing nothing else
+  answers: the mandate lives **off-chain** (one JSON per vault under `AGENT_STATE_DIR`); only its
+  keccak hash is on-chain, and that hash is the depositor's entire verification handle.
+- **Disclaimer on every page**, not dismissible. A deep-linked vault from a shared URL is exactly
+  where someone lands with no context beside a working deposit form.
+- **Holdings are a donut**, zero balances filtered, `committed_to_venue` preserved (encumbered ≠
+  sent away). **Aqua positions** get their own panel with the SwapVM curve and maker fee, pulled
+  from the decision that shipped them.
+- **Genesis** offers Lane F's preset archetypes (each leading with what it *gives up*), one-tap
+  example replies, and the source/venue universe before the first question.
+- **Banded acceptances** (`AgentAction.warnings`) render beside the reasoning.
+- **`pnpm --filter @curator/web lint:imports`** — `'wagmi'` can never be imported again; it runs
+  automatically as `prebuild`. The build log explains why `tsc` cannot catch that class of bug.
+- Still open: the **venue capability strip** (E5) needs Lane D's manifest — note #67.
+
+> ⚠️ **If you are taking screenshots or recording the video, read cross-lane note #66 first.**
+> `msedge --headless --window-size=375,H` lays out at 492px and *crops* — it does not give you the
+> viewport you asked for, and the result looks exactly like a broken responsive layout.
+
 ### What works
 
 - All three routes: `/` (thesis + vault list), `/create` (genesis chat → live mandate draft →
