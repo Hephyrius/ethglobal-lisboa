@@ -39,6 +39,19 @@ contract VaultHandler is Test {
     /// @dev Sentinel for "this vault has no shares outstanding, so there is no price per share".
     uint256 internal constant SHARE_PRICE_UNDEFINED = 0;
 
+    /// @dev One unit of the base asset — 0.000001 USDC — per in-kind exit, and it is not slop.
+    ///
+    ///      `redeemInKind` hands over a floored fraction of each raw *balance*. The vault's books are
+    ///      kept in the base asset, and converting a WETH balance into that number floors too. Those
+    ///      two floors do not commute: `value(w − ⌊w·f⌋)` can exceed `value(w)·(1 − f)` by up to one
+    ///      unit, so the redeemer can leave with one unit more than their exact quote.
+    ///
+    ///      Closing it would mean valuing the payout — reading the oracle — which is the one thing
+    ///      this exit must not do, because being oracle-free is what makes it unconditional. So the
+    ///      trade is stated rather than hidden: **an exit that reads no oracle cannot also be
+    ///      oracle-exact.** Generalises to one unit per valued token; the invariant fixture has one.
+    uint256 internal constant VALUATION_FLOOR_SLACK = 1;
+
     // ── ghosts: every one of these must still be zero at the end ─────────
 
     /// @notice `execute`/`executeBatch`/`approveVenue` succeeded for a caller without `AGENT_ROLE`.
@@ -52,6 +65,16 @@ contract VaultHandler is Test {
     uint256 public sharePriceMovedByPlainFlow;
     /// @notice `initialize` succeeded a second time.
     uint256 public reinitializations;
+    /// @notice An agent call that landed *while paused* left the book further from cash — measured
+    ///         from the balances afterwards, not inferred from whether the vault reverted.
+    uint256 public windDownWentTheWrongWay;
+    /// @notice A holder was refused an in-kind exit on their own shares. The exit is unconditional,
+    ///         so any non-zero value here means it is not.
+    uint256 public inKindExitsRefused;
+    /// @notice An in-kind exit removed more value from the vault than the redeemer's shares were
+    ///         quoted at. See `VALUATION_FLOOR_SLACK` for the one unit of tolerance and why it is
+    ///         one unit rather than zero.
+    uint256 public inKindTookMoreThanQuoted;
 
     // ── ghosts: bookkeeping ──────────────────────────────────────────────
 
@@ -60,6 +83,11 @@ contract VaultHandler is Test {
     uint256 public depositCount;
     uint256 public withdrawCount;
     uint256 public agentSwapCount;
+    uint256 public pauseToggles;
+    uint256 public inKindExits;
+    /// @notice Agent calls that landed while the vault was paused. If this stays zero the wind-down
+    ///         invariant is vacuous, which is the failure mode a ghost counter cannot see by itself.
+    uint256 public agentCallsWhilePaused;
 
     constructor(
         CuratedVault vault_,
@@ -133,6 +161,9 @@ contract VaultHandler is Test {
     }
 
     /// @notice The real rebalance path: approve, then swap, as one atomic `executeBatch`.
+    /// @dev While the vault is paused this direction is a purchase, so every one of these should be
+    ///      refused. It is left in the rotation rather than skipped precisely so the fuzzer keeps
+    ///      trying it — an attack that is never attempted is never disproved.
     function agentSwapUsdcForWeth(uint256 amount) external {
         uint256 available = usdc.balanceOf(address(vault));
         if (available < 2e6) return;
@@ -150,10 +181,7 @@ contract VaultHandler is Test {
             data: abi.encodeCall(SwapVenue.swapUsdcForWeth, (amount))
         });
 
-        vm.prank(agent);
-        try vault.executeBatch(calls) {
-            agentSwapCount++;
-        } catch {}
+        _agentBatch(calls);
     }
 
     function agentSwapWethForUsdc(uint256 amount) external {
@@ -173,10 +201,58 @@ contract VaultHandler is Test {
             data: abi.encodeCall(SwapVenue.swapWethForUsdc, (amount))
         });
 
-        vm.prank(agent);
-        try vault.executeBatch(calls) {
-            agentSwapCount++;
-        } catch {}
+        _agentBatch(calls);
+    }
+
+    /// @notice The guardian flipping wind-down on and off at moments of the fuzzer's choosing.
+    /// @dev Weighted toward pausing (two in three) so campaigns spend real time in the state the new
+    ///      rule governs. An even split leaves the paused window too short for a rebalance to land
+    ///      inside it, and a rule nothing is ever tested against passes for free.
+    function guardianTogglesPause(uint256 seed) external {
+        bool wantPaused = bound(seed, 0, 2) != 0;
+        if (wantPaused == vault.paused()) return;
+
+        vm.prank(guardian);
+        if (wantPaused) vault.pause();
+        else vault.unpause();
+        pauseToggles++;
+    }
+
+    /// @notice The exit that has no precondition beyond holding shares. Every refusal is a bug.
+    /// @dev Same any-holder fallback as `redeem`, for the same reason: without it the action is a
+    ///      silent no-op on most draws and the invariant proves nothing.
+    function redeemInKind(uint256 sharesSeed, uint256 actorSeed) external useActor(actorSeed) {
+        if (vault.balanceOf(currentActor) == 0) {
+            address holder = _anyHolder();
+            if (holder == address(0)) return;
+            vm.stopPrank();
+            currentActor = holder;
+            vm.startPrank(currentActor);
+        }
+
+        uint256 held = vault.balanceOf(currentActor);
+        if (held == 0) return;
+        uint256 shares = bound(sharesSeed, 1, held);
+
+        // Checked against its own quote rather than against the share price, and the difference is a
+        // finding rather than a convenience. `convertToAssets(1e18)` divides by `totalSupply + 10¹²`,
+        // so when supply is small — a donation into an empty vault, then a one-USDC deposit, which
+        // the fuzzer reaches — that denominator is ~10¹² and a *single unit* of valuation rounding
+        // shows up as ~10⁶ in the read-out. `deposit` and `redeem` never tripped it only because they
+        // move the base asset, whose valuation is exact; this is the first action to move a *priced*
+        // holding. The share-price check is a proxy whose resolution depends on supply, so for this
+        // action the exact property is asserted instead: value out must not exceed value quoted.
+        uint256 quoted = vault.previewRedeem(shares);
+        uint256 assetsBefore = vault.totalAssets();
+
+        try vault.redeemInKind(shares, currentActor, currentActor) {
+            inKindExits++;
+            // Balances only fall here, and the valuation is monotone, so this cannot underflow.
+            uint256 removed = assetsBefore - vault.totalAssets();
+            if (removed > quoted + VALUATION_FLOOR_SLACK) inKindTookMoreThanQuoted++;
+        } catch {
+            inKindExitsRefused++;
+        }
     }
 
     /// @notice Move the oracle. Bounded to a plausible range so prices stay meaningful.
@@ -333,6 +409,26 @@ contract VaultHandler is Test {
         uint256 priceAfter = _sharePrice();
         if (priceBefore == SHARE_PRICE_UNDEFINED || priceAfter == SHARE_PRICE_UNDEFINED) return;
         if (priceAfter + 1 < priceBefore) sharePriceMovedByPlainFlow++;
+    }
+
+    /// @dev Runs an agent batch and, when the vault is paused, re-derives the wind-down rule from
+    ///      the balances rather than trusting the vault's own verdict. If the contract's check were
+    ///      subtly wrong — measuring the wrong token, or the wrong end of the batch — trusting its
+    ///      revert would make this invariant a restatement of the bug.
+    function _agentBatch(ICuratedVault.Call[] memory calls) private {
+        bool wasPaused = vault.paused();
+        uint256 usdcBefore = usdc.balanceOf(address(vault));
+        uint256 wethBefore = weth.balanceOf(address(vault));
+
+        vm.prank(agent);
+        try vault.executeBatch(calls) {
+            agentSwapCount++;
+            if (!wasPaused) return;
+
+            agentCallsWhilePaused++;
+            if (usdc.balanceOf(address(vault)) < usdcBefore) windDownWentTheWrongWay++;
+            if (weth.balanceOf(address(vault)) > wethBefore) windDownWentTheWrongWay++;
+        } catch {}
     }
 
     function _someAllowlistedTarget(uint256 seed) private view returns (address) {

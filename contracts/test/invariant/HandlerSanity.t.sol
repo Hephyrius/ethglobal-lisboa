@@ -127,6 +127,48 @@ contract HandlerSanityTest is Test {
         assertApproxEqAbs(vault.totalAssets(), before, 2, "a round trip lost value");
     }
 
+    function test_pauseToggleActionActuallyToggles() public {
+        handler.guardianTogglesPause(1); // any non-zero seed asks for paused
+
+        assertEq(handler.pauseToggles(), 1, "the toggle did not register");
+        assertTrue(vault.paused(), "the vault is not paused");
+
+        handler.guardianTogglesPause(0); // seed 0 asks for unpaused
+        assertFalse(vault.paused(), "and it does come back");
+    }
+
+    /// @dev The wind-down invariant is a ghost counter, and a ghost counter on an action that never
+    ///      lands is zero for the wrong reason. This pins that a paused campaign really does refuse
+    ///      purchases and really does let sales through — both halves, or the invariant is vacuous.
+    function test_windDownRefusesPurchasesAndPermitsSalesUnderTheHandler() public {
+        handler.deposit(10_000e6, 0);
+        handler.agentSwapUsdcForWeth(5_000e6);
+        uint256 swapsBefore = handler.agentSwapCount();
+
+        handler.guardianTogglesPause(1);
+
+        handler.agentSwapUsdcForWeth(1_000e6);
+        assertEq(handler.agentSwapCount(), swapsBefore, "a purchase landed while paused");
+
+        handler.agentSwapWethForUsdc(type(uint256).max);
+        assertEq(handler.agentSwapCount(), swapsBefore + 1, "a sale did not land while paused");
+        assertGt(handler.agentCallsWhilePaused(), 0, "no agent call was measured in the paused state");
+        assertEq(handler.windDownWentTheWrongWay(), 0, "the book moved away from cash");
+    }
+
+    function test_redeemInKindActionActuallyExits() public {
+        handler.deposit(10_000e6, 0);
+        handler.agentSwapUsdcForWeth(5_000e6);
+
+        handler.redeemInKind(type(uint256).max, 0); // seed bounds to the full holding
+
+        assertEq(handler.inKindExits(), 1, "the in-kind exit did not register");
+        assertEq(handler.inKindExitsRefused(), 0, "it was refused");
+        assertEq(handler.inKindTookMoreThanQuoted(), 0, "it took more than its quote");
+        assertEq(vault.balanceOf(handler.actorAt(0)), 0, "no shares were burned");
+        assertGt(weth.balanceOf(handler.actorAt(0)), 0, "and the WETH leg never reached the holder");
+    }
+
     /// @dev Each attack must be reachable *and* fail. If an attack silently no-ops, the counter it
     ///      guards stays zero for the wrong reason and the invariant passes vacuously.
     function test_attacksAreExercisedAndAllFail() public {

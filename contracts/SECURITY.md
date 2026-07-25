@@ -27,15 +27,20 @@ take value from another.
 
 Two consequences worth stating plainly, because both look alarming out of context:
 
-- **There is no pause, no emergency withdrawal and no human override.** Nobody holds
+- **There is no human override and no way for anyone to seize funds.** Nobody holds
   `DEFAULT_ADMIN_ROLE` and `grantRole`/`revokeRole`/`renounceRole` all revert, so the role graph is
-  frozen at genesis. This is deliberate. It also means a compromised agent key cannot be revoked —
-  the vault would have to be abandoned. Accepted for a hackathon build; a production version needs
-  the parked protocol-level controls.
+  frozen at genesis. A compromised agent key still cannot be revoked — the vault would have to be
+  wound down and exited. Accepted for a hackathon build; a production version needs the parked
+  protocol-level controls.
+
+  Since Wave 3 the guardian can `pause()`, and that is **narrower than it sounds and narrower than it
+  was**: it stops the agent buying, never anyone withdrawing. §12 is the whole boundary, and the
+  short version is that a guardian who flipped every target off had already halted trading before
+  this existed. What is genuinely new is `redeemInKind`, an exit that needs no oracle, no venue and
+  no liquidity — §10.
 - **The allowlist bounds *which contracts* the agent may call, not what it may do there.** Within an
   allowlisted target the agent has full latitude. It is a blast-radius limiter, not a mandate
   enforcer — the mandate is soft and lives off-chain.
-
 ---
 
 ## 1 · Donation / first-depositor inflation — **mitigated, and the attack is executed**
@@ -274,7 +279,7 @@ different code.
 
 ---
 
-## 10 · Solvency is not liquidity — **inherent, and depositor-facing**
+## 10 · Solvency is not liquidity — **inherent to `redeem`, and now escapable**
 
 Found while asserting that everyone redeeming empties the vault. It does not, once the agent has
 rebalanced.
@@ -291,17 +296,50 @@ either as "available to withdraw right now" will be wrong whenever the vault hol
 base asset. Lane E's deposit panel and anything else surfacing a withdrawal limit should read
 `asset.balanceOf(vault)` alongside them.
 
+### The exit that closes it — `redeemInKind`
+
+**The hole above is unchanged and still real: `redeem` reverts on that book, today, and the test that
+says so still passes.** What Wave 3 added is a second door that cannot hit it.
+
+`redeemInKind(shares, receiver, owner)` burns the shares and pays a pro-rata slice of **every**
+registered token — the USDC *and* the WETH. It reads no oracle, calls no venue, and needs no
+liquidity, because it hands over a fraction of what is already sitting there. It is therefore
+**unconditionally payable**, which the base-asset path provably is not. The depositor gets a worse
+user experience and a strictly better guarantee, and for an emergency exit that is the right trade.
+
+Four properties, each pinned:
+
+1. **It is never the more generous door.** Payouts use the same virtual-share denominator as
+   `previewRedeem`, so the basket is worth at most what the front door quoted — the emergency exit
+   cannot be arbitraged against the normal one.
+2. **It is not gated on the pause.** Making it paused-only would have handed the guardian a say in
+   when depositors may leave, which is exactly the power §12 forbids.
+3. **Its residue is the virtual-share offset, not a leak.** When every holder leaves, what stays
+   behind is ~10⁻¹⁰ of the book — worth well under a thousandth of a cent.
+4. **It is oracle-free, and therefore not oracle-exact.** Flooring a raw balance and flooring its
+   valuation do not commute, so a redeemer can leave with up to one unit of the base asset
+   (0.000001 USDC, per valued token) more than their exact quote. Closing that would mean pricing the
+   payout, which would reintroduce the oracle dependency that makes the exit unconditional in the
+   first place. Stated, bounded, and asserted rather than hidden.
+
 | Test | What it proves |
 |---|---|
-| `test_withdrawalIsLimitedByBaseAssetLiquidityNotTotalAssets` | With 15,000 in `totalAssets()` and only 9,000 liquid, a 10,000 redemption reverts while a 9,000 withdrawal succeeds and leaves the holder with shares against the WETH leg. |
+| `test_withdrawalIsLimitedByBaseAssetLiquidityNotTotalAssets` | The hole. 15,000 in `totalAssets()`, 9,000 liquid, a 10,000 redemption reverts while a 9,000 withdrawal succeeds. |
 | `test_everyoneRedeemingEmptiesTheVault` | The complement: absent a rotation, every holder redeeming does drain the vault — no value is structurally trapped. |
+| `test_redeemInKindClosesTheBookSection10CouldNotPay` | **The same book, both halves in one test.** `redeem` still reverts on it; `redeemInKind` pays the full 10,000 claim as USDC plus the WETH leg. |
+| `test_everyHolderCanLeaveAndTheVaultEmpties` | Nobody is trapped: both holders exit in kind, supply reaches zero, residue is worth ≤ 5 units. |
+| `test_redeemInKindIsNeverMoreGenerousThanRedeem` | Property 1 — value removed ≤ `previewRedeem`'s quote. |
+| `test_redeemInKindPaysProRataOfEveryHolding` | Two thirds of the cash, two thirds of the WETH, and an empty holding still reported. |
+| `invariant_theInKindExitIsNeverRefused` | Across every book, price and pause state the campaign reaches, a holder redeeming their own shares is always paid. |
+| `invariant_theInKindExitNeverTakesMoreThanItsQuote` | Property 1 again, fuzzed, with property 4's one unit as the stated tolerance. |
 
-**Not fixed here, deliberately.** Honouring a redemption against non-base holdings means unwinding
-positions during a withdrawal, which needs a venue-aware liquidation path inside the vault — exactly
-the coupling the opaque-calldata seam exists to avoid, and a far larger change than a hackathon vault
-should carry. What keeps the vault liquid is the mandate's `min_cash_pct`, which makes this a **soft,
-off-chain guarantee enforced by the harness rather than by the contract.** A depositor should
-understand that before depositing, which is why it is here rather than only in a code comment.
+**What is still not fixed, and will not be.** `redeem` itself remains liquidity-bound; honouring it
+against non-base holdings would need a venue-aware liquidation path inside the vault, which is
+exactly the coupling the opaque-calldata seam exists to avoid. `maxWithdraw`/`previewRedeem` still
+report the **claim**, not what is payable right now. What keeps the ordinary path liquid is the
+mandate's `min_cash_pct` — a **soft, off-chain guarantee enforced by the harness, not the contract.**
+The difference Wave 3 makes is that a depositor who hits the limit is no longer stuck waiting for the
+harness to behave; they have a door of their own.
 
 ---
 

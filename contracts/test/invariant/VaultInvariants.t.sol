@@ -210,6 +210,43 @@ contract VaultInvariantsTest is StdInvariant, Test {
     }
 
     // ─────────────────────────────────────────────────────────────────────
+    // 8. Wind-down only ever moves the book toward cash
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// @dev The strongest claim the pause makes: while it is on, *even a fully compromised agent key*
+    ///      can do nothing but convert holdings to the base asset. The fuzzer pauses and unpauses at
+    ///      moments of its own choosing and keeps attempting purchases throughout, so this is a claim
+    ///      about every interleaving rather than about one scripted sequence.
+    ///
+    ///      The counter is raised from the balances after the call, not from whether the vault
+    ///      reverted — trusting the contract's own verdict would make this a restatement of the code
+    ///      under test rather than a check on it.
+    function invariant_windDownOnlyMovesTowardCash() public view {
+        assertEq(handler.windDownWentTheWrongWay(), 0, "a paused batch moved the book away from cash");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 9. No state of this vault can trap a depositor
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// @dev `redeem` is allowed to fail — `SECURITY.md` §10, and the fuzzer will produce books where
+    ///      it does. `redeemInKind` is not: it reads no oracle, needs no venue and requires no
+    ///      liquidity, so a holder redeeming their own shares must always be paid. This asserts that
+    ///      across every book, price and pause state the campaign reaches.
+    function invariant_theInKindExitIsNeverRefused() public view {
+        assertEq(handler.inKindExitsRefused(), 0, "a holder was refused an in-kind exit");
+    }
+
+    /// @dev The other half: unconditional is worthless if it is also generous. An in-kind exit must
+    ///      remove no more value than the shares were quoted at, so the emergency door cannot be
+    ///      arbitraged against the front one. Tolerance is one unit of the base asset, for the reason
+    ///      spelled out at `VaultHandler.VALUATION_FLOOR_SLACK` — an exit that reads no oracle cannot
+    ///      also be oracle-exact, and that is the trade, not an oversight.
+    function invariant_theInKindExitNeverTakesMoreThanItsQuote() public view {
+        assertEq(handler.inKindTookMoreThanQuoted(), 0, "an in-kind exit removed more than it was quoted");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
     // A note on coverage — the failure mode these invariants cannot self-detect
     // ─────────────────────────────────────────────────────────────────────
     //
