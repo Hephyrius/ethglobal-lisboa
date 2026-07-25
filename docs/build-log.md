@@ -8,6 +8,85 @@ the hackathon window.
 
 ---
 
+## 2026-07-25 — Lane A phase 2: guarding the one deploy that cannot be undone
+
+**What changed.** `script/Deploy.s.sol` now refuses to deploy to a real network with fork-grade
+configuration, `priceMaxAge` is derived from the target network instead of defaulting to `0`, and
+`script/verify.sh` verifies on Blockscout. 10 new tests, 86 total. Usage doc and handoff section
+updated.
+
+**Why a deploy script earned its own test suite.** Testing a script is usually not worth it. Here it
+is, because of a property this lane chose deliberately in phase 1: **everything the guards check is
+immutable after genesis.** The role graph is frozen — `DEFAULT_ADMIN_ROLE` is granted to nobody and
+grant/revoke/renounce all revert — and there is no valuation setter for anyone. That is the right
+design, and its exact cost is that a vault deployed wrong cannot be repaired. It can only be
+abandoned. So the deploy is a one-shot, real-money, unfixable decision, run once, under time
+pressure, at 3am. That is precisely the shape of thing to put a test around.
+
+Two failure modes, each one forgotten environment variable away:
+
+*An anvil account as agent.* The fork run **defaults** `DEPLOYER_PRIVATE_KEY` to anvil #0 and
+`AGENT_ADDRESS` to anvil #1, which is what makes a fork deploy need no configuration at all — a
+genuinely good property that turns into the trap. Anvil's private keys are published in Foundry's own
+documentation. A mainnet vault whose `AGENT_ROLE` is anvil #1 is drainable by anyone who has ever
+read those docs, and because the role graph is frozen it could never be revoked. Checked for
+deployer, agent and guardian.
+
+*Staleness checking left off.* `priceMaxAge = 0` is correct on a pinned fork and wrong everywhere
+else — it makes `totalAssets()` trust a Chainlink answer of any age, so shares would price off a
+frozen feed during exactly the volatility that makes feeds stall. Phase 2 flagged "remember to set
+this" twice (§3.1, §5). Deriving it from `DEPLOY_NETWORK` beats remembering it, so the default is now
+`0` for `base-fork` and `3600` for anything else.
+
+**The classification fails safe, which is the part worth copying.** Only the exact string
+`base-fork` gets fork defaults; every other value — including a typo like `base-forks` — is treated
+as a real network and gets the strict settings plus the guards. A misspelling therefore causes a loud
+revert rather than a quiet vault with its safety checks disabled.
+
+**Reverting rather than warning** was the other deliberate call. A warning scrolls off the top of a
+broadcast log. Given the decision is unfixable afterwards, a hard stop that costs thirty seconds to
+override correctly is the cheaper error.
+
+*Alternatives considered.* Documenting the requirement in the README and trusting the operator —
+which is what phase 1 did, and phase 2's audit then flagged the same gap twice, so documentation
+demonstrably was not enough. A `--force` escape hatch — rejected: it would be pasted reflexively the
+first time the guard fired, which defeats the purpose; setting the three env vars properly is the
+same amount of typing. Deriving `isFork` from `block.chainid` — rejected, because the fork
+deliberately *reports* chain id 8453 to look like mainnet, so chain id cannot distinguish them.
+
+Verified in the real script against the fork, not only in unit tests: an anvil deployer reverts,
+non-anvil keys pass with `priceMaxAge` auto-set to 3600, and an explicit `PRICE_MAX_AGE=0` reverts.
+The guard caught one of my own verification commands that had used anvil #1's key by mistake, which
+is a fair demonstration of the failure mode being realistic rather than theoretical.
+
+**Blockscout, not Etherscan** (cross-lane request #23 from Wave 0). There is no free Etherscan path
+for Base: the V2 API rejects the chain outright and `api.basescan.org` V1 now refuses as deprecated.
+Blockscout needs no API key and gives judges the same thing — readable verified source.
+`script/verify.sh` reads addresses from `deployments/<network>.json` so it verifies what was actually
+deployed rather than what someone remembered to paste, and it uses `--guess-constructor-args` for the
+factory rather than asking anyone to hand-encode a struct array. **Stated plainly because it matters:
+it has never been run against a live Blockscout instance,** since nothing is deployed to real Base
+while `DEPLOYER_PRIVATE_KEY` is unfunded. Its error paths and address extraction are tested; expect to
+debug the rest on first real use. Vault instances are EIP-1167 clones with no source of their own —
+verifying `CuratedVault` is what makes every vault readable.
+
+**The phase 1 design got its real validation this window, and not from a test.** Lane B landed the
+first genuine agent write — fork tx `0x789066d4…8a4b`, one atomic `executeBatch` with three
+`Executed` events: `USDC.approve` (a *token* as target), `Permit2.approve`, then
+`UniversalRouter.execute`. Every answer this lane gave Lane D held up in production: token addresses
+work as `execute` targets (request #8), the router address Lane D verified against the live API is on
+the allowlist (request #7), and `executeBatch` did the job it was added for — a three-step plan that
+cannot land half-applied. Recomputing the WETH leg independently from the live Chainlink answer gives
+`749880448`, exactly what `holdings()` reports, so agent, contract and UI agree on the portfolio's
+value. That last point is the argument for sharing one oracle with the contract, made concrete.
+
+**One correction for anyone reading request #11:** it records the fork vault's share price as
+"exactly `1e18`". On-chain it is `999952` — `convertToAssets(1e18)` returns a **6-decimal** number
+because shares are 18-decimal over a 6-decimal asset. Lane E's UI renders `1.00` correctly, so
+nothing is broken; noting it so the `1e18` figure is not copied into the submission text.
+
+---
+
 ## 2026-07-25 — Lane A: the vault, and what "no human override" costs you
 
 **What changed.** `contracts/` MVP complete. `CuratedVault` (ERC-4626, sole custodian, agent
@@ -160,6 +239,27 @@ decimals attached. The scale comes from the vault's own holdings — it is sole 
 holdings are authoritative for any token an intent can mention. Where a token is not held, the raw
 value renders labelled "base units" rather than divided by a guess. Same principle as the
 `share_price` decision below.
+
+**Then live data found a flaw the fixture could not, which is the argument for testing against it.**
+The golden snapshot happens to carry one lending market per protocol. A real one does not: Aave's
+Base deployment reports **USDC at 3.48% and WETH at 1.46%**, so the comparison ranked yields on
+different assets against each other and named Aave's $174.8M *WETH* market "deeper" than a USDC
+market it has nothing to do with. Comparing a stablecoin lending rate to an ETH one is meaningless;
+stating it as a conclusion is worse than not showing it. Now grouped by market asset — only
+protocols lending the same asset are compared, and a market with a single protocol is not a
+comparison, so it drops out on its own.
+
+**Verified against the fully live stack**, badge green `LIVE`, all three seams on real registries:
+the comparison renders moonwell 4.18% on $15.1M at 88% utilization against aave-v3 3.48% on $173.2M
+at 85%, with *"Deepest is aave-v3 — not the highest yield"* — Lane C's composability argument made
+visible from two different Graph sources. Derived share price came out at exactly `1.00`, matching
+`convertToAssets(1 share)` on chain, which independently confirms the derive-don't-trust decision
+below was right. Ran the live agent on **port 8001** rather than restarting the fixture-mode instance
+on 8000, so another lane's running service was left undisturbed.
+
+**Genesis picked up Lane C's new `chainlink` source with no change here** — the source list is read
+from `GET /genesis/sources` rather than hard-coded, so a newly registered provider simply appears.
+That is the registry claim holding up in practice rather than in principle.
 
 ---
 
