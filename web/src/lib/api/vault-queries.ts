@@ -17,6 +17,22 @@ import { readChainVaultState } from '@/lib/chain/vault-state'
 const VAULT_STATE_REFETCH_MS = 12_000
 const DECISIONS_REFETCH_MS = 15_000
 
+/** A whole vault read is several round trips; generous, but never unbounded. */
+const CHAIN_READ_TIMEOUT_MS = 8_000
+
+/**
+ * Reject rather than hang. Every rung of the fallback ladder has to be able to
+ * *fail* for the next one to be reachable at all.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`chain read exceeded ${ms}ms`)), ms),
+    ),
+  ])
+}
+
 /**
  * Vault state, down a three-rung ladder: **agent API → the chain → fixtures.**
  *
@@ -49,8 +65,15 @@ export function useVaultState(address: string) {
       try {
         // Re-validated through the frozen schema rather than trusted: the same
         // bar every other source has to clear.
+        //
+        // Bounded, because an unbounded read here is worse than no read: a
+        // wedged or very slow RPC leaves this promise pending, the query never
+        // settles, and the dashboard sits on its loading skeleton forever
+        // rather than falling through to the fixtures that exist precisely for
+        // this case. Found while rendering the page under a fast-forwarded
+        // clock, which is exactly the shape of a hung node.
         const onChain = schemas.vaultState.response.parse(
-          await readChainVaultState(address as `0x${string}`),
+          await withTimeout(readChainVaultState(address as `0x${string}`), CHAIN_READ_TIMEOUT_MS),
         )
         return {
           data: onChain,

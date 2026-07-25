@@ -57,7 +57,25 @@ export function WalletButton() {
           : 'No injected wallet detected — install MetaMask, Rabby or a Coinbase Wallet extension')
       }
     >
-      {hasConnector ? (pending ? 'Connecting' : 'Connect wallet') : 'No wallet detected'}
+      {/* The header is the tightest row in the app at 375px: logo, nav, network
+          badge and this button all compete for the same line, and a button that
+          refuses to shrink pushes the whole page wider than the viewport. The
+          label shortens rather than the layout breaking. */}
+      {hasConnector ? (
+        pending ? (
+          'Connecting'
+        ) : (
+          <>
+            <span className="sm:hidden">Connect</span>
+            <span className="hidden sm:inline">Connect wallet</span>
+          </>
+        )
+      ) : (
+        <>
+          <span className="sm:hidden">No wallet</span>
+          <span className="hidden sm:inline">No wallet detected</span>
+        </>
+      )}
     </Button>
   )
 }

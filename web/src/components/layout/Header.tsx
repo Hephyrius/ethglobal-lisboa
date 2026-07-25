@@ -30,7 +30,7 @@ export function Header() {
         {/* Kept at every width. Hiding it below `sm` — as it was — made the
             primary action of the whole app unreachable on a phone, which is
             the device judges browse on. The label shortens instead. */}
-        <nav className="flex shrink-0 items-center gap-1">
+        <nav className="flex min-w-0 items-center gap-0.5 sm:gap-1">
           <NavLink href="/create" active={pathname === '/create'}>
             <span className="sm:hidden">Create</span>
             <span className="hidden sm:inline">Create a vault</span>
@@ -40,7 +40,7 @@ export function Header() {
           </NavLink>
         </nav>
 
-        <div className="ml-auto flex min-w-0 items-center gap-2 sm:gap-3">
+        <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
           <span className="hidden text-2xs text-faint lg:inline">{networkLabel}</span>
           <ModeBadge />
           <WalletButton />

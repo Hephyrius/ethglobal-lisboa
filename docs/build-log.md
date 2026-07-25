@@ -457,6 +457,94 @@ is distinctive enough that a collision needs the number to appear in another fie
 
 ---
 
+## 2026-07-25 — Lane A Wave 2: the tests that found bugs were all in the tests
+
+**What changed.** `contracts/SECURITY.md` — nine attack vectors, each ending with the test that
+proves the claim, and two that say plainly "not mitigated". `test/invariant/` — nine properties at
+2,048 calls each, driven by a handler that attacks the vault rather than only using it. The
+donation/inflation attack is now executed end to end instead of asserted. 85 → 101 tests. **No
+contract source changed**, which was the brief: an adversarial pass, not new features.
+
+**Why the handler pattern earned its extra file.** Unguided fuzzing of a vault spends almost every
+run reverting on `transferFrom` before reaching any interesting state. A handler bounds inputs so
+sequences are *reachable* while the fuzzer still picks order, actor and amounts. The design decision
+worth recording is the **ghost counters**: rather than asserting inside each action — which stops the
+sequence at the first surprise and hides everything after it — every attack that *should* fail
+increments a counter when it succeeds, and the invariant asserts the counter is zero. One breach
+anywhere in a 32-call sequence is then caught and reported with the whole history that produced it.
+
+**Then the suite found four bugs, and every one was mine, in the test.** That is worth being precise
+about rather than glossing, because the pattern is identical each time: *I asserted something
+stronger than the property I actually cared about.*
+
+1. **`|Δ share price| > 1` after a deposit.** Failed on a donation into a near-empty vault. But the
+   move was *upward* — ERC-4626 rounding in the vault's favour, leaving existing holders marginally
+   better off. The property is **direction, not magnitude**: entry and exit may round the price up,
+   never down, because down means the actor extracted value from the holders who stayed. Restating it
+   that way made the check both correct and sharper.
+2. **Share price `0` meant "undefined" and "collapsed" simultaneously.** After a full exit there are
+   no shares to price, and returning 0 made an ordinary complete withdrawal read as theft. Fixed with
+   an explicit sentinel. A sentinel colliding with a real value is an old bug in new clothes.
+3. **`afterInvariant()` coverage failed on sequence composition.** I had it assert the campaign
+   deposited, withdrew *and* rebalanced. Foundry evaluates that hook per sequence, and a 32-call draw
+   from twelve handler functions legitimately will not always contain a deposit — so it failed for a
+   reason that said nothing about the vault. Removed in favour of `HandlerSanity.t.sol`, which drives
+   each action deterministically and asserts each *individually*, so a broken action fails with its
+   own name instead of as an aggregate. That is the stronger guarantee, not a weaker one.
+4. **`redeem` was a silent no-op most of the time.** It only fired when the fuzzer drew an actor who
+   had already deposited, so ~169 withdrawal calls did nothing. Falling back to any holder fixed it —
+   **and that fix is what surfaced findings 1 and 2 at all.** Before it, the exit path was barely
+   exercised and the suite was passing partly by not looking.
+
+The transferable lesson: **an invariant suite's most dangerous failure is passing.** Every property
+in that file holds trivially on a vault nothing ever happened to, and nothing in the properties
+themselves can detect that. `HandlerSanity.t.sol` exists solely for that, and Foundry's per-function
+call distribution is the same signal for free — a zero in the `calls` column means the action never
+ran.
+
+**The donation attack: executed, not asserted.** `_decimalsOffset() = 12` is a one-line override and
+nothing about reading it tells you the attack fails. So the test now runs it: attacker seeds 1 wei,
+donates 10,000 USDC, victim deposits, and **both actually redeem**. Victim recovers their deposit;
+attacker recovers ~5,000 of the ~10,000 spent. The second assertion is the stronger one — an attack
+that merely fails is one somebody still tries; one that costs 5,000 USDC is one nobody tries. The
+loss is structural: the donation is shared pro-rata and a 1 wei seed buys almost none of the pool.
+
+One over-tight bound there too — I first asserted the attacker recovers `< spend / 2` and it failed
+by **one wei** (5000000001 vs 5000000000) while describing exactly the outcome I wanted. Replaced
+with a 60% bound so the test states "loses a large fraction" rather than pinning an arithmetic
+artefact.
+
+**Two sections of SECURITY.md say "not mitigated", deliberately.**
+
+*Sandwiching the agent's swap* cannot be verified from this lane at all, and that is a design
+consequence rather than an omission: the vault executes **opaque calldata** against an allowlisted
+target, which is the seam that lets Lane D build any venue without touching these contracts. It
+therefore cannot inspect a `minOut` it never parses, and adding that inspection would require the
+vault to understand every venue's calldata format — precisely the coupling the seam exists to avoid.
+So the protection lives in D's calldata and the honest answer has to come from D (#60). Not
+hypothetical: #26 already records the Trading API reporting its *default* 250 bps rather than a
+mandate-derived figure.
+
+*Deposit/withdraw sandwiching around a rebalance* is unmitigated and stays that way. The fixes — entry
+fee, timelock, share-price cooldown — each change the depositor experience materially and need their
+own testing; adding one hastily to a hackathon vault trades a known, bounded, disclosed issue for an
+unknown one. The reentrancy guard does mean it cannot happen atomically, so an attacker carries at
+least one block of price risk rather than none.
+
+**Result.** All nine invariants green at the deep profile: 512 runs × 128 depth, **65,536 calls each,
+589,824 in total, zero failures**, 189s on a CPU-only i5-8265U. The default profile runs the same
+properties at 2,048 calls so the normal suite stays under five seconds — the deep run is the one that
+earns the claim, the default one is the one that stays useful.
+
+**Alternatives considered.** Asserting inside handler actions instead of counting — rejected, it
+truncates the sequence at the first failure and hides later ones. Making the swap venue a real AMM
+with a curve — rejected: pricing at the oracle makes a swap value-neutral *by construction*, so any
+drift in `totalAssets()` across a rebalance is a genuine accounting bug rather than slippage noise,
+which is what the invariant needs to be able to say. A `fail_on_revert = true` invariant profile —
+rejected, the handler deliberately attempts calls that must revert.
+
+---
+
 ## 2026-07-25 — Lane A: rehearsing R0 found the landmine under R8
 
 **What changed.** `script/Deploy.s.sol` no longer reads the mainnet deployer key on a fork, and
@@ -703,6 +791,69 @@ being written down, which caught an Aqua constant I had transcribed by hand into
 calls hang indefinitely in this WSL setup, while `curl` to the same endpoint returns instantly. It is
 not a blocker: `anvil --fork-url` works fine, and once anvil holds the fork everything else talks to
 localhost. Point `forge test` and `forge script` at the anvil endpoint, not at the upstream RPC.
+
+---
+
+## 2026-07-25 — Lane E Wave 2: an import guard, a docs page, and a measuring instrument that lied
+
+**The most useful thing in this entry is the measurement error**, because anyone doing responsive
+work here will hit it and conclude the app is broken.
+
+**`msedge --headless --window-size=375,H` does not give you a 375px viewport.** This build lays the
+page out at a fixed **492 CSS px** — Windows display scaling — and then *crops* the capture to the
+requested size. Every screenshot I took at 375 showed content sliced off at the right edge, which
+reads exactly like horizontal overflow. It was not. I "fixed" the header twice against a reading
+that was an artefact.
+
+A control page settled it in one shot: render a plain div and print
+`document.documentElement.clientWidth` into the DOM. It said **492 while the PNG was 375**.
+`--force-device-scale-factor=1` does not change it and neither does `--headless=old`.
+
+Two ways round it, both used here:
+
+- **An `<iframe width="375">` in a local wrapper page.** Media queries inside evaluate against the
+  frame's width, so that genuinely is a 375px viewport. Works for static pages — `/docs` verified
+  clean this way. It does **not** work for data-driven pages: inside a frame, under a
+  fast-forwarded clock, React Query never settles and every panel stays a skeleton.
+- **Screenshot at the native 492px and don't crop** (`--window-size=520`). 492 is below the `sm`
+  breakpoint, so it exercises the mobile layout with real data and no artefacts. This is what
+  actually verified the vault page.
+
+*The lesson worth generalising:* an instrument that produces plausible-looking wrong output is worse
+than one that fails. Control for the tool before believing what it says about the code — the same
+standard this repo already applies to third-party integrations (#30, check the deployed bytecode,
+not the docs).
+
+**A real bug the bad instrument found anyway.** Rendering under a fast-forwarded clock is the same
+shape as a wedged RPC, and it showed that `readChainVaultState` had **no timeout**. The chain rung
+of the fallback ladder could hang forever, so the query never settled and the dashboard sat on its
+skeleton — never reaching the fixtures that exist for exactly that case. Every rung has to be able
+to *fail* for the next one to be reachable. Now bounded at 8s.
+
+**`'wagmi'` can no longer be imported, and the reason it ever resolved is the interesting part.**
+`wagmi` is not a dependency of `web/`, but a stale copy sits at the **workspace root**
+`node_modules/wagmi` from before this app dropped it. Node and webpack walk up from `web/`, find it,
+and the import compiles and builds — then throws `WagmiProviderNotFoundError` in the browser,
+because this app mounts no provider (#58). Nothing in `tsc` or `next build` can catch that, which is
+why a grep-shaped check is the right tool here rather than a weak one. ESLint with
+`no-restricted-imports` was the alternative and was rejected: a large dependency tree to buy one
+rule, in a repo that pins every package to an exact version at least 180 days old. The check has no
+dependencies, runs as `prebuild`, and was proven by feeding it the exact offending import.
+
+**`/docs` is a route, not the drawer the plan sketched.** A drawer cannot be linked to, is awkward
+on a phone, and this is the page a sceptical reader most wants to send to someone else. It answers
+the question nothing in the UI answered: the mandate lives **off-chain**, one JSON file per vault;
+only its keccak hash is on-chain, and that hash is the depositor's entire verification handle.
+
+**Preset cards lead with what each preset gives up.** A picker that lists only upside is a sales
+page. The tradeoff text comes from Lane F's preset metadata rather than being written here, so a
+card cannot go stale when a preset's limits change — the same reason the universe strip renders
+every registry key it is given and treats its descriptions as enrichment rather than a filter. A
+hardcoded list is precisely what hid the fully-built Aave venue for an entire wave.
+
+**The disclaimer is not dismissible.** The page it matters on is a deep-linked vault reached from a
+shared URL, where the reader has no context, sees a deposit form wired to a real wallet, and is one
+click from funding an unaudited contract whose key is held by a language model.
 
 ---
 

@@ -22,11 +22,16 @@ export function ModeBadge() {
   // here would be a claim about data that was never loaded.
   if (mode === 'unknown') return null
 
+  // The label collapses to its dot below `sm`. The header is the tightest row
+  // in the app at 375px, and a badge that will not shrink pushes the whole
+  // page wider than the viewport — which centres every other section off to
+  // one side, because `main` is `mx-auto` inside the wider scroll area. The
+  // colour still carries the state, and the title still carries the detail.
   if (mode === 'live') {
     return (
       <Badge tone="ok" title={`Live data from the agent API at ${API_BASE}`}>
         <Dot tone="ok" pulse />
-        LIVE
+        <span className="hidden sm:inline">LIVE</span>
       </Badge>
     )
   }
@@ -38,7 +43,7 @@ export function ModeBadge() {
         title={`Read directly from the vault contract — the agent API at ${API_BASE} is unreachable. These numbers are real.`}
       >
         <Dot tone="data" pulse />
-        ON-CHAIN
+        <span className="hidden sm:inline">ON-CHAIN</span>
       </Badge>
     )
   }
@@ -53,7 +58,7 @@ export function ModeBadge() {
       }
     >
       <Dot tone="warn" />
-      FIXTURES
+      <span className="hidden sm:inline">FIXTURES</span>
     </Badge>
   )
 }
