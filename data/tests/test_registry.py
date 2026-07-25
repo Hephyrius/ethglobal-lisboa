@@ -92,6 +92,32 @@ async def test_registry_satisfies_the_frozen_port():
     assert isinstance(StubSource("x"), DataSource)
 
 
+def test_the_late_binding_integration_point_resolves():
+    """Lane B binds by reference: AGENT_DATA_REGISTRY=curator_data.default:registry
+
+    It imports that string, checks the Protocol, and falls back to fixture data
+    on ANY failure. So a rename here would not break their build — it would
+    quietly serve fixture numbers during a live demo. Pin it.
+    """
+    import importlib
+
+    module, _, attribute = "curator_data.default:registry".partition(":")
+    resolved = getattr(importlib.import_module(module), attribute)
+
+    assert isinstance(resolved, DataSourceRegistry)
+    assert set(resolved.available()) == {"messari", "token_api"}
+
+
+def test_importing_the_default_registry_survives_missing_credentials():
+    """A raise here would drop a late-binding consumer back to fixtures silently."""
+    import importlib
+
+    import curator_data.default as default
+
+    importlib.reload(default)  # re-runs construction against the real environment
+    assert default.registry.available()
+
+
 # ── access control ────────────────────────────────────────────────────────
 
 

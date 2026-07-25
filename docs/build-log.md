@@ -8,6 +8,98 @@ the hackathon window.
 
 ---
 
+## 2026-07-25 — Lane C: the data registry, two Graph sources, a standalone MCP server, x402
+
+**What changed.** `/data` — a pluggable market-data registry (`curator-data`), Messari and Token API
+adapters, a separately-installable MCP server (`curator-mcp`) with its own `SKILL.md`, a `verify-live`
+CLI, and feature-flagged x402 pay-per-query. 109 tests, no network, no credentials.
+
+**Why the registry came before the Graph adapters.** This lane has two goals that look opposed: win
+three Graph tracks *now*, and make adding a non-Graph provider later a 30-minute job. They only
+conflict if the adapters drive the design. So the order was registry → `MarketSnapshot` merge →
+adapters, and the constraint is asserted rather than trusted:
+`tests/test_source_agnostic.py` fails if any provider name appears in executable code above
+`sources/`. Docstrings may name providers — that documentation is how the next person finds the
+extension point — but behaviour may not.
+
+**Why sources declare capabilities instead of being named by callers.** First cut had
+`MARKET_SOURCES = ("messari",)` in the query layer. The source-agnosticism test caught it, and it was
+a genuine flaw, not a style nit: adding a Chainlink price source would have needed a *second* edit
+outside `sources/`, quietly making the one-line extension claim false. Sources now declare
+`provides = ("price", ...)` and the registry resolves by capability. A new price source joins price
+queries the moment it is registered. Mandate permissions intersect on top, so access control still
+wins over capability. *Alternative rejected:* a capability registry separate from the source table —
+more indirection for a property that belongs on the source itself.
+
+**Why a partial-failure channel was added to the source contract.** The frozen port models a source
+as all-or-nothing: return facts, or raise and land in `errors[]`. Real sources are not — `messari`
+queries three protocols and any one can be down. Returning the other two silently would tell the
+model it saw the whole market when it did not, which is the most dangerous failure mode available to
+a system that holds a key. Sources may now call `self.note(...)`; the registry folds notes into
+`errors[]` via an optional `drain_notes` hook. **This is additive, not a schema change** — `key` +
+`fetch` still satisfies the frozen protocol, and a source ignoring the mechanism behaves exactly as
+before. No request against `packages/schema` was needed.
+
+**Why protocol and token tables are data, not code.** Messari publishes one standardized schema per
+protocol *type*, so every lending market answers the identical GraphQL document — asserted in
+`test_one_query_shape_serves_every_lending_protocol`. Adding a protocol is therefore one
+`Protocol(...)` line with no adapter. That *is* the Track 3 composition argument, so it is printable
+(`curator-data protocols`) rather than merely claimed. Token addresses get the same treatment, with
+one rule: an unknown symbol produces a note naming the fix, never a guessed address. On a system that
+trades with a real key, a wrong address is the most expensive possible bug.
+
+**Why `FactBuilder` has `apy_from_percent` and `apy_from_fraction` rather than one `apy`.** Messari
+reports `InterestRate.rate` as a percentage (`4.32`); the frozen schema requires `0.0432`. A 100×
+error here would not crash anything — it would make the agent believe every market yields 400% and
+rebalance into whichever it misread worst. Naming the constructors after the unit they *consume*
+makes the conversion a decision at the call site instead of an assumption.
+
+**Why the MCP server is a separate distribution.** Graph Track 1 asks for reusable tooling, not a
+single end-user app, and a server that only runs inside our repo fails that on its face. `curator-mcp`
+has its own `pyproject.toml`, `README.md`, `SKILL.md`, licence and entry point, and imports nothing
+from `agent/`. The claim is tested rather than asserted: it installs into a clean Python 3.10 venv
+*outside* this repo and answers `tools/list`. That also pins the 3.10 floor — which is why `/data`
+carries its own ruff config at `py310` and avoids `datetime.UTC` and the `TimeoutError` alias, both
+3.11+. Our harness talks to the registry directly, so it is visibly *a* consumer, not *the* consumer.
+
+**Why x402 is a transport decorator rather than a data source.** The agent paying for its own data is
+the best narrative beat we have and also hand-rolled EIP-712 signing against a spec we cannot
+rehearse. Making it a decorator over `GatewayClient` means the fallback is the *design*, not an error
+handler bolted on: there is no code path where enabling x402 loses data the API-key path would have
+returned. 13 of its 20 tests are failure tests — no key, amount over ceiling, unsupported scheme or
+network, rejected payment, malformed body, empty `accepts`, 5xx, DNS failure — each asserting the
+caller still got its data. A client-side ceiling of 1 USDC refuses to sign an absurd demand. It needs
+the flag **and** a key, because a flag alone would fall back on every query instead of failing
+obviously. Came in under the 90-minute timebox.
+
+**Deviation from the plan's sketch:** the master plan showed `/data/registry.py` importing as
+`data.registry`. Shipped as `/data/curator_data/` instead — `data` is far too generic a top-level
+import name for a shared venv, and the MCP server needs a real distribution boundary to depend on.
+Lane B imports `curator_data`.
+
+**Environment findings, recorded so nobody else loses time:**
+- **`uv sync --extra data` prunes every package not in the named extras.** It silently uninstalled
+  Lane B's `fastapi`/`web3` and Lane D's `eth-abi` from the shared venv. Always sync all lanes:
+  `uv sync --extra dev --extra data --extra agent --extra venues`. Noted in `/data/README.md` too.
+- Windows consoles are cp1252 and turn an em dash in an error message into a mojibake box, so every
+  string that can reach a terminal is ASCII — asserted by a test on the `verify-live` report.
+
+**Blocked on a credential, not on code.** `GRAPH_API_KEY` is absent from `.env` and cannot be
+self-served. Every unit test runs offline against `httpx.MockTransport`, and `curator-data verify-live`
+is the one command that proves the live demo path the moment the key lands — it checks credentials
+first (otherwise every downstream failure is ambiguous), queries each enabled subgraph concurrently,
+and exits non-zero if anything failed *or was skipped*, because "we did not check" is not proof.
+
+**Unverified against live data (the honest list).** The subgraph IDs are from Graph Explorer but
+their schema *family* could not be confirmed without a key. Aave V3 and Moonwell are expected to
+answer the Messari standardized `markets` shape; the Uniswap V3 entry may answer Uniswap's own `pools`
+schema instead, in which case it degrades into `errors[]` and `verify-live` names it. Fixing that is a
+one-line config edit, which is exactly why the table is data. The Token API's exact path layout is
+also unconfirmed — its docs now redirect to Pinax — so that source tries a short ordered list of known
+path shapes and remembers the first that answers.
+
+---
+
 ## 2026-07-25 — Lane D: Uniswap taker path live, and three findings that contradict our fixtures
 
 **What changed.** `/venues` scaffolded and the Uniswap adapter finished end to end: `config.py`,
