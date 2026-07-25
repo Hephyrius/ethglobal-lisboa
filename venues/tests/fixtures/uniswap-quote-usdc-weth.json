@@ -1,0 +1,140 @@
+{
+  "requestId": "007e2ea45a78d4888d7f6347a5bdf093",
+  "routing": "CLASSIC",
+  "isTokenApprovalApplicable": true,
+  "permitData": {
+    "domain": {
+      "name": "Permit2",
+      "chainId": 8453,
+      "verifyingContract": "0x000000000022D473030F116dDEE9F6B43aC78BA3"
+    },
+    "types": {
+      "PermitSingle": [
+        {
+          "name": "details",
+          "type": "PermitDetails"
+        },
+        {
+          "name": "spender",
+          "type": "address"
+        },
+        {
+          "name": "sigDeadline",
+          "type": "uint256"
+        }
+      ],
+      "PermitDetails": [
+        {
+          "name": "token",
+          "type": "address"
+        },
+        {
+          "name": "amount",
+          "type": "uint160"
+        },
+        {
+          "name": "expiration",
+          "type": "uint48"
+        },
+        {
+          "name": "nonce",
+          "type": "uint48"
+        }
+      ]
+    },
+    "values": {
+      "details": {
+        "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "amount": "1461501637330902918203684832716283019655932542975",
+        "expiration": "1787535300",
+        "nonce": "0"
+      },
+      "spender": "0x6ff5693b99212da76ad316178a184ab56d299b43",
+      "sigDeadline": "1784945100"
+    }
+  },
+  "permitTransaction": null,
+  "quote": {
+    "chainId": 8453,
+    "swapper": "0x0000000000000000000000000000000000000001",
+    "tradeType": "EXACT_INPUT",
+    "route": [
+      [
+        {
+          "type": "v3-pool",
+          "address": "0xb4CB800910B228ED3d0834cF79D697127BBB00e5",
+          "tokenIn": {
+            "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "chainId": 8453,
+            "symbol": "USDC",
+            "decimals": "6"
+          },
+          "tokenOut": {
+            "address": "0x4200000000000000000000000000000000000006",
+            "chainId": 8453,
+            "symbol": "WETH",
+            "decimals": "18"
+          },
+          "sqrtRatioX96": "3415800391460846313761461",
+          "liquidity": "24704560846624285",
+          "tickCurrent": "-201044",
+          "fee": "100",
+          "amountIn": "1000000",
+          "amountOut": "537935691469946"
+        }
+      ]
+    ],
+    "input": {
+      "amount": "1000000",
+      "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "maximumAmount": "1000000"
+    },
+    "output": {
+      "amount": "537935691469946",
+      "token": "0x4200000000000000000000000000000000000006",
+      "recipient": "0x0000000000000000000000000000000000000001",
+      "minimumAmount": "524487299183197"
+    },
+    "slippage": 2.5,
+    "priceImpact": 0.01,
+    "gasFee": "983694060765",
+    "gasFeeUSD": "0.0018252471253798746",
+    "gasFeeQuote": "982050000000",
+    "gasUseEstimate": "163675",
+    "routeString": "[v3] 100.00% = [0.01%] 0xb4CB800910B228ED3d0834cF79D697127BBB00e5",
+    "blockNumber": "49076976",
+    "quoteId": "ef772210-9e04-4169-86aa-20403763bb59",
+    "maxFeePerGas": "6000000",
+    "maxPriorityFeePerGas": "1000000",
+    "txFailureReasons": [],
+    "gasEstimates": [
+      {
+        "type": "eip1559",
+        "strategy": {
+          "limitInflationFactor": 1.15,
+          "priceInflationFactor": 1,
+          "percentileThresholdFor1559Fee": 25,
+          "minPriorityFeeGwei": 1,
+          "maxPriorityFeeGwei": 1.8,
+          "baseFeeMultiplier": 1.05,
+          "baseFeeHistoryWindow": 100,
+          "minPriorityFeeRatioOfBaseFee": 0.2,
+          "thresholdToInflateLastBlockBaseFee": 0
+        },
+        "gasLimit": "61861",
+        "gasFee": "372239459222",
+        "maxPriorityFeePerGas": "1000000",
+        "maxFeePerGas": "6000000"
+      }
+    ],
+    "aggregatedOutputs": [
+      {
+        "amount": "537935691469946",
+        "token": "0x4200000000000000000000000000000000000006",
+        "recipient": "0x0000000000000000000000000000000000000001",
+        "bps": 10000,
+        "minAmount": "524487299183197"
+      }
+    ]
+  }
+}

@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 # anything used by exactly one lane belongs in that lane's own section.
 dependencies = [
   "curator-schema",
+  "curator-data",
   "pydantic>=2.7",
   "httpx>=0.27",
   "python-dotenv>=1.0",
@@ -19,14 +20,42 @@ dev = [
   "jsonschema>=4.21",
   "ruff>=0.5",
 ]
+# Lane B (/agent). FastAPI for the frozen routes Lane E consumes; web3 for the
+# VaultClient and for keccak256 mandate hashing (it brings eth-utils/eth-account
+# with a working eth-hash backend, so there is no separate crypto dependency).
+agent = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "web3>=7.0",
+]
+# Lane D (/venues). ABI encoding + keccak for building venue calldata, and one
+# eth_call for SwapVM program bytes. Deliberately NOT web3.py: this lane needs
+# encoding and a single JSON-RPC POST, both of which run on the shared httpx
+# client, so pulling a full node library in for it would be dead weight.
+venues = [
+  "eth-abi>=5.1",
+  "eth-utils>=4.1",
+]
+# Lane C (/data). The registry and both Graph sources run on the shared httpx
+# client and need nothing extra. These two are for the optional edges: the MCP
+# SDK for the standalone server (a separate distribution, so this is only for
+# running it from the workspace), and eth-account to sign x402 payment payloads
+# on the feature-flagged pay-per-query path.
+data = [
+  "mcp>=1.2",
+  "eth-account>=0.11",
+]
 
 [tool.uv.sources]
 # The frozen interface is consumed as a local editable package, so every lane
 # imports the same models rather than copying shapes around.
 curator-schema = { workspace = true }
+# Lane C's data layer. A real distribution rather than a loose module tree so
+# the MCP server can depend on it and be installed standalone.
+curator-data = { workspace = true }
 
 [tool.uv.workspace]
-members = ["packages/schema/python"]
+members = ["packages/schema/python", "data", "data/curator_mcp"]
 
 [tool.pytest.ini_options]
 testpaths = ["packages/schema/python", "agent", "data", "venues"]

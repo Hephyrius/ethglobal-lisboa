@@ -8,6 +8,61 @@ the hackathon window.
 
 ---
 
+## 2026-07-25 — Lane D: Uniswap taker path live, and three findings that contradict our fixtures
+
+**What changed.** `/venues` scaffolded and the Uniswap adapter finished end to end: `config.py`,
+`addresses.py`, `abi.py`, `errors.py`, `registry.py`, and `uniswap/{client,plan,venue}.py`.
+18 tests green, 4 of them against the live gateway.
+
+**Three things the live API does that our written assumptions did not.** All found in the first
+hour, because the alternative is finding them at CP2 with the vertical slice on the line.
+
+1. **`routingPreference: CLASSIC` is rejected** with HTTP 400 `"routingPreference" must be one of
+   [BEST_PRICE, FASTEST]` — yet a *successful* response echoes `"routing": "CLASSIC"` back. The
+   value you read out of a response is not a value you may send. Headed for `FEEDBACK.md`; there is
+   a regression test pinning it so we notice if they fix it.
+2. **The swap target is `0x6fF5693b…D299b43`, not the `0x2626664c…e481` UniversalRouter** in
+   `packages/schema/fixtures/execution-plan.json`. Had we trusted the fixture, every swap would have
+   reverted on an allowlist check. Filed to Lane A as cross-lane request 7.
+3. **`swap.value` comes back hex-encoded (`"0x00"`)** while `ExecutionPlan.value` requires
+   `^[0-9]+$`. A straight copy produces a plan that passes casual inspection and fails schema
+   validation. Normalised in `plan.py::_to_int`, with a test.
+
+**The design decision that matters: how a contract vault gets a Permit2 allowance.** The quote
+response hands back a `permitData` block to sign as an EIP-712 `PermitSingle`. **The vault cannot
+sign anything** — it is a contract, it holds no key, and the agent's key is external to it. Options
+were (a) implement ERC-1271 so the vault validates a signature the agent produces, or (b) use
+Permit2's other, signature-free entry point, `approve(token, spender, amount, expiration)`, which is
+an ordinary call the vault can make through `execute()`. **Chose (b).** It needs nothing from Lane
+A beyond the generic `execute()` that already exists, whereas (a) would have put a contract change
+on Lane A's critical path for no functional gain. Confirmed viable by observing `POST /swap` return
+200 with no signature supplied. Every plan is therefore three ordered steps: ERC-20 approve → Permit2
+approve → router execute.
+
+**Approvals are re-emitted on every plan** rather than checked against current allowance first. A
+redundant approve costs gas and always succeeds; a missing one reverts the whole plan. Given the
+vault executes plans rarely and atomically, that is the right side to err on. `include_approvals=False`
+exists for a vault with standing allowances.
+
+**Why no web3.py.** This lane needs ABI encoding, keccak, and eventually one `eth_call` — all of
+which are a few lines over the `httpx` client already in the tree. `eth-abi` + `eth-utils` are a
+fraction of the dependency weight, and the root `pyproject.toml` already documents a broken global
+web3 breaking pytest collection. Added as a `venues` extra, following the per-lane extras pattern
+Lane B established rather than inventing a second convention.
+
+**Rejected: a standalone `venues/pyproject.toml` with its own workspace.** Written first (while the
+root config was broken) and then deleted once Lane B fixed root. It worked, but it meant a second
+`.venv` in the tree and a macOS teammate at 10:00 guessing which one to activate. One venv,
+per-lane extras, `uv sync --all-extras`.
+
+**Client/translator split.** `client.py` speaks HTTP and knows nothing about our schema; `plan.py`
+speaks our schema and never touches the network. That is what lets the plan builder be tested
+against recorded responses — the offline suite covers step ordering, unit conversion and allowlist
+enforcement with no quota and no market dependency — and it confines a future Uniswap API change to
+one file.
+
+---
+
 ## 2026-07-25 — Lane B: root `uv` workspace config was broken, blocking all three Python lanes
 
 **What changed.** One line in the root `pyproject.toml`:
