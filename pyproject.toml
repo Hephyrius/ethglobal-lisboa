@@ -42,7 +42,7 @@ venues = [
 # running it from the workspace), and eth-account to sign x402 payment payloads
 # on the feature-flagged pay-per-query path.
 data = [
-  "mcp>=1.2",
+  "curator-mcp",
   "eth-account>=0.11",
 ]
 
@@ -53,6 +53,10 @@ curator-schema = { workspace = true }
 # Lane C's data layer. A real distribution rather than a loose module tree so
 # the MCP server can depend on it and be installed standalone.
 curator-data = { workspace = true }
+# The MCP server is its own distribution (it ships standalone via `uvx
+# curator-mcp`); this only makes it importable from the workspace venv so its
+# tests run in CI alongside everything else.
+curator-mcp = { workspace = true }
 
 [tool.uv.workspace]
 members = ["packages/schema/python", "data", "data/curator_mcp"]
