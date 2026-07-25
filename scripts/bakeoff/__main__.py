@@ -31,6 +31,7 @@ import sys
 import time
 from pathlib import Path
 
+from agent.model.backends.grok import GrokBackend
 from agent.model.backends.ollama import OllamaBackend
 from agent.model.prompts.curator import decision_messages, decision_schema
 
@@ -86,20 +87,64 @@ def _resident_models(base_url: str) -> list[str]:
         return []
 
 
+def _build_backend(kind: str, model: str, base_url: str):
+    """One backend, chosen the same way the running agent chooses one.
+
+    Grok config comes from Lane B's `Settings` rather than from flags here, so
+    the bake-off measures the endpoint and model the harness actually calls. A
+    benchmark that dials its own endpoint is measuring a configuration nobody
+    ships — the same reasoning that makes this harness import Lane B's prompt
+    instead of writing one.
+    """
+    if kind == "ollama":
+        return OllamaBackend(base_url=base_url, model=model, timeout=TIMEOUT_S)
+
+    # `settings()`, not `Settings()` — the latter is the defaults dataclass and its
+    # xai_api_key is None regardless of the environment. Getting this wrong reads as
+    # "no key configured" while the key sits right there in .env.
+    from agent.config import settings as load_settings
+
+    cfg = load_settings()
+    if not cfg.xai_api_key:
+        raise SystemExit(
+            "XAI_API_KEY is not set, so the grok backend cannot be built. This harness will not "
+            "quietly fall back to ollama the way the agent does: a bake-off that silently "
+            "benchmarks a different model than the one named is worse than one that refuses."
+        )
+    return GrokBackend(
+        base_url=cfg.xai_base_url,
+        model=model or cfg.xai_model,
+        api_key=cfg.xai_api_key,
+        timeout=TIMEOUT_S,
+    )
+
+
 async def run_trials(
-    model: str, *, base_url: str, scenarios: list[str], trials: int, temperature: float
+    model: str,
+    *,
+    base_url: str,
+    scenarios: list[str],
+    trials: int,
+    temperature: float,
+    backend_kind: str = "ollama",
 ) -> ModelReport:
     # `ModelBackend` is an async port, and an un-awaited coroutine is falsy-adjacent rather than
     # an error: the first version of this called `reachable()` without awaiting, believed the
     # truthy coroutine object, and then scored twelve trials as invalid output in 0.0 seconds.
     # A harness that reports a perfect failure is indistinguishable from a model that failed.
-    backend = OllamaBackend(base_url=base_url, model=model, timeout=TIMEOUT_S)
+    backend = _build_backend(backend_kind, model, base_url)
     if not await backend.reachable():
-        raise SystemExit(f"ollama not reachable at {base_url}")
+        raise SystemExit(
+            f"{backend_kind} not reachable"
+            + (f" at {base_url}" if backend_kind == "ollama" else "")
+        )
     if hasattr(backend, "has_model") and not await backend.has_model():
         raise SystemExit(
-            f"model {model!r} is not pulled. `ollama pull {model}` first — this harness will not "
-            f"download gigabytes on your behalf."
+            f"model {model!r} is not available on {backend_kind}."
+            + (
+                " `ollama pull` it first — this harness will not download gigabytes on your "
+                "behalf." if backend_kind == "ollama" else ""
+            )
         )
 
     snap = snapshot()
@@ -148,7 +193,12 @@ def main(argv: list[str] | None = None) -> int:
             stream.reconfigure(encoding="utf-8", errors="replace")
 
     p = argparse.ArgumentParser(prog="bakeoff", description=__doc__)
-    p.add_argument("--models", default="", help="comma-separated ollama model tags")
+    p.add_argument("--models", default="", help="comma-separated model tags")
+    p.add_argument(
+        "--backend", default="ollama", choices=("ollama", "grok"),
+        help="ollama (local, RAM-bound) or grok (hosted). Grok reads XAI_API_KEY and its "
+             "endpoint from the agent's own Settings; --models then names the xAI model.",
+    )
     p.add_argument("--scenarios", default="", help="comma-separated scenario keys (default: all)")
     p.add_argument("--trials", type=int, default=3, help="attempts per scenario (default 3)")
     p.add_argument("--temperature", type=float, default=0.0)
@@ -184,13 +234,23 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     models = [m.strip() for m in args.models.split(",") if m.strip()]
+    if not models and args.backend == "grok":
+        # A hosted backend has one configured model and no reason to make the caller retype it.
+        from agent.config import settings as load_settings
+
+        models = [load_settings().xai_model]
     if not models:
         p.error("--models is required (or use --check / --list)")
     keys = [k.strip() for k in args.scenarios.split(",") if k.strip()] or [
         s.key for s in all_scenarios()
     ]
 
-    print(f"available RAM: {ram:.1f} GB" if ram else "available RAM: unknown")
+    # RAM bounds a local model and is irrelevant to a hosted one. Printing it anyway
+    # invites reading a hosted latency as though it were memory-constrained.
+    if args.backend == "ollama":
+        print(f"available RAM: {ram:.1f} GB" if ram else "available RAM: unknown")
+    else:
+        print(f"backend: {args.backend} (hosted — local RAM does not bound this run)")
     print(f"{len(models)} model(s) x {len(keys)} scenario(s) x {args.trials} trial(s)\n")
 
     reports: list[ModelReport] = []
@@ -201,6 +261,7 @@ def main(argv: list[str] | None = None) -> int:
                 run_trials(
                     model, base_url=args.base_url, scenarios=keys,
                     trials=args.trials, temperature=args.temperature,
+                    backend_kind=args.backend,
                 )
             )
         )
