@@ -30,6 +30,9 @@ abstract contract VaultTestBase is Test {
     address internal guardian = makeAddr("guardian");
     address internal alice = makeAddr("alice");
     address internal bob = makeAddr("bob");
+    /// @dev Distinct from every other actor on purpose: attribution must not be satisfiable by
+    ///      accident from `msg.sender`, the agent, or a shareholder.
+    address internal deployer = makeAddr("deployer");
 
     uint256 internal constant PRICE_MAX_AGE = 3600;
     int256 internal constant ETH_USD = 3000e8;
@@ -64,7 +67,8 @@ abstract contract VaultTestBase is Test {
             symbol: "cUSDC",
             agent: agent,
             guardian: guardian,
-            mandateHash: MANDATE_HASH
+            mandateHash: MANDATE_HASH,
+            deployer: deployer
         });
     }
 

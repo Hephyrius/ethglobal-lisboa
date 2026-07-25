@@ -63,7 +63,8 @@ contract HandlerSanityTest is Test {
                     symbol: "cUSDC",
                     agent: agent,
                     guardian: guardian,
-                    mandateHash: keccak256("sanity")
+                    mandateHash: keccak256("sanity"),
+                    deployer: address(0)
                 })
             )
         );

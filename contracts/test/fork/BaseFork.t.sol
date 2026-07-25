@@ -74,7 +74,8 @@ contract BaseForkTest is Test {
                     symbol: "cUSDC",
                     agent: agent,
                     guardian: guardian,
-                    mandateHash: keccak256("fork-mandate")
+                    mandateHash: keccak256("fork-mandate"),
+                    deployer: address(0)
                 })
             )
         );

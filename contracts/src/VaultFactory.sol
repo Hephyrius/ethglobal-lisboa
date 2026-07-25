@@ -23,12 +23,21 @@ import {IVaultFactory} from "./interfaces/IVaultFactory.sol";
 ///
 ///      Changing a default never reaches a vault that already exists. To give an existing vault a
 ///      newly-discovered target, its guardian calls `setTargetAllowed` on the vault itself.
+///
+///      The factory also records **who a vault was created on behalf of** (`vaultsOf`,
+///      `deployerOf`, and the `deployer` topic on `VaultCreated`). That record lives here rather
+///      than on the vault for a reason: the vault must not be able to read it, so it cannot
+///      accidentally become a permission. See `IVaultFactory.CreateParams.deployer`.
 contract VaultFactory is Ownable, IVaultFactory {
     /// @notice The implementation every clone delegates to. Initializers are disabled on it.
     address public immutable implementation;
 
     address[] private _vaults;
     mapping(address vault => bool) private _isVault;
+
+    /// @dev Attribution only. See `IVaultFactory.CreateParams.deployer` — a label, not an ACL.
+    mapping(address deployer => address[]) private _vaultsOf;
+    mapping(address vault => address) private _deployerOf;
 
     address[] private _defaultTargets;
     mapping(address target => bool) private _isDefaultTarget;
@@ -79,10 +88,16 @@ contract VaultFactory is Ownable, IVaultFactory {
             })
         );
 
+        // Falling back to msg.sender rather than reverting keeps the field optional for the callers
+        // that predate it, and keeps `deployerOf` total — every vault has an answer, never a null.
+        address deployer = params.deployer == address(0) ? msg.sender : params.deployer;
+
         _vaults.push(vault);
         _isVault[vault] = true;
+        _vaultsOf[deployer].push(vault);
+        _deployerOf[vault] = deployer;
 
-        emit VaultCreated(vault, params.asset, params.agent, params.mandateHash);
+        emit VaultCreated(vault, params.asset, params.agent, params.mandateHash, deployer);
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -163,6 +178,16 @@ contract VaultFactory is Ownable, IVaultFactory {
     /// @inheritdoc IVaultFactory
     function isVault(address vault) external view returns (bool) {
         return _isVault[vault];
+    }
+
+    /// @inheritdoc IVaultFactory
+    function vaultsOf(address who) external view returns (address[] memory) {
+        return _vaultsOf[who];
+    }
+
+    /// @inheritdoc IVaultFactory
+    function deployerOf(address vault) external view returns (address) {
+        return _deployerOf[vault];
     }
 
     /// @inheritdoc IVaultFactory

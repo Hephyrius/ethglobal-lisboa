@@ -71,7 +71,8 @@ contract VaultInvariantsTest is StdInvariant, Test {
                     symbol: "cUSDC",
                     agent: agent,
                     guardian: guardian,
-                    mandateHash: keccak256("invariant-mandate")
+                    mandateHash: keccak256("invariant-mandate"),
+                    deployer: address(0)
                 })
             )
         );

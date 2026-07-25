@@ -12,7 +12,16 @@ import {ICuratedVault} from "./ICuratedVault.sol";
 ///      mutable valuation set would let its owner mint or burn shares at a manipulated price.
 interface IVaultFactory {
     /// @notice Emitted once per vault. This is the event indexers and the dApp key off.
-    event VaultCreated(address indexed vault, address indexed asset, address indexed agent, bytes32 mandateHash);
+    ///
+    /// @dev `agent` is deliberately **not** indexed, though it once was. An event has three topic
+    ///      slots and `deployer` needed one; at genesis every vault is created by the same agent key,
+    ///      so filtering on it selects the entire set — an index that indexes nothing. `asset` keeps
+    ///      its slot because "every USDC vault" is a filter someone will actually run.
+    ///
+    ///      `deployer` is **asserted, not proven** — see `CreateParams.deployer`.
+    event VaultCreated(
+        address indexed vault, address indexed asset, address agent, bytes32 mandateHash, address indexed deployer
+    );
     event DefaultTargetSet(address indexed target, bool allowed);
     event DefaultValuationSet(address indexed token, address indexed feed);
     event DefaultPriceMaxAgeSet(uint256 priceMaxAge);
@@ -28,6 +37,17 @@ interface IVaultFactory {
         address agent;
         address guardian;
         bytes32 mandateHash;
+        /// Who asked for this vault. **A label, never an authorization primitive.**
+        ///
+        /// The agent submits `createVault`, so `msg.sender` records the agent, not the human who
+        /// clicked. This field carries that human's address instead — but it is *asserted by the
+        /// submitter*, not proven by a signature, and anyone may call `createVault` with any value
+        /// here. It confers no power over the vault: nothing on-chain reads it, and the vault
+        /// itself never learns it. Safe for "show me the vaults I deployed"; unsafe for anything
+        /// that decides who may do what. `SECURITY.md` §11.
+        ///
+        /// `address(0)` records `msg.sender`, so the mapping is never null.
+        address deployer;
     }
 
     /// @notice Clone, initialize and register a new vault.
@@ -43,6 +63,17 @@ interface IVaultFactory {
     function vaults() external view returns (address[] memory);
     function vaultCount() external view returns (uint256);
     function isVault(address vault) external view returns (bool);
+
+    /// @notice Vaults created with `CreateParams.deployer == who`, in creation order.
+    /// @dev Convenience over the `VaultCreated` topic filter, so a dApp can answer "my vaults" with
+    ///      one `eth_call` instead of a log query over a block range. The event remains the source
+    ///      of truth; this is a cache of it that cannot disagree, because both are written in the
+    ///      same statement. Read `CreateParams.deployer` before trusting either for anything but
+    ///      display.
+    function vaultsOf(address who) external view returns (address[] memory);
+
+    /// @notice Who `vault` was created on behalf of, or `address(0)` if this factory did not make it.
+    function deployerOf(address vault) external view returns (address);
 
     /// @notice Defaults handed to the next vault created.
     function defaultTargets() external view returns (address[] memory);

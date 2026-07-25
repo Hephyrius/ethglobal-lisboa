@@ -103,7 +103,11 @@ contract Deploy is Script {
                 symbol: "cUSDC",
                 agent: agent,
                 guardian: guardian,
-                mandateHash: mandateHash
+                mandateHash: mandateHash,
+                // The genesis vault has no human behind it — it is deployed by the script, not
+                // requested by anyone. Recording the broadcasting key is the truthful answer, and
+                // address(0) gets there without hardcoding it.
+                deployer: address(0)
             })
         );
 

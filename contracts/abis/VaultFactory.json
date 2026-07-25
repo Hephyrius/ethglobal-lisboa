@@ -75,6 +75,11 @@
             "name": "mandateHash",
             "type": "bytes32",
             "internalType": "bytes32"
+          },
+          {
+            "name": "deployer",
+            "type": "address",
+            "internalType": "address"
           }
         ]
       }
@@ -135,6 +140,25 @@
             "internalType": "address"
           }
         ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "deployerOf",
+    "inputs": [
+      {
+        "name": "vault",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "view"
@@ -280,6 +304,25 @@
     "stateMutability": "view"
   },
   {
+    "type": "function",
+    "name": "vaultsOf",
+    "inputs": [
+      {
+        "name": "who",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address[]",
+        "internalType": "address[]"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
     "type": "event",
     "name": "DefaultPriceMaxAgeSet",
     "inputs": [
@@ -368,7 +411,7 @@
       {
         "name": "agent",
         "type": "address",
-        "indexed": true,
+        "indexed": false,
         "internalType": "address"
       },
       {
@@ -376,6 +419,12 @@
         "type": "bytes32",
         "indexed": false,
         "internalType": "bytes32"
+      },
+      {
+        "name": "deployer",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
       }
     ],
     "anonymous": false
