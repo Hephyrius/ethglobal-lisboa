@@ -86,11 +86,17 @@ AGENT_VENUE_REGISTRY=venues:get_venue uv run uvicorn agent.api.app:app --port 80
   where Lane B is up but internally in fixture mode, which `GET /health` exposes.
 - The fixture-mode genesis chat is a scripted interviewer, not a model. It only runs when Lane B is
   unreachable.
-- **The Aqua ship rendering is proven against a fixture, not against a real ship.** R5 is blocked on
-  Lanes B + D, so no agent-driven `ship()` has ever reached this UI. The path is exercised and
-  verified — `SwapVM · constant-product (xyc) curve · 30 bps maker fee`, amounts scaled from the
-  vault's holdings, all three plan steps paired to their tx hashes — so when a real one lands it
-  renders rather than surprising us. Run with `NEXT_PUBLIC_FIXTURES=1` to see it.
+- **The Aqua ship rendering is proven against a fixture, not against a real ship.** The path is
+  exercised and verified — `SwapVM · constant-product (xyc) curve · 30 bps maker fee`, amounts
+  scaled from the vault's holdings, all three plan steps paired to their tx hashes. Run with
+  `NEXT_PUBLIC_FIXTURES=1` to see it.
+
+  **Why it is still a fixture after R5 closed:** the real ship (`0x16eae7a2…`) landed on-chain but
+  was driven directly rather than through a tick, so it produced no `AgentAction` and never entered
+  the journal — the feed has 12 live actions and not one carries an `aqua` intent. The transaction
+  is real; it just is not *shown*, which is what e2e R7 asks for. Filed as cross-lane request #51:
+  one ship driven through `POST /vault/{addr}/tick` would close it. Nothing on this side is waiting
+  on that — the renderer is ready.
 
 ### ✅ The write path is verified on-chain — phase 2 §3.5 is closed
 
