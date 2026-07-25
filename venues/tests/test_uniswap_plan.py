@@ -64,6 +64,68 @@ class TestStepOrdering:
         assert plan.steps[0].target == swap_response["swap"]["to"]
 
 
+class TestAKeylessContractCanExecuteEveryStep:
+    """The property the whole Uniswap integration is shaped around.
+
+    The vault is a contract with no private key. The Trading API's documented
+    happy path hands back a `permitData` block to be signed as an EIP-712
+    `PermitSingle` — which our swapper cannot do, ever. The plan therefore takes
+    Permit2's *other* entry point: an ordinary on-chain
+    `approve(token, spender, amount, expiration)`.
+
+    Pinned as tests rather than left as a comment because the failure is not
+    loud. A plan that smuggled in a signature-dependent step would build fine,
+    validate fine, and revert only when the vault tried to execute it — and the
+    fix would then look like an execution bug rather than a design mistake.
+
+    Re-verified against the live API 2026-07-25: for a contract swapper the
+    quote returns `permitData` populated, `permitTransaction` **null**, and
+    `POST /swap` still returns a complete unsigned transaction. See FEEDBACK.md
+    §4.
+    """
+
+    #: `permit(address,((address,uint160,uint48,uint48),address,uint256),bytes)`
+    #: — the signature-consuming Permit2 entry point. Its presence in a plan
+    #: would mean the signature-free path had been silently abandoned.
+    PERMIT2_PERMIT_WITH_SIGNATURE = "0x2b67b570"
+
+    def test_the_permit2_step_is_the_approve_not_the_signature_entry_point(
+        self, quote_response, swap_response
+    ):
+        plan = _plan(quote_response, swap_response)
+        assert plan.steps[1].calldata.startswith("0x" + selector(PERMIT2_APPROVE).hex())
+        assert not plan.steps[1].calldata.startswith(self.PERMIT2_PERMIT_WITH_SIGNATURE)
+
+    def test_no_step_anywhere_calls_the_signature_entry_point(
+        self, quote_response, swap_response
+    ):
+        for step in _plan(quote_response, swap_response).steps:
+            assert not step.calldata.startswith(self.PERMIT2_PERMIT_WITH_SIGNATURE), (
+                f"step targeting {step.target} needs an EIP-712 signature the vault cannot produce"
+            )
+
+    def test_the_plan_carries_no_signature_material(self, quote_response, swap_response):
+        """A plan is executed by `executeBatch`, which passes only
+        (target, value, calldata). There is nowhere for a signature to live, so
+        anything the API expected us to sign must have been resolved before
+        this point — not carried along in hope."""
+        plan = _plan(quote_response, swap_response)
+        for step in plan.steps:
+            assert set(step.model_dump()) <= {"target", "value", "calldata", "why"}
+
+    def test_the_api_still_offers_a_signature_we_deliberately_ignore(self, quote_response):
+        """Guards the *reason* for the workaround, not just the workaround.
+
+        If Uniswap ever populates `permitTransaction`, or stops sending
+        `permitData` to contract swappers, this fails and someone re-reads
+        FEEDBACK.md §4 instead of carrying a workaround nobody remembers the
+        cause of."""
+        assert "permitData" in quote_response, (
+            "the recorded quote no longer carries permitData - re-check whether "
+            "the contract-caller workaround is still necessary (FEEDBACK.md #4)"
+        )
+
+
 class TestUnitConversion:
     """Every one of these is a silent-wrongness bug if it regresses."""
 

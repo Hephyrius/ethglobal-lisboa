@@ -100,13 +100,35 @@ the signature was supported or whether we were relying on undefined behaviour
 that might change. For an autonomous agent holding user funds, "it returned 200
 in July" is an uncomfortable foundation.
 
-**Suggestion:** document the contract-caller path explicitly — that
-`permitData` may be ignored when the swapper has a standing Permit2 allowance,
-and that `/swap` will build the calldata regardless. A one-line
-`"requiresSignature": false` in the response when a standing allowance is
-detected would be even better. Smart-account and protocol integrations are only
-going to become more common, and right now that audience has to discover its own
-path.
+**The field for this already exists, and it comes back empty.** Re-checked
+against the live API on 2026-07-25 with a contract swapper, a 500 USDC → WETH
+quote on Base returns:
+
+```
+isTokenApprovalApplicable : true
+permitData                : { domain, types: [PermitSingle, PermitDetails], values }
+permitTransaction         : null
+```
+
+So the response carries **both** a signature request and a slot for the
+on-chain alternative — and populates only the one a contract cannot use. We had
+assumed the signature-free path was simply undocumented; it is not, it is
+*modelled* and left null. That reads less like a missing feature than an
+unfinished branch, which is a much easier fix than new API surface.
+
+**Suggestion, in preference order:**
+
+1. **Populate `permitTransaction`** with the `Permit2.approve(token, spender,
+   amount, expiration)` call when the swapper cannot sign, or whenever a
+   standing allowance is the applicable path. The field is already in the
+   schema and every integrator is currently hand-rolling what it would return.
+2. Failing that, document that `permitData` may be ignored when the swapper has
+   a standing Permit2 allowance, and that `/swap` builds the calldata
+   regardless.
+
+Smart-account and protocol integrations are only going to become more common,
+and right now that audience has to discover its own path by experiment — and
+then wonder whether a 200 in July is a contract or an accident.
 
 ## 5. Unroutable and unavailable are reported in several shapes, none of them consistent
 
