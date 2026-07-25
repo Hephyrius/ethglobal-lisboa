@@ -19,6 +19,8 @@ amount above our ceiling, a missing key, a signing failure, a rejected payment
 
 from __future__ import annotations
 
+import base64
+import json
 import logging
 from typing import Any
 
@@ -96,24 +98,57 @@ class X402GatewayClient(GatewayClient):
                 f"expected 402, got HTTP {first.status_code}: {first.text[:120]}"
             )
 
-        try:
-            terms = PaymentRequirements.from_response(first.json())
-        except ValueError as exc:
-            raise PaymentError(f"402 body was not JSON: {exc}") from exc
-
+        terms = self._terms_from(first)
         header = build_payment_header(terms, self.settings.x402_private_key)
 
+        # Both header names are sent. The Graph's gateway asks for
+        # `Payment-Signature`; the x402 v1 spec uses `X-PAYMENT`. Sending both
+        # costs a few bytes and means we work against either without sniffing
+        # the version, which is worth it while the spec is still moving.
         second = await self.client.post(
-            url, json=payload, headers={**headers, "X-PAYMENT": header}
+            url,
+            json=payload,
+            headers={**headers, "Payment-Signature": header, "X-PAYMENT": header},
         )
         if second.status_code == 402:
-            raise PaymentError(f"payment rejected: {second.text[:160]}")
+            raise PaymentError(f"payment rejected: {self._reason(second)}")
 
         data = self._read(second, subgraph_id)
         receipt = second.headers.get("X-PAYMENT-RESPONSE")
         if receipt:
             logger.info("x402 payment settled for %s", subgraph_id)
         return data
+
+    @staticmethod
+    def _terms_from(response: httpx.Response) -> PaymentRequirements:
+        """Read the 402's terms from wherever this server puts them.
+
+        The Graph's gateway returns an **empty body** and a base64
+        `payment-required` header (verified live). The x402 v1 spec puts the
+        same JSON in the body. Header first, body as fallback.
+        """
+        header = response.headers.get("payment-required")
+        if header:
+            return PaymentRequirements.from_header(header)
+        try:
+            return PaymentRequirements.from_response(response.json())
+        except ValueError as exc:
+            raise PaymentError(
+                "402 carried neither a payment-required header nor a JSON body"
+            ) from exc
+
+    @staticmethod
+    def _reason(response: httpx.Response) -> str:
+        """Why a payment was refused, from header or body."""
+        header = response.headers.get("payment-required")
+        if header:
+            try:
+                padded = header.strip() + "=" * (-len(header.strip()) % 4)
+                decoded = json.loads(base64.b64decode(padded))
+                return str(decoded.get("error") or decoded)[:200]
+            except Exception:  # noqa: BLE001 - best-effort diagnostics
+                pass
+        return response.text[:160] or f"HTTP {response.status_code} with no detail"
 
     def status(self) -> dict[str, Any]:
         """What actually happened, for the CLI and the demo feed."""

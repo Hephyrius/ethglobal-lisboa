@@ -57,12 +57,134 @@ def _terms(amount: int = 1000, **over) -> dict:
     return {"x402Version": 1, "accepts": [offer]}
 
 
+def _terms_v2(amount: int = 10000, **over) -> dict:
+    """The Graph's gateway terms, verbatim from a live 402 (2026-07-25)."""
+    offer = {
+        "scheme": "exact",
+        "network": "eip155:8453",          # CAIP-2, not "base"
+        "amount": str(amount),             # not "maxAmountRequired"
+        "payTo": "0x79DC34E41B2b591078d3dE222C43EcaaBD52FcCB",
+        "maxTimeoutSeconds": 300,
+        "asset": USDC_BASE,
+        "extra": {"assetTransferMethod": "eip3009", "name": "USD Coin", "version": "2"},
+    }
+    offer.update(over)
+    return {
+        "x402Version": 2,
+        "error": "Payment-Signature header is required",
+        "resource": {"url": "http://indexer.example/subgraphs/id/sub-1"},
+        "accepts": [offer],
+    }
+
+
+def _header(terms: dict) -> str:
+    return base64.b64encode(json.dumps(terms).encode()).decode()
+
+
 def _client(handler) -> X402GatewayClient:
     shared = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     return X402GatewayClient(PAID, client=shared)
 
 
-# ── the happy path ────────────────────────────────────────────────────────
+# ── The Graph's gateway: x402 v2, terms in a header ───────────────────────
+#
+# Every value in these tests came off the live gateway. Body-only parsing and
+# the X-PAYMENT header both silently fell back on every single request until
+# this was found.
+
+
+async def test_terms_are_read_from_the_payment_required_header_with_an_empty_body():
+    """The live 402 carries NO body at all - everything is in the header."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if "Payment-Signature" not in request.headers:
+            return httpx.Response(
+                402, content=b"", headers={"payment-required": _header(_terms_v2())}
+            )
+        return httpx.Response(200, json=DATA)
+
+    client = _client(handler)
+    assert await client.query("sub-1", "{ markets { id } }") == DATA["data"]
+    assert client.paid_queries == 1
+    assert client.fallback_reasons == []
+
+
+async def test_the_payment_travels_in_the_payment_signature_header():
+    """The gateway asks for `Payment-Signature`; v1's `X-PAYMENT` alone got
+    'Payment-Signature header is required'."""
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "Payment-Signature" not in request.headers:
+            return httpx.Response(402, headers={"payment-required": _header(_terms_v2())})
+        captured["payload"] = json.loads(base64.b64decode(request.headers["Payment-Signature"]))
+        return httpx.Response(200, json=DATA)
+
+    await _client(handler).query("sub-1", "{ markets { id } }")
+    assert captured, "Payment-Signature header was never sent"
+
+
+async def test_the_v2_payload_echoes_the_accepted_offer():
+    """v2 replaces v1's flat scheme/network with the offer echoed back."""
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        header = request.headers.get("Payment-Signature")
+        if not header:
+            return httpx.Response(402, headers={"payment-required": _header(_terms_v2())})
+        captured.update(json.loads(base64.b64decode(header)))
+        return httpx.Response(200, json=DATA)
+
+    await _client(handler).query("sub-1", "{ markets { id } }")
+
+    assert captured["x402Version"] == 2
+    assert captured["accepted"]["network"] == "eip155:8453"
+    assert captured["accepted"]["amount"] == "10000"
+    assert captured["resource"]["url"].endswith("sub-1")
+    assert "extensions" in captured
+    # The signed authorization is still the same EIP-3009 object.
+    assert captured["payload"]["authorization"]["value"] == "10000"
+    assert captured["payload"]["signature"].startswith("0x")
+
+
+async def test_a_caip2_network_resolves_to_the_right_chain_id():
+    """`eip155:8453` must sign against chain 8453, or the signature is void."""
+    terms = PaymentRequirements.from_header(_header(_terms_v2()))
+    assert terms.chain_id == 8453
+
+
+def test_both_amount_spellings_are_accepted():
+    """v2 says `amount`; v1 says `maxAmountRequired`."""
+    v2 = PaymentRequirements.from_header(_header(_terms_v2(amount=10000)))
+    assert v2.max_amount_required == 10000
+
+    v1 = PaymentRequirements.from_response(_terms(amount=1500))
+    assert v1.max_amount_required == 1500
+
+
+async def test_a_rejection_reason_is_read_out_of_the_header():
+    """The live refusal ('insufficient_balance') arrives base64 in a header."""
+    refusal = {
+        "x402Version": 2,
+        "error": "Verification failed: invalid_exact_evm_insufficient_balance",
+        "accepts": [_terms_v2()["accepts"][0]],
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/x402/" in str(request.url):
+            if "Payment-Signature" not in request.headers:
+                return httpx.Response(402, headers={"payment-required": _header(_terms_v2())})
+            return httpx.Response(402, headers={"payment-required": _header(refusal)})
+        return httpx.Response(200, json=DATA)
+
+    client = _client(handler)
+    assert await client.query("sub-1", "{ markets { id } }") == DATA["data"]
+    assert any("insufficient_balance" in r for r in client.fallback_reasons)
+
+
+# ── the happy path (x402 v1: terms in the body, X-PAYMENT) ────────────────
 
 
 async def test_402_is_answered_with_a_signed_payment_and_the_data_returns():

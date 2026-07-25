@@ -47,6 +47,20 @@ TRANSFER_WITH_AUTHORIZATION_TYPES = {
 
 CHAIN_IDS = {"base": 8453, "base-sepolia": 84532}
 
+#: The Graph's gateway announces networks in CAIP-2 form (`eip155:8453`) rather
+#: than by name. Both are accepted so the parser survives either spelling.
+def chain_id_for(network: str) -> int | None:
+    """Chain id for a network name or CAIP-2 identifier."""
+    name = (network or "").strip().lower()
+    if name in CHAIN_IDS:
+        return CHAIN_IDS[name]
+    if name.startswith("eip155:"):
+        try:
+            return int(name.split(":", 1)[1])
+        except ValueError:
+            return None
+    return None
+
 
 class PaymentError(RuntimeError):
     """Payment could not be constructed or signed. Always recoverable —
@@ -67,18 +81,47 @@ class PaymentRequirements:
     #: EIP-712 domain details for the asset contract (`name`, `version`).
     extra: dict[str, Any] | None = None
     x402_version: int = 1
+    #: The offer exactly as the server sent it. v2 requires echoing it back
+    #: under `accepted`, and reconstructing it from parsed fields risks a
+    #: mismatch on anything we did not model.
+    raw_offer: dict[str, Any] | None = None
+    #: The `resource` object from a v2 402, echoed back unchanged.
+    raw_resource: dict[str, Any] | None = None
+
+    @classmethod
+    def from_header(cls, header_value: str) -> PaymentRequirements:
+        """Parse the base64 `payment-required` response header.
+
+        This is how The Graph's gateway actually states its terms — verified
+        live 2026-07-25. The 402 arrives with an **empty body** and everything
+        in this header, which is why body-only parsing silently fell back on
+        every request.
+        """
+        if not header_value:
+            raise PaymentError("empty payment-required header")
+        padded = header_value.strip() + "=" * (-len(header_value.strip()) % 4)
+        try:
+            decoded = base64.b64decode(padded)
+            return cls.from_response(json.loads(decoded))
+        except PaymentError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - any decode failure is a fallback
+            raise PaymentError(f"unreadable payment-required header: {exc}") from exc
 
     @classmethod
     def from_response(cls, body: dict[str, Any]) -> PaymentRequirements:
-        """Parse a 402 body, preferring an `exact` offer we can actually pay.
+        """Parse decoded 402 terms, preferring an `exact` offer we can pay.
 
-        The body carries an `accepts` list because a server may support several
-        schemes and networks. We take the first `exact` offer; if there is none
-        we raise, and the caller falls back.
+        `accepts` is a list because a server may support several schemes and
+        networks. We take the first `exact` offer; if there is none we raise
+        and the caller falls back.
+
+        Field names differ across x402 versions and both are accepted: v1 calls
+        the price `maxAmountRequired`, the gateway's v2 calls it `amount`.
         """
         offers = body.get("accepts") or []
         if not offers:
-            raise PaymentError("402 response contained no payment options")
+            raise PaymentError("402 terms contained no payment options")
 
         exact = [o for o in offers if str(o.get("scheme", "")).lower() == "exact"]
         if not exact:
@@ -86,10 +129,16 @@ class PaymentRequirements:
             raise PaymentError(f"no 'exact' scheme offered (got: {', '.join(schemes)})")
 
         offer = exact[0]
+        raw_amount = offer.get("amount", offer.get("maxAmountRequired"))
         try:
-            amount = int(offer["maxAmountRequired"])
-        except (KeyError, TypeError, ValueError) as exc:
-            raise PaymentError(f"unreadable maxAmountRequired: {exc}") from exc
+            amount = int(raw_amount)
+        except (TypeError, ValueError) as exc:
+            raise PaymentError(f"unreadable payment amount: {raw_amount!r}") from exc
+
+        resource = offer.get("resource")
+        if not resource:
+            # v2 moves the resource up next to the offers.
+            resource = (body.get("resource") or {}).get("url", "")
 
         return cls(
             scheme="exact",
@@ -97,10 +146,12 @@ class PaymentRequirements:
             max_amount_required=amount,
             pay_to=str(offer.get("payTo") or ""),
             asset=str(offer.get("asset") or ""),
-            resource=str(offer.get("resource") or ""),
+            resource=str(resource or ""),
             max_timeout_seconds=int(offer.get("maxTimeoutSeconds") or 60),
             extra=offer.get("extra") or {},
             x402_version=int(body.get("x402Version") or 1),
+            raw_offer=dict(offer),
+            raw_resource=body.get("resource") if isinstance(body.get("resource"), dict) else None,
         )
 
     def validate(self, *, max_atomic: int = MAX_PAYMENT_ATOMIC) -> None:
@@ -114,8 +165,15 @@ class PaymentRequirements:
                 f"refusing to sign {self.max_amount_required} atomic units - above the "
                 f"{max_atomic} ceiling. A market-data query should cost a fraction of a cent."
             )
-        if self.network not in CHAIN_IDS:
+        if chain_id_for(self.network) is None:
             raise PaymentError(f"unsupported network '{self.network}'")
+
+    @property
+    def chain_id(self) -> int:
+        resolved = chain_id_for(self.network)
+        if resolved is None:
+            raise PaymentError(f"unsupported network '{self.network}'")
+        return resolved
 
 
 def build_payment_header(
@@ -166,7 +224,7 @@ def build_payment_header(
         # conforming 402 body supplies both explicitly.
         "name": str(extra.get("name") or "USD Coin"),
         "version": str(extra.get("version") or "2"),
-        "chainId": CHAIN_IDS[requirements.network],
+        "chainId": requirements.chain_id,
         "verifyingContract": requirements.asset,
     }
 
@@ -186,17 +244,41 @@ def build_payment_header(
     except Exception as exc:  # noqa: BLE001 - signing failure must fall back
         raise PaymentError(f"signing failed: {type(exc).__name__}: {exc}") from exc
 
-    payload = {
-        "x402Version": requirements.x402_version,
-        "scheme": requirements.scheme,
-        "network": requirements.network,
-        "payload": {
-            "signature": signed.signature.hex()
-            if str(signed.signature.hex()).startswith("0x")
-            else "0x" + signed.signature.hex(),
-            "authorization": authorization,
-        },
-    }
+    raw_signature = str(signed.signature.hex())
+    signature = raw_signature if raw_signature.startswith("0x") else "0x" + raw_signature
+    signed_payload = {"signature": signature, "authorization": authorization}
+
+    # v1 and v2 wrap the same signed authorization differently. v2 echoes the
+    # accepted offer and the resource back to the server instead of restating
+    # scheme/network at the top level.
+    if requirements.x402_version >= 2:
+        payload: dict[str, Any] = {
+            "x402Version": requirements.x402_version,
+            "accepted": requirements.raw_offer
+            or {
+                "scheme": requirements.scheme,
+                "network": requirements.network,
+                "amount": str(requirements.max_amount_required),
+                "asset": requirements.asset,
+                "payTo": requirements.pay_to,
+                "maxTimeoutSeconds": requirements.max_timeout_seconds,
+                "extra": extra,
+            },
+            "payload": signed_payload,
+            "extensions": {},
+        }
+        if requirements.raw_resource:
+            payload["resource"] = requirements.raw_resource
+        elif requirements.resource:
+            payload["resource"] = {"url": requirements.resource}
+    else:
+        payload = {
+            "x402Version": requirements.x402_version,
+            "scheme": requirements.scheme,
+            "network": requirements.network,
+            "payload": signed_payload,
+        }
+
     return base64.b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode()
 
 
