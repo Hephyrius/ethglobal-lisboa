@@ -43,6 +43,7 @@ from datetime import timedelta
 from curator_schema import AgentAction, PerformancePoint
 
 from ..clock import to_utc, utcnow
+from ..performance.metrics import summarize
 
 __all__ = ["Outcome", "Reflection", "build_reflection"]
 
@@ -151,6 +152,10 @@ class Reflection:
     rejections: int
     executions: int
     idle_drag: IdleDrag | None = None
+    #: Annualised return divided by annualised volatility. Deliberately not
+    #: called a Sharpe ratio: there is no risk-free rate in it and the window
+    #: is hours, not years. None until there is enough history to mean anything.
+    risk_adjusted_return: float | None = None
 
     def render(self) -> str:
         """The prompt block. Empty string when there is nothing honest to say."""
@@ -159,10 +164,28 @@ class Reflection:
             and self.return_pct is None
             and not self.rejections
             and self.idle_drag is None
+            and self.risk_adjusted_return is None
         ):
             return ""
 
         lines = ["", "HOW YOUR RECENT DECISIONS HAVE WORKED OUT."]
+
+        # The scoreboard opens the block, because it is the objective. When it
+        # is unknown we say so: a fabricated 0.0 would read as "doing nothing
+        # scores fine", which is the exact lesson this lane is trying to unteach.
+        if self.risk_adjusted_return is not None:
+            lines.append(
+                f"Your risk-adjusted return is {self.risk_adjusted_return:.2f} "
+                "(annualised return divided by annualised volatility). That is the "
+                "number you are trying to raise. Raising return by taking more swing "
+                "does not raise it."
+            )
+        else:
+            lines.append(
+                "Your risk-adjusted return cannot be computed yet: not enough price "
+                "history. Do not read that as a score of zero, and do not let it "
+                "argue for either trading or holding."
+            )
 
         if self.return_pct is not None:
             summary = f"Share price is {self.return_pct * 100:+.3f}% since the record begins"
@@ -358,4 +381,5 @@ def build_reflection(
         rejections=sum(1 for a in actions if a.status == "rejected"),
         executions=sum(1 for a in actions if a.status == "executed"),
         idle_drag=idle_drag,
+        risk_adjusted_return=summarize("", points).risk_adjusted_return,
     )

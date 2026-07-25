@@ -213,3 +213,78 @@ def test_the_whole_rendered_block_is_ascii_not_just_the_venue_text():
 
     offenders = sorted({ch for ch in text if ord(ch) > 127})
     assert not offenders, f"non-ASCII in the reflection block: {offenders}"
+
+
+# ── B4 · risk-adjusted return is the scoreboard ───────────────────────────
+#
+# Wave 2: "the agent's goal should always be making the highest risk-adjusted
+# return for the current given mandate." The system prompt already states the
+# objective; what was missing was the *figure*, so the agent had a goal and no
+# scoreboard. It opens the block because it is the thing being optimised.
+
+
+def test_the_scoreboard_opens_the_block():
+    from agent.performance.fixture_curve import fixture_curve
+
+    rendered = build_reflection([], fixture_curve(VAULT)).render()
+    body = rendered.split("HOW YOUR RECENT DECISIONS HAVE WORKED OUT.", 1)[1].lstrip()
+
+    assert body.startswith("Your risk-adjusted return is"), (
+        "the objective must lead; anything above it competes for attention with it"
+    )
+
+
+def test_the_scoreboard_carries_the_real_figure():
+    from agent.performance.fixture_curve import fixture_curve
+    from agent.performance.metrics import summarize
+
+    points = fixture_curve(VAULT)
+    reflection = build_reflection([], points)
+
+    assert reflection.risk_adjusted_return == summarize("", points).risk_adjusted_return
+    assert reflection.risk_adjusted_return is not None
+
+
+def test_too_little_history_says_so_rather_than_scoring_zero():
+    """A fabricated 0.0 reads as "doing nothing scores fine", which is the exact
+    lesson the idle-capital work exists to unteach.
+
+    Uses a vault with a rejection but no price series: it has a record worth
+    showing and not enough of one to compute a ratio, which is the case the line
+    exists for. A vault with *no* record at all renders nothing at all, and that
+    is correct — a block whose only content is "we cannot score you" is noise.
+    """
+    rendered = build_reflection([_rejected(2.0)], []).render()
+
+    assert "cannot be computed yet" in rendered
+    assert "0.00" not in rendered
+
+
+def test_an_unknown_score_argues_for_nothing():
+    """It must not become a reason to trade *or* to hold. An absent measurement
+    is not evidence in either direction."""
+    rendered = build_reflection([_rejected(2.0)], []).render()
+    assert "do not let it argue for either trading or holding" in rendered.lower()
+
+
+def test_an_empty_record_renders_nothing_at_all():
+    """The scoreboard must not resurrect an otherwise-empty block. "We cannot
+    score you and have nothing else to report" is not worth prompt tokens."""
+    assert build_reflection([], []).render() == ""
+
+
+def test_the_block_is_not_empty_when_only_the_scoreboard_exists():
+    """`render()` returns "" when there is nothing honest to say. A computable
+    score is something to say, even with no outcomes and no rejections."""
+    from agent.performance.fixture_curve import fixture_curve
+
+    assert build_reflection([], fixture_curve(VAULT)).render() != ""
+
+
+def test_the_scoreboard_explains_what_would_not_raise_it():
+    """The failure mode is a model that chases return by taking more swing. The
+    line has to say that explicitly, because the ratio alone does not."""
+    from agent.performance.fixture_curve import fixture_curve
+
+    rendered = build_reflection([], fixture_curve(VAULT)).render()
+    assert "taking more swing does not raise it" in rendered
