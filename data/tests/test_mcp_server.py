@@ -14,8 +14,9 @@ from __future__ import annotations
 
 import json
 
-from curator_data.config import Settings
 from curator_mcp.server import build_server
+
+from curator_data.config import Settings
 
 #: No credentials: every upstream call fails, so responses must degrade.
 NO_CREDS = Settings()
