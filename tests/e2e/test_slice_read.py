@@ -14,7 +14,6 @@ everyone else is testing against.
 from __future__ import annotations
 
 import json
-import pathlib
 
 import pytest
 from curator_schema import VaultState

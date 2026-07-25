@@ -32,7 +32,10 @@ def demo_vault(deployments) -> str:
     vault holds a single asset with nothing to compare. A tick may execute, so this is the one place
     the suite can touch shared state — which is why nothing here asserts on balances.
     """
-    demo = deployments.get("demoVault", {}).get("address") or (deployments.get("vaults") or [None])[0]
+    demo = (
+        deployments.get("demoVault", {}).get("address")
+        or (deployments.get("vaults") or [None])[0]
+    )
     if not demo:
         pytest.skip(f"no vault recorded in {DEPLOYMENTS.name}")
     return demo

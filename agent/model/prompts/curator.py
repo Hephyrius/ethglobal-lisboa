@@ -227,7 +227,10 @@ Decide what to do with this vault now. Work in this order:
 
 1. Read your objective above and write down the allocation it asks for.
 2. Compare it with the percentages already shown under THE VAULT CURRENTLY HOLDS.
-3. If they differ by more than your objective tolerates, act. If they match, hold.
+3. If they differ by more than your objective tolerates, rotate to close the gap.
+4. If they already match, you are not finished. Re-read your objective and check \
+whether it asks for anything else once the book is balanced, such as posting the \
+idle balance as Aqua liquidity to earn fees. Hold only if it does not.
 
 `target_allocations` is where you want the vault to BE, not where it already is. \
 If your targets differ from the current percentages, you must supply the \
