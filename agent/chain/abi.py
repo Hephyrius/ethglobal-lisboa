@@ -1,15 +1,18 @@
 """Loading Lane A's published ABIs.
 
-`contracts/out/` is committed on purpose — it is how Lane A publishes its
-interface to every other lane (`docs/active-work.md`). Reading the compiled
-artifact is therefore the *correct* integration surface, and the reason this lane
-never opens `contracts/src/`: the ABI is the contract, the Solidity is Lane A's
-business.
+Lane A publishes its interface two ways, and asks consumers to prefer the first
+(cross-lane request #2): `contracts/abis/<Name>.json` is a **flat ABI array**
+curated for exactly this purpose, while `contracts/out/<Name>.sol/<Name>.json` is
+the raw Foundry artifact with the ABI nested under `.abi`. Both are committed on
+purpose. Reading either is the *correct* integration surface, and the reason this
+lane never opens `contracts/src/`: the ABI is the contract, the Solidity is
+Lane A's business.
 
-If an artifact is missing — Lane A mid-recompile, a fresh clone before the first
-`forge build` — the minimal fallback below keeps the harness importable and the
-tests running. It carries only what the harness actually calls, and it is a
-floor, not a substitute: whenever the real artifact exists it wins.
+So the lookup order is: the curated flat array, then the raw artifact, then a
+minimal built-in fallback carrying only what the harness actually calls. The
+fallback exists so a fresh clone before the first `forge build`, or a mid-
+recompile moment, still imports and still runs the tests — it is a floor, never a
+substitute. Whenever Lane A's real ABI is present, it wins.
 """
 
 from __future__ import annotations
@@ -25,6 +28,9 @@ __all__ = ["load_abi", "ERC20_ABI", "artifact_path"]
 
 log = logging.getLogger(__name__)
 
+#: Lane A's curated flat ABI arrays — the interface they ask consumers to use.
+_ABI_DIR = REPO_ROOT / "contracts" / "abis"
+#: Raw Foundry artifacts, ABI nested under `.abi`.
 _OUT_DIR = REPO_ROOT / "contracts" / "out"
 
 #: Only what this lane calls: balances and metadata for holdings display.
@@ -140,21 +146,62 @@ _FALLBACK: dict[str, list[dict[str, Any]]] = {
 
 
 def artifact_path(name: str):
+    """The raw Foundry artifact. `abi_path` is the preferred source."""
     return _OUT_DIR / f"{name}.sol" / f"{name}.json"
+
+
+def abi_path(name: str):
+    """Lane A's curated flat ABI array."""
+    return _ABI_DIR / f"{name}.json"
+
+
+def _read_flat(name: str) -> list[dict[str, Any]] | None:
+    path = abi_path(name)
+    if not path.is_file():
+        return None
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        log.warning("could not parse %s (%s)", path, exc)
+        return None
+    # Tolerate the file being an artifact rather than a flat array: Lane A
+    # documents it as flat, but guessing wrong here would silently fall through
+    # to the minimal ABI and lose every function the harness needs.
+    if isinstance(loaded, list):
+        return loaded
+    if isinstance(loaded, dict) and isinstance(loaded.get("abi"), list):
+        return loaded["abi"]
+    log.warning("%s is neither a flat ABI array nor an artifact", path)
+    return None
+
+
+def _read_artifact(name: str) -> list[dict[str, Any]] | None:
+    path = artifact_path(name)
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))["abi"]
+    except (KeyError, ValueError) as exc:
+        log.warning("could not read %s (%s)", path, exc)
+        return None
 
 
 @cache
 def load_abi(name: str) -> list[dict[str, Any]]:
-    """Lane A's ABI for `name`, or the minimal fallback."""
-    path = artifact_path(name)
-    if path.is_file():
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))["abi"]
-        except (KeyError, ValueError) as exc:
-            log.warning("could not read %s (%s); using the fallback ABI", path, exc)
-    else:
-        log.warning("%s not found; using the fallback ABI. Has Lane A run `forge build`?", path)
+    """Lane A's ABI for `name`, preferring their curated flat array."""
+    if (abi := _read_flat(name)) is not None:
+        return abi
+    if (abi := _read_artifact(name)) is not None:
+        log.info("%s: using the raw Foundry artifact (no flat ABI published)", name)
+        return abi
 
+    log.warning(
+        "no published ABI for %s in %s or %s; using the minimal fallback. "
+        "Has Lane A run `forge build`?",
+        name,
+        _ABI_DIR,
+        _OUT_DIR,
+    )
     if name not in _FALLBACK:
-        raise FileNotFoundError(f"no artifact and no fallback ABI for {name}")
+        raise FileNotFoundError(f"no published ABI and no fallback for {name}")
     return _FALLBACK[name]
