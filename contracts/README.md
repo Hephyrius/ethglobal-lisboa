@@ -32,7 +32,7 @@ reading any venue's state.
 cd contracts
 ./script/install-deps.sh          # vendored, pinned — only needed to change a version
 forge build
-forge test                        # 142 tests, no network required (+7 fork tests skip)
+forge test                        # 142 tests, no network required (+9 fork tests skip)
 ```
 
 Fork deployment (from repo root, two terminals):

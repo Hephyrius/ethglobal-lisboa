@@ -188,6 +188,83 @@ contract BaseForkTest is Test {
         assertFalse(vault.isAllowedTarget(address(0xdead)), "a stranger");
     }
 
+    /// @dev The §10 book against **real** USDC, **real** WETH and the **live** ETH/USD feed, rather
+    ///      than mocks that could be flattering it. The whole point of `redeemInKind` is that it does
+    ///      not depend on what anything is worth, so proving it where the price is genuinely unknown
+    ///      at test-authoring time is the version of the claim worth making.
+    function test_redeemInKindPaysOutAgainstRealBaseState() public onlyLive {
+        _fundUsdc(alice, 15_000e6);
+        vm.startPrank(alice);
+        IERC20(USDC).approve(address(vault), 15_000e6);
+        uint256 shares = vault.deposit(15_000e6, alice);
+        vm.stopPrank();
+
+        // A completed rotation: 6,000 USDC of the book is now real WETH, leaving 9,000 liquid.
+        (, int256 answer,,,) = IAggregatorV3(ETH_USD_FEED).latestRoundData();
+        assertGt(answer, 0, "feed is reporting");
+        // forge-lint: disable-next-line(unsafe-typecast)
+        uint256 wethIn = (6_000e6 * 1e20) / uint256(answer);
+        deal(USDC, address(vault), 9_000e6);
+        deal(WETH, address(vault), wethIn);
+
+        assertApproxEqRel(vault.totalAssets(), 15_000e6, 1e15, "solvent at the live price");
+        assertEq(IERC20(USDC).balanceOf(address(vault)), 9_000e6, "and only 9,000 of it liquid");
+
+        // The hole: a 15,000 claim against 9,000 of the asset the front door pays in.
+        vm.expectRevert();
+        vm.prank(alice);
+        vault.redeem(shares, alice, alice);
+
+        // The door that needs no market.
+        vm.prank(alice);
+        ICuratedVault.InKindPayout[] memory payouts = vault.redeemInKind(shares, alice, alice);
+
+        assertEq(vault.balanceOf(alice), 0, "out in full");
+        assertEq(payouts[0].token, USDC, "base asset first");
+
+        // Relative, not absolute. What stays behind is the virtual-share offset — a fixed *fraction*
+        // of the book, ~10⁻¹⁰ — so on an 18-decimal token it is a few hundred million wei and on a
+        // 6-decimal one it rounds away entirely. An absolute wei bound would be an assertion about
+        // WETH's decimals dressed as a payout claim, and would have passed for the wrong reason.
+        assertApproxEqRel(IERC20(USDC).balanceOf(alice), 9_000e6, 1e9, "took the cash leg");
+        assertApproxEqRel(IERC20(WETH).balanceOf(alice), wethIn, 1e9, "and the WETH leg redeem could not reach");
+    }
+
+    /// @dev Wind-down against a real venue rather than a mock: the vault genuinely cannot approve
+    ///      Permit2 into a *larger* position while paused, and genuinely still can while not.
+    function test_windDownBindsAgainstRealBaseState() public onlyLive {
+        _fundUsdc(alice, 1_000e6);
+        vm.startPrank(alice);
+        IERC20(USDC).approve(address(vault), 1_000e6);
+        vault.deposit(1_000e6, alice);
+        vm.stopPrank();
+        deal(WETH, address(vault), 1e18);
+
+        vm.prank(guardian);
+        vault.pause();
+        assertTrue(vault.paused(), "wind-down is live");
+
+        // Buying real WETH with real USDC through an allowlisted target: refused on direction alone.
+        vm.expectRevert(
+            abi.encodeWithSelector(ICuratedVault.WindDownWouldSpendBaseAsset.selector, uint256(1_000e6), uint256(0))
+        );
+        vm.prank(agent);
+        vault.execute(USDC, 0, abi.encodeCall(IERC20.transfer, (address(0xdead), 1_000e6)));
+
+        // Approving a real venue still works, because an unwind cannot happen without it.
+        vm.prank(agent);
+        vault.approveVenue(WETH, PERMIT2, 1e18);
+        assertEq(IERC20(WETH).allowance(address(vault), PERMIT2), 1e18, "real allowance to real Permit2");
+
+        // And the exit is open throughout. `balanceOf` is hoisted deliberately: it is an external
+        // call, so evaluating it inside the argument list consumes the prank and the redemption
+        // arrives from the test contract instead of from alice.
+        uint256 aliceShares = vault.balanceOf(alice);
+        vm.prank(alice);
+        vault.redeemInKind(aliceShares, alice, alice);
+        assertGt(IERC20(WETH).balanceOf(alice), 0, "paid in kind from a paused vault");
+    }
+
     /// @dev `deal` on a proxied token can miss the real balance slot, so assert it landed.
     function _fundUsdc(address to, uint256 amount) internal {
         deal(USDC, to, amount);
