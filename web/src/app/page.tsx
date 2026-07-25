@@ -31,7 +31,7 @@ export default function HomePage() {
 
       <section>
         <div className="flex items-baseline justify-between border-b border-line pb-2">
-          <h2 className="text-sm font-semibold text-ink">Vaults</h2>
+          <h2 className="text-xl font-semibold tracking-tight text-ink">Explore Deployed Vaults</h2>
           <Link href="/create" className="text-xs text-muted transition-colors hover:text-ink">
             Create a vault →
           </Link>
