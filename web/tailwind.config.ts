@@ -18,20 +18,42 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        base: '#FAF9F7', // warm paper
+        // ── Ground ────────────────────────────────────────────────────────
+        // White, not paper. The ground carries no colour of its own; every
+        // tint below leans a few degrees violet so the surface reads as one
+        // family rather than as grey with a purple accent bolted on.
+        base: '#FFFFFF',
         surface: '#FFFFFF',
-        raised: '#F4F2EE', // insets, table stripes
-        line: '#E4E0D9', // hairline rules
-        'line-bright': '#CFC9BF',
-        ink: '#14181D',
-        muted: '#5B646F',
-        faint: '#8A9099',
-        // Semantic
-        agent: '#1D3B6B', // the curator's voice — reasoning, mandate, primary action
-        data: '#1B6A66', // observed facts and their provenance
-        ok: '#146B3C', // executed on-chain
-        warn: '#8A5209', // degraded / held / fixture mode
-        bad: '#9E2B20', // rejected by validation, failed
+        raised: '#F6F5F9', // insets, table stripes
+        line: '#E7E5EE', // hairline rules
+        'line-bright': '#CBC7D8',
+        ink: '#17161D', // near-black, violet undertone
+        muted: '#575366',
+        faint: '#86818F',
+
+        // ── The curator's voice ───────────────────────────────────────────
+        // Deep violet: mystical in hue, institutional in depth. Chosen dark
+        // enough (~9:1 on white) to serve as body-weight text AND as a solid
+        // button ground with white type, because it is used both ways. A
+        // brighter violet would have forced a second colour for one of them.
+        agent: '#4A3B8C',
+        'agent-soft': '#6F5FB8', // borders, hover, secondary marks
+        'agent-tint': '#F1EFF9', // wash backgrounds
+
+        // ── Highlight ─────────────────────────────────────────────────────
+        // Antique gold. Decorative and structural only — rules, active
+        // underlines, the one figure on a page that should be looked at
+        // first. Deliberately yellower than `warn` below: gold must never be
+        // mistaken for a warning in a UI where colour carries meaning.
+        gold: '#A8801F',
+        'gold-bright': '#D9A93C', // hairline rules, underlines
+        'gold-tint': '#FAF4E6', // wash backgrounds
+
+        // ── Semantic ──────────────────────────────────────────────────────
+        data: '#156E6A', // observed facts and their provenance
+        ok: '#136B3E', // executed on-chain
+        warn: '#B45309', // degraded / held / fixture mode — orange, not gold
+        bad: '#A32B21', // rejected by validation, failed
       },
       fontFamily: {
         // No webfont: next/font/google fetches at build time, which would make a
@@ -49,7 +71,17 @@ const config: Config = {
         ],
         // Serif headings do most of the work of reading "financial" rather than
         // "web3", and cost nothing — every target OS ships one of these.
+        //
+        // Ordered for a higher-contrast, older-cut face first: Hoefler Text and
+        // Baskerville are the transitional serifs a private bank's letterhead
+        // would use, and both ship on macOS. Iowan and Palatino are humanist
+        // and warmer — kept as the next rung because they are the best that
+        // Windows offers before Georgia. The visual jump from Georgia up to
+        // Baskerville is most of what makes this read "traditional" rather
+        // than "website".
         serif: [
+          'Hoefler Text',
+          'Baskerville',
           'Iowan Old Style',
           'Palatino Linotype',
           'Palatino',
