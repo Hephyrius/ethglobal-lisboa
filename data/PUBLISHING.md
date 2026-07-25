@@ -30,7 +30,21 @@ fails with *"Requirements contain conflicting URLs for package curator-data"*.
 ## Publishing makes `uvx curator-mcp` work for someone who has never seen the repo
 
 That is the version worth having: a judge pasting our MCP config into their own client, with no
-clone. It is three commands once a token exists.
+clone.
+
+### The short version
+
+```bash
+./data/publish.sh                 # build + verify, uploads nothing — safe to run now
+./data/publish.sh --publish       # build, verify, confirm, then upload
+```
+
+The dry run is the default deliberately. It builds all three distributions and proves they install
+from wheels alone in a clean 3.10 venv — the check that matters, because a PyPI version number can
+never be re-uploaded. `--publish` additionally requires `UV_PUBLISH_TOKEN` and prompts before
+uploading, since `curator-schema` belongs to Wave 0 rather than Lane C.
+
+The manual equivalents are below, for anyone who would rather see each step.
 
 ### 1. Build
 
