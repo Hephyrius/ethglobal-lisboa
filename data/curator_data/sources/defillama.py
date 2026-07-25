@@ -44,6 +44,7 @@ from ..config import Settings
 from ..diagnostics import DROPPED_NOT_SHOWN
 from ..facts import FactBuilder
 from ..http import LoopBoundClient
+from ..plausibility import MAX_PLAUSIBLE_APY
 from ..ports import BaseSource
 
 logger = logging.getLogger(__name__)
@@ -57,10 +58,10 @@ CHAIN_NAME = "Base"
 #: would make the vault most of the pool, and exiting would move the price.
 MIN_TVL_USD = 1_000_000.0
 
-#: Above this an "APY" is a token emission, a bootstrapping incentive, or an
-#: indexing error. Dropped rather than clamped: clamping reports a made-up
-#: number as real, and this feeds an agent that allocates by comparing yields.
-MAX_PLAUSIBLE_APY = 1.0  # 100%
+# `MAX_PLAUSIBLE_APY` now lives in `plausibility` (imported above): three
+# sources need the identical bound, and a threshold that differs by source is
+# worse than none - it makes the same market credible or not depending on who
+# reported it.
 
 #: Deepest N pools kept, after filtering.
 TOP_N = 25

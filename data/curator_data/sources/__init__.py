@@ -29,6 +29,7 @@ from .chainlink import make_chainlink_source
 from .defillama import make_defillama_source
 from .gas import make_gas_source
 from .messari import make_messari_source
+from .morpho import make_morpho_source
 from .peers import make_peer_source
 from .sentiment import make_sentiment_source
 from .token_api import make_token_api_source
@@ -52,6 +53,11 @@ SOURCE_FACTORIES: Mapping[str, SourceFactory] = {
     # knowing the difference. The comment that used to sit here as a
     # hypothetical is now the real thing.
     "chainlink": make_chainlink_source,
+    # Morpho is the largest lending market on Base and the gap the Wave 2
+    # feedback named. It uses Morpho's own API rather than a subgraph
+    # because the only Morpho Base subgraph on the network indexes a dead
+    # deployment - see sources/morpho.py.
+    "morpho": make_morpho_source,
     # ── Wave 1: three more, each one file and one line ────────────────────
     #
     # All three are free and none is token-gated, which matters for a judge
