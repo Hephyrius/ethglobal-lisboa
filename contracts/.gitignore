@@ -4,6 +4,11 @@
 # re-include it here rather than editing shared root config that Wave 0 owns.
 !/out/
 
+# `build_info = false` in foundry.toml keeps these out of a normal build, but `forge inspect`
+# regenerates them regardless. They are solc input/output JSON that no downstream lane reads — the
+# ABIs and bytecode are in the per-contract artifacts — so keep them out of the committed tree.
+/out/build-info/
+
 # Foundry local state. Already covered by the root file; repeated so this directory is
 # self-explanatory to anyone who opens it alone.
 /cache/

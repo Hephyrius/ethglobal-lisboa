@@ -332,6 +332,7 @@ script/
   install-deps.sh             vendor dependencies at pinned tags
   export-abis.sh              publish flat ABIs to abis/
   verify.sh                   verify on Blockscout (no API key)
+  check-deployment.sh         does the deployed code match this source?
 ```
 
 ## Verification
@@ -339,7 +340,15 @@ script/
 ```bash
 forge test                                    # 79 unit tests, no network
 forge test --match-path "test/fork/*"         # real Base state, needs an RPC
+./script/check-deployment.sh                  # deployed code == this source?
 ```
+
+**Run `check-deployment.sh` before the demo and before submitting.** Source can be edited after a
+deploy, and every downstream "verified against the deployed vault" claim then quietly becomes a claim
+about different code — three lanes assert against this deployment and the submission points judges at
+this source. It exits non-zero on a mismatch, so it works as a gate. Currently passing: the deployed
+implementation's bytecode is byte-for-byte identical to the committed source, and the factory differs
+only in the 40 bytes of its immutable `implementation` address.
 
 Confirmed against a live Base mainnet fork, not mocks: 5,000 real USDC deposited → `5000e18` shares
 and a share price of exactly `1000000`; the agent set a real USDC allowance to real Permit2 through
