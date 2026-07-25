@@ -27,6 +27,7 @@ from curator_schema.models import Fact
 
 from ..config import Settings
 from ..facts import FactBuilder
+from ..graph.factory import make_gateway
 from ..graph.gateway import GatewayClient
 from ..ports import BaseSource
 from .protocols import Protocol, enabled_protocols
@@ -125,7 +126,9 @@ class MessariSource(BaseSource):
     ):
         super().__init__()
         self.settings = settings
-        self._gateway = gateway or GatewayClient(settings)
+        # `make_gateway` picks API-key or x402 from configuration; this source
+        # never learns which it got.
+        self._gateway = gateway or make_gateway(settings)
         self._owns_gateway = gateway is None
         self._protocols = protocols if protocols is not None else enabled_protocols(
             chain=settings.chain
