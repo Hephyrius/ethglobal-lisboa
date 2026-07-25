@@ -159,8 +159,18 @@ registered into a valuation set:
 
 This is not a vault defect — the vault cannot inspect what it is given, by the same design that lets a
 new venue ship without touching these contracts. It is a **requirement on the registrar**, and it is
-written here because it is invisible from the contract side. Confirming that Lane D's
-`ERC4626PriceFeed` propagates rather than stamps is tracked as cross-lane **#74**.
+written here because it is invisible from the contract side.
+
+**Lane D's `ERC4626PriceFeed` satisfies it**, confirmed from their published usage doc rather than
+assumed. [`venues/README.md`](../venues/README.md):
+
+> **Timestamps pass through from the underlying feed.** `convertToAssets` is always current, so
+> reporting `block.timestamp` would make the feed *always look fresh* and silently defeat the vault's
+> staleness check — on the half that can actually go stale, the USD price.
+
+They reached that independently, which is the outcome worth having: two lanes deriving the same
+requirement from opposite sides is stronger evidence than either one asserting it. The tests above
+remain, because the requirement binds **every future registration**, not just this one.
 
 ---
 
