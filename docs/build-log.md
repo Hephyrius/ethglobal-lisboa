@@ -1424,6 +1424,50 @@ path shapes and remembers the first that answers.
 
 ---
 
+## 2026-07-25 — Lane D (Wave 2): Morpho not built, because the guard it needs cannot be satisfied
+
+**What changed.** No adapter. Verified on-chain first and reported the blocker as request 63.
+
+**The decisive question, asked first this time.** The prediction-market gate (#62) cost more than it
+should have because the structural question — *can a keyless contract act here?* — was asked third
+instead of first. So Morpho got it first, and **passed**: Morpho Blue's
+`supply(MarketParams, uint256, uint256, address onBehalf, bytes)` needs no signature, so the vault
+can call it. `setAuthorizationWithSig` exists but only for delegating to a third party, which we do
+not need.
+
+**What blocks it is the second question, which Aave taught us to ask.** `balanceOf` and `decimals`
+are **absent** from Morpho Blue's dispatcher: it is not an ERC-20 and **issues no receipt token at
+all**. Positions live in `position(bytes32 marketId, address user)`. So a supply moves USDC out of
+the vault and returns nothing the vault can hold or value, and `totalAssets()` — which counts the
+base asset plus registered valued tokens — would fall by exactly the amount supplied.
+
+That is the same failure `_assert_valued()` was written for. The difference is fatal: for Aave the
+guard is satisfiable by registering the aToken, whereas here **there is no token to register**, so
+the guard could never pass. An adapter whose every plan is refused is worse than no adapter — it
+occupies a venue key, appears in genesis, and consumes attention.
+
+**Why the obvious alternative also fails.** MetaMorpho vaults are ERC-4626 and *do* issue ERC-20
+shares. But 4626 shares **appreciate** instead of rebasing, and the vault's only valuation mechanism
+is `priceFeed(address)` — one Chainlink feed per token. **There is no Chainlink feed for a MetaMorpho
+share.** Aave worked precisely because an aToken is a 1:1 rebasing claim, which is what makes the
+*underlying's* feed correct for it. That property was doing more work than it appeared to, and Morpho
+has neither form of it.
+
+**What was proposed instead of a workaround.** A second valuation kind on the vault — ERC-4626 →
+`convertToAssets(balance)` — which is *exact* rather than approximate and would unlock every
+yield-bearing 4626 token at once rather than one integration. Filed to Lane A as a question, not a
+request, and explicitly flagged as something to decline this wave: it is a new code path on the
+custody contract during its adversarial security pass, and that is a bad trade regardless of how
+small the diff is.
+
+**Why not building it is the right call rather than a shortfall.** Wave 2's definition of done reads
+*"a tick deploys idle capital into a lending venue **or** Aqua"* — Aave already satisfies it. Morpho
+is protocol breadth, not a missing capability, so §B1 is unaffected. Lane C's Morpho *data* work is
+also unaffected: reading Morpho yields needs none of this. The cost of getting this wrong was not a
+missing feature, it was a silently collapsing share price on the demo path.
+
+---
+
 ## 2026-07-25 — Lane D (Wave 2): the prediction-market gate says no, for the third time for the same reason
 
 **What changed.** Nothing in code — that is the point of a gate. The Wave 2 §D2 evaluation ran inside
