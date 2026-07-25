@@ -48,7 +48,11 @@ time.
 - **Banded acceptances** (`AgentAction.warnings`) render beside the reasoning.
 - **`pnpm --filter @curator/web lint:imports`** — `'wagmi'` can never be imported again; it runs
   automatically as `prebuild`. The build log explains why `tsc` cannot catch that class of bug.
-- Still open: the **venue capability strip** (E5) needs Lane D's manifest — note #67.
+- **Venue strip** renders Lane D's capability manifest. `custody` — `virtual` / `claim` /
+  `rotational` — is the field that stops a reader concluding `totalAssets()` is broken, so it is the
+  primary badge. Unavailable venues render *with* their reason rather than being filtered out.
+  Degrades to bare venue keys until Lane B exposes `GET /venues` (note #73), and in that state it
+  says capability detail is unavailable rather than guessing it.
 
 > ⚠️ **If you are taking screenshots or recording the video, read cross-lane note #66 first.**
 > `msedge --headless --window-size=375,H` lays out at 492px and *crops* — it does not give you the
@@ -489,7 +493,7 @@ For a real network, set `DEPLOY_NETWORK`, `DEPLOYER_PRIVATE_KEY`, `AGENT_ADDRESS
 
 ## Lane C — `data/` · the market data layer
 
-**Status: MVP + phase 2 extensions complete.** Four sources live, 182 tests, no chain contention —
+**Status: Wave 2 complete.** Ten sources live, 285 tests, no chain contention —
 this lane never writes to the chain, so nothing here can disturb the fork, and it is independent of
 all nine e2e rungs.
 
@@ -502,7 +506,7 @@ cross-check — `chainlink` prices the same assets in ~0.5s.
 
 ```bash
 uv sync --all-extras                        # NOT --extra data; see gotchas
-uv run pytest data/tests -q                 # 180 tests, no network, no credentials
+uv run pytest data/tests -q                 # 285 tests, no network, no credentials
 uv run curator-data verify-live             # the live submission gate
 uv run curator-data snapshot --assets USDC,WETH
 uv run curator-data sources                 # what a mandate may grant
@@ -575,11 +579,28 @@ Full interface in [data/README.md](../data/README.md).
 
 ---
 
-## Lane D — `venues/` · Uniswap (taker) and 1inch Aqua/SwapVM (maker)
+## Lane D — `venues/` · four venues behind one port
 
-**Status: MVP complete, claim released.** Both venues implement the frozen `Venue` port. 59 Python
-tests + 25 Foundry tests green; 1 Foundry test committed **skipped** on purpose (see the open
-question below). Lane B is already bound to this lane with zero code change on either side.
+**Status: Wave 2 complete.** **168 Python + 46 Foundry tests.** Lane B binds to this lane with zero
+code change on either side.
+
+| Venue | Role | Custody | State |
+|---|---|---|---|
+| `uniswap` | taker — rotates what the vault holds | `rotational` | ✅ live |
+| `aqua` | maker — earns fees on what it holds | **`virtual`** — tokens never leave | ✅ live |
+| `aave` | lender — earns interest | `claim` (1:1 rebasing aToken) | ✅ live |
+| `morpho` | lender — curated MetaMorpho | `claim` (appreciating 4626 share) | ⏳ needs one registration, see below |
+
+**Start here: `from venues import manifest`** — one JSON row per venue with intents, tokens,
+custody, availability and the contracts it calls. Performs **no network I/O** (asserted by a test),
+so it is safe on every render. Never hardcode a venue list; a test fails if the registry and the
+manifest diverge, which is how the fully-built Aave venue stayed invisible for a whole wave.
+
+**If something reverts: `from venues.reverts import describe; describe("0x…")`.** Eleven selectors
+across Uniswap, Permit2, Aqua, MetaMorpho and the vault, each with the cause *and* the fix. This
+exists because `0x39d35496` blocked R5 for hours — it was `V3TooLittleReceived()`, Uniswap's, while
+every hypothesis was about 1inch. An unknown selector returns the search procedure rather than
+nothing.
 
 ### Run it
 
@@ -592,12 +613,27 @@ uv run pytest venues/tests -m live        # real Uniswap API + a live RPC
 Solidity (needs Foundry, in `wsl -d Ubuntu-24.04`; native on macOS):
 
 ```sh
-cd venues/aqua/solidity
+cd venues/aqua/solidity     # Lane D's only Foundry project; named for its first contract
 pnpm install --ignore-workspace           # the flag is REQUIRED — see below
-forge test                                # 13 encoding tests, offline
-forge test --fork-url $BASE_RPC_URL       # + 12 against the REAL deployed Aqua
+forge test                                # encoding tests, offline
+forge test --fork-url $BASE_RPC_URL       # + fork tests vs REAL Aqua and REAL Chainlink
 sh build.sh                               # recompile + republish program_builder.json
 ```
+
+### Making Morpho live — one registration, three steps
+
+The venue is built and refuses to plan until this is done, because supplying into a token the vault
+cannot value makes `totalAssets()` fall by the amount supplied with nothing erroring.
+
+1. Deploy `ERC4626PriceFeed(vault=0xeE8F4eC5672F09119b96Ab6fB59C27E1b7e44b61,
+   assetFeed=0x7e860098F58bBFC8648a4311b374B1D669a2bc6B, "gtUSDCp / USD")`.
+2. `VaultFactory.setDefaultValuation(<share token>, <that feed>)` + `setDefaultTarget`.
+3. **Create a new vault** — per-vault valuations are immutable, so existing vaults cannot lend here.
+
+**Why a custom feed at all:** a MetaMorpho share *appreciates* rather than rebasing like an aToken,
+so the underlying's Chainlink feed understates it — measured at **760 bps** and worsening every
+block. `priceFeed()` only needs something answering `IAggregatorV3`, so the feed was written rather
+than waited for. No `contracts/` change was required.
 
 **You do not need Foundry to use this lane.** The compiled artifact is committed at
 `venues/aqua/program_builder.json`, so Python works on a fresh clone with no toolchain. Verified by
@@ -661,14 +697,33 @@ mode, verified on-chain"* — not *"the vault market-makes"*.
 - Uniswap's API rejects `routingPreference: CLASSIC` while echoing `routing: CLASSIC` back in
   successful responses, and returns `swap.value` hex-encoded while every sibling integer is decimal.
   Both are handled; both are written up in `FEEDBACK.md`.
+- **A tight slippage band and a stale fork do not mix.** `UNISWAP_SLIPPAGE_BPS=50` is right for
+  mainnet, where quote-to-execution is one block. The Trading API prices against **live** Base while
+  a pinned fork executes hours behind — measured at 15.5 h of drift and a **72 bps** price gap, so a
+  50 bps band reverts *deterministically* with `V3TooLittleReceived`. **Set ~150 bps for fork runs.**
+  That is honest rather than a fudge: the widened band is absorbing fork staleness, not granting the
+  agent looser real-world slippage.
+- **A Morpho redeem can exceed withdrawal liquidity.** The shares are real; the underlying is lent
+  out. Reverts with `ERC4626ExceededMaxRedeem` — read `maxRedeem(vault)` and redeem that, repeating
+  as liquidity returns.
+- **Do not trust a per-leg reading of the Uniswap `minOut`.** Where the minimum lives depends on the
+  route the API picked: per-leg `amountOutMin` on a pure-V3 split, or a single trailing `SWEEP` on a
+  mixed V3+V4 route where **every leg reads 0**. Both observed minutes apart. Only the aggregate
+  means anything, and `amountIn` may be the `CONTRACT_BALANCE` sentinel (`1 << 255`) rather than a
+  number. Three route-shape assumptions in one file have already been wrong.
 
 ### Outstanding
 
 | Item | Owner |
 |---|---|
 | **Uniswap Developer Feedback Form** — `FEEDBACK.md` is written and substantive; the *form* is a separate hard requirement | **a human** |
-| Taker fill / "the vault earns" demo | blocked on the deployed opcode table above |
-| Surfacing SwapVM program parameters in the UI | Lane E, optional; ask me for a decode helper |
+| **Register the MetaMorpho valuation** (3 steps above) to make `morpho` live | whoever owns `scripts/` |
+| **Expose `venues.manifest()` over HTTP** as `GET /venues` — Lane E's strip degrades to bare keys without it | Lane B |
+| Taker fill / "the vault earns" demo | needs 1inch's deployed SwapVM source; **not** blocking anything else |
+| Surfacing SwapVM program parameters in the UI | ✅ Lane E did it in Wave 2 |
+
+**Nothing in this lane is waiting on another lane.** The two registration items are one-liners for
+whoever owns the stack; the venue refuses safely until then rather than failing at execution.
 
 Full interface: [venues/README.md](../venues/README.md). Plan and DoD:
 [plans/2026-07-25-lane-d-venues.md](../plans/2026-07-25-lane-d-venues.md).
