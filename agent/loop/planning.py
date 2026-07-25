@@ -49,17 +49,36 @@ class PlanRejected(Exception):
 def _lookup_venue(registry, key: str):
     """Find a venue by key without assuming Lane D's registry shape.
 
-    A plain `dict`, or any object exposing `.get(key)`, or one exposing the venue
-    as an attribute all work. Being tolerant here avoids a cross-lane request
-    over a naming detail; the venue itself is duck-typed against
-    `curator_schema.ports.Venue` when it is used.
+    Three shapes are accepted, because all three are reasonable ways to publish
+    a registry and none is worth a cross-lane request:
+
+    - a mapping, or anything exposing `.get(key)` — `{"uniswap": venue}`
+    - a lookup **function**, `get_venue(key)` — which is what Lane D publishes
+    - an object carrying venues as attributes
+
+    A lookup that raises for an unknown key (Lane D's `UnknownVenueError`) is
+    treated as "not found", so the caller reports the missing adapter rather
+    than leaking another lane's exception type. The venue itself is duck-typed
+    against `curator_schema.ports.Venue` at the point of use.
     """
     if registry is None:
         return None
+
     getter = getattr(registry, "get", None)
     if callable(getter):
-        if (venue := getter(key)) is not None:
-            return venue
+        try:
+            if (venue := getter(key)) is not None:
+                return venue
+        except Exception:  # noqa: BLE001 - an unknown key is "not found", not a crash
+            return None
+
+    # A bare callable registry is a lookup function.
+    if callable(registry) and not isinstance(registry, type):
+        try:
+            return registry(key)
+        except Exception:  # noqa: BLE001
+            return None
+
     return getattr(registry, key, None)
 
 

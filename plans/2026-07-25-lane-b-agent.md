@@ -151,15 +151,41 @@ data-source choices rather than a hardcoded list). Documented in `agent/README.m
 
 ## 7. Order of work
 
-| Phase | Deliverable | Gate |
-|---|---|---|
-| **1** | Config, fixtures, API skeleton, all five routes returning fixture data, route tests | **Unblocks Lane E — first push** |
-| **2** | Model seam + `validation.py` + retry tests (deliberately malformed output → recovery) | §12 DoD line 1 |
-| **3** | Mandate store/hash/amend; `DecisionEngine`; constraint tests | |
-| **4** | `cycle.py` + `AgentAction` store; `POST /tick` runs the real loop in live mode | CP2 |
-| **5** | `VaultClient` on web3.py against Lane A's ABIs; stub until then | CP2 |
-| **6** | Genesis chat → mandate draft → finalize → deploy | |
-| — | README + build log updated *within* each phase, not after | Rule 1/5 |
+| Phase | Deliverable | Gate | Status |
+|---|---|---|---|
+| **1** | Config, fixtures, API skeleton, all five routes returning fixture data, route tests | **Unblocks Lane E — first push** | ✅ |
+| **2** | Model seam + `validation.py` + retry tests (deliberately malformed output → recovery) | §12 DoD line 1 | ✅ |
+| **3** | Mandate store/hash/amend; `DecisionEngine`; constraint tests | | ✅ |
+| **4** | `cycle.py` + `AgentAction` store; `POST /tick` runs the real loop in live mode | CP2 | ✅ |
+| **5** | `VaultClient` on web3.py against Lane A's ABIs; stub until then | CP2 | ✅ written, **unrun against a fork** |
+| **6** | Genesis chat → mandate draft → finalize → deploy | | ✅ |
+| — | README + build log updated *within* each phase, not after | Rule 1/5 | ✅ |
+
+## 7a. How the plan changed during implementation
+
+Recorded per Rule 2. Four material deviations, all in the build log with reasoning:
+
+- **A `service/` layer was added.** Routes depend on `GenesisService` / `VaultService` Protocols
+  rather than calling the loop directly. Without it, "am I in fixture mode?" becomes a branch inside
+  every handler and the two paths drift exactly where it matters. `api/deps.py` is now the only
+  module that knows the mode.
+- **`constraints.py` moved from `loop/` to `mandate/`.** The checks are a property of the mandate,
+  not of loop plumbing, and validation needs them. Split by *what information each check requires*:
+  asset lists, weights and action counts are checkable from the decision alone and run inside
+  validation; slippage and quote staleness need a venue quote, so they run on the merged plan in
+  `loop/planning.py`.
+- **`model/extraction.py` split out of `validation.py`.** Recovering JSON from fences and prose is a
+  different job from judging whether a decision is legal, and it is the layer with the most
+  model-specific trivia. Separated so it can be tested against real malformed output on its own.
+- **Three routes added beyond the frozen five** — `GET /vault/{addr}/mandate` (Lane E's request #6),
+  `GET /genesis/sources`, `GET /health`. The freeze prevents *changing* agreed shapes; adding a route
+  breaks no consumer.
+
+**Cross-lane refs discovered and verified** (both bind with no code change on either side):
+`AGENT_DATA_REGISTRY=curator_data:build_registry`, `AGENT_VENUE_REGISTRY=venues:get_venue`.
+Lane C published `curator_data`, not the `data.registry` the master plan sketched; Lane D publishes a
+lookup *function* rather than a mapping, so `_lookup_venue` accepts mapping, `.get()` and bare
+callable. `tests/test_integration_lanes.py` binds to both for real and skips if a lane is absent.
 
 ---
 

@@ -58,8 +58,11 @@ class ProviderResolution:
 
     @property
     def label(self) -> str:
+        # Name the ref that failed, not just the failure. "it fell back" is not
+        # actionable at 3am; "it tried data.registry:registry and the module was
+        # not found" is a fix.
         if self.error:
-            return f"fixture (fallback: {self.error})"
+            return f"fixture (tried {self.ref}: {self.error})"
         return "fixture" if self.is_fixture else self.ref
 
 

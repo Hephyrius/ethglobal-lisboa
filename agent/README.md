@@ -16,9 +16,13 @@ validation layer, so it fails closed and records what it rejected.
 ## Quick start
 
 ```bash
-uv sync --extra agent --extra dev
+uv sync --all-extras          # NOT --extra agent — see the warning below
 uv run uvicorn agent.api.app:app --reload --port 8000
 ```
+
+> ⚠️ **Always `uv sync --all-extras`.** Syncing a subset (`uv sync --extra agent`) *prunes* every
+> package outside the named extras from the shared venv, silently uninstalling the other lanes'
+> dependencies. Finding discovered by Lane C; it costs ten confusing minutes each time.
 
 Then `http://localhost:8000/docs` for live OpenAPI, or:
 
@@ -127,6 +131,20 @@ the API down.
 | **A** contracts | ABIs read from `contracts/out/**` at runtime | minimal built-in ABI, stub client |
 
 **So: Lane C and Lane D each cost this lane one environment variable and zero code changes.**
+Both are wired and verified against what those lanes actually published — set:
+
+```bash
+AGENT_DATA_REGISTRY=curator_data:build_registry
+AGENT_VENUE_REGISTRY=venues:get_venue
+```
+
+`agent/tests/test_integration_lanes.py` binds to both for real and asserts Lane C's registry
+satisfies `DataSourceRegistry`, that its sources cover what the golden mandate grants, that Lane D's
+adapters satisfy `Venue`, and that a full cycle runs across both. It **skips** rather than fails when
+a lane is absent, so this suite still runs from a fresh clone with only `/agent` installed.
+
+The venue ref accepts three shapes — a mapping, an object with `.get(key)`, or a bare lookup function
+(what Lane D publishes) — so neither lane had to change anything to be consumable.
 
 External: `fastapi`, `uvicorn`, `httpx`, `web3`, `pydantic`, `curator-schema`.
 
