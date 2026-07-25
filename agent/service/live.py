@@ -149,12 +149,34 @@ class LiveGenesisService:
             return []
 
     def available_venues(self) -> list[str]:
+        """Venue keys the genesis UI may offer.
+
+        Three rungs, because the venue seam is a bare `get_venue(key)` lookup
+        function with no introspection method — so the obvious `.available()`
+        never resolves, and the hardcoded fallback silently became the answer.
+
+        That was a real bug, caught by reading `GET /genesis/sources` after
+        adding Aave: it reported `uniswap, aqua`, meaning **the third venue
+        could never be granted in a mandate and the agent could never lend.**
+        A fallback that happens to be right is indistinguishable from one that
+        has gone stale, which is exactly what happened here.
+        """
         available = getattr(self._venues, "available", None)
         if callable(available):
             try:
                 return list(available())
             except Exception as exc:  # noqa: BLE001
                 log.warning("venue registry could not list venues (%s)", exc)
+
+        # The registry's own published tuple, rather than a copy of it.
+        try:
+            from venues.registry import VENUES
+
+            return list(VENUES)
+        except Exception as exc:  # noqa: BLE001 - venues is an optional seam
+            log.warning("venue package unavailable (%s); offering the frozen pair", exc)
+
+        # Last resort only: the two venues every deployment has had since Wave 0.
         return ["uniswap", "aqua"]
 
     async def chat(self, messages: list[ChatMessage]) -> GenesisChatResponse:

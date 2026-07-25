@@ -164,3 +164,29 @@ async def test_a_bad_address_is_rejected_before_any_rpc_call():
 
     response = TestClient(create_app()).get("/portfolio/not-an-address")
     assert response.status_code == 422
+
+
+# ── the venue list genesis offers ─────────────────────────────────────────
+
+
+def test_genesis_offers_every_registered_venue_not_a_hardcoded_pair():
+    """Caught by reading GET /genesis/sources after adding the Aave venue.
+
+    It reported `uniswap, aqua`. The venue seam is a bare `get_venue(key)`
+    lookup with no `.available()`, so the introspection branch never resolved
+    and a hardcoded fallback had silently become the answer — meaning the third
+    venue could never be granted in a mandate and the agent could never lend.
+
+    A fallback that happens to be right is indistinguishable from one that has
+    gone stale, which is why this asserts against the registry rather than
+    against a list.
+    """
+    from agent.config import settings
+    from agent.service.live import LiveGenesisService
+    from venues.registry import VENUES
+
+    offered = LiveGenesisService(settings()).available_venues()
+    assert set(offered) == set(VENUES), (
+        f"genesis offers {offered} but the registry has {list(VENUES)}"
+    )
+    assert "aave" in offered
