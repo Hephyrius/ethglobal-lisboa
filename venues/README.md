@@ -211,8 +211,8 @@ assumed:
 |---|---|---|
 | `0x6fF5693b99212Da76ad316178A184AB56D299b43` | **Uniswap router (Base)** | What `POST /swap` actually returns as `to`. **Not** the `0x2626664c…e481` in the golden fixture — allowlisting only that address reverts every swap. |
 | `0x000000000022D473030F116dDEE9F6B43aC78BA3` | Permit2 | Step 2 of every swap. |
-| `0x499943e74Fb0ce105688bEEe8ef2ABEc5d936d31` | Aqua | `ship()` / `dock()`. |
-| `0x8fdD04dbF6111437b44BbCa99c28882434E0958f` | SwapVM | Named as the Aqua `app`; not called directly. |
+| `0x499943E74FB0cE105688beeE8Ef2ABec5D936d31` | Aqua | `ship()` / `dock()`. |
+| `0x8fDD04Dbf6111437B44bbca99C28882434e0958f` | SwapVM | Named as the Aqua `app`; not called directly. |
 | `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` | USDC | **Token approvals target the token contract.** |
 | `0x4200000000000000000000000000000000000006` | WETH | Same. |
 

@@ -18,10 +18,10 @@ CHAIN_ID: Final[int] = 8453
 #: Aqua shared-liquidity registry. The vault is the *maker*: it approves Aqua
 #: once and thereafter only virtual balances move. Tokens never leave the vault,
 #: which is what makes Aqua compatible with our Pattern 1 custody decision.
-AQUA: Final[str] = "0x499943e74Fb0ce105688bEEe8ef2ABEc5d936d31"
+AQUA: Final[str] = "0x499943E74FB0cE105688beeE8Ef2ABec5D936d31"
 
 #: SwapVM — executes the strategy program shipped into Aqua.
-SWAPVM: Final[str] = "0x8fdD04dbF6111437b44BbCa99c28882434E0958f"
+SWAPVM: Final[str] = "0x8fDD04Dbf6111437B44bbca99C28882434e0958f"
 
 # ── Uniswap ───────────────────────────────────────────────────────────────
 
