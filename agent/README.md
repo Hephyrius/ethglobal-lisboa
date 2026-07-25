@@ -350,7 +350,23 @@ from rather than agreement with ourselves.
 **Complete:** all frozen routes in both modes · four-layer output validation with reject-and-retry ·
 mandate store, hashing and amendment · the decision cycle with cooldown, slippage and stale-quote
 enforcement · the append-only journal · `VaultClient` on web3.py against Lane A's published ABIs ·
-live genesis. 78 tests green, ruff clean, no network needed to run them.
+live genesis. 192 tests green, ruff clean, no network or model needed to run them.
+
+**The vertical slice runs end to end on live data.** With `AGENT_MODE=live` and both provider refs
+set:
+
+```
+health   : ok — curator_data:build_registry · venues:get_venue · model_reachable
+genesis  : mandate hashed, vault deployed, mandate persisted
+tick     : held in 55.5s, 0 retries, 3 live Graph facts consulted, 2 sources degraded
+           cites messari:yield:moonwell/usdc, :tvl:, :utilization:
+feed     : 1 entry rendered from the journal
+```
+
+Those fact ids come from Lane C's **live** Messari subgraph query, not a fixture — the demo-path
+requirement. The two `snapshot.errors` are the Token API without a credential, degrading the snapshot
+exactly as designed rather than failing the tick. A tick is slower than the raw model benchmark
+because it also pays for the Graph round trip.
 
 **Verified against the real fork.** `Web3VaultClient.state()` reads Lane A's deployed vault
 `0x0E2c…B5d1` on the anvil fork correctly: 2,500 USDC, share price exactly `1e18`, ERC-20 symbols
