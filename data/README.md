@@ -198,6 +198,7 @@ here imports `agent/`, `venues/`, `web/` or `contracts/`.
 |---|---|---|---|
 | `GRAPH_API_KEY` | **yes** | — | Subgraph gateway. Free at [thegraph.com/studio](https://thegraph.com/studio) → API Keys |
 | `TOKEN_API_KEY` | no | falls back to `GRAPH_API_KEY` | Token API bearer token — a *separate* credential |
+| `TOKEN_API_URL` | no | `https://api.pinax.network/v1` | ⚠️ **not** `token-api.thegraph.com` — that host, named in The Graph's own docs, does not resolve. Verified live |
 | `DATA_CHAIN` | no | `base` | Chain to query |
 | `DATA_REQUEST_TIMEOUT_S` | no | `15` | Per-HTTP-request timeout |
 | `DATA_SOURCE_TIMEOUT_S` | no | `20` | Per-source ceiling inside `snapshot()` |
@@ -265,7 +266,7 @@ Callers may rely on all of these:
 ## Tests
 
 ```bash
-uv run pytest data/tests -q          # 109 tests, no network, no credentials
+uv run pytest data/tests -q          # 129 tests, no network, no credentials
 uv run curator-data verify-live      # the live path — needs GRAPH_API_KEY
 ```
 

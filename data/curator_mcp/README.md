@@ -96,6 +96,7 @@ See [SKILL.md](SKILL.md) for how an agent should use these tools well.
 |---|---|---|---|
 | `GRAPH_API_KEY` | **yes** | — | Subgraph gateway credential ([thegraph.com/studio](https://thegraph.com/studio)) |
 | `TOKEN_API_KEY` | no | `GRAPH_API_KEY` | Token API bearer token, if different |
+| `TOKEN_API_URL` | no | `https://api.pinax.network/v1` | Token API host. Pinax operates it — `token-api.thegraph.com` does not resolve |
 | `DATA_CHAIN` | no | `base` | Chain to query |
 | `DATA_REQUEST_TIMEOUT_S` | no | `15` | Per-request timeout |
 | `CURATOR_MCP_LOG_LEVEL` | no | `WARNING` | Logs go to stderr; stdout is the MCP transport |
