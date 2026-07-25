@@ -22,6 +22,8 @@ from __future__ import annotations
 
 from curator_schema import AllocationDecision, Mandate, MarketSnapshot, VaultState
 
+from ...loop.idle import IDLE_FACT_ID
+
 __all__ = ["SYSTEM_PROMPT", "decision_messages", "decision_schema"]
 
 SYSTEM_PROMPT = """\
@@ -108,6 +110,10 @@ def _format_value(fact) -> str:
     # things by it — a utilization of 0.78 is "78% of capacity", a sentiment of
     # 0.78 is "extreme greed" — and rendering the second as the first is exactly
     # the misread `_KIND_LABELS` exists to prevent.
+    if fact.id == IDLE_FACT_ID:
+        # The generic `ratio` rendering would print "68.0% of capacity", which
+        # reads as the opposite of what this measures.
+        return f"{fact.value:.1%} of the vault is sitting idle"
     if fact.kind == "sentiment":
         return f"{fact.value:.2f} on a 0-1 scale (0 = extreme fear, 1 = extreme greed)"
     if fact.kind == "gas":
@@ -294,9 +300,16 @@ Decide what to do with this vault now. Work in this order:
 1. Read your objective above and write down the allocation it asks for.
 2. Compare it with the percentages already shown under THE VAULT CURRENTLY HOLDS.
 3. If they differ by more than your objective tolerates, rotate to close the gap.
-4. If they already match, you are not finished. Re-read your objective and check \
-whether it asks for anything else once the book is balanced, such as posting the \
-idle balance as Aqua liquidity to earn fees. Hold only if it does not.
+4. Whether or not you rotate, look at the idle figure in the table above. \
+**Capital sitting idle above the mandate's cash floor is not neutral. It is a \
+position, and the position is earning nothing.** Deploying it into a permitted \
+venue is the default: lending it earns yield, and posting it into Aqua earns \
+fees while moving no tokens at all.
+5. Hold only if you can say why. Holding is legitimate and often right, but it \
+is a choice, so `reasoning` must name the reason: the idle share is immaterial, \
+the yields on offer do not cover the cost of moving, or the data you needed was \
+missing. "The book is balanced" is a reason to stop rotating, not a reason to \
+leave capital idle.
 
 `target_allocations` is where you want the vault to BE, not where it already is. \
 If your targets differ from the current percentages, you must supply the \

@@ -45,6 +45,7 @@ from ..mandate.store import MandateNotFound, MandateStore
 from ..model.openai_compat import ModelUnavailable
 from ..model.validation import DecisionRejected
 from .engine import LlmDecisionEngine
+from .idle import with_idle_fact
 from .planning import PlanRejected, build_execution_plan
 from .reflection import build_reflection
 from .store import ActionJournal
@@ -104,7 +105,12 @@ class DecisionCycle:
         except Exception as exc:  # noqa: BLE001 - an unreachable chain is a failed tick
             return record.failed(f"could not read vault state: {exc}")
 
-        snapshot = await self._snapshot(mandate)
+        # Idle capital is appended after the registry returns, so a failing
+        # source still degrades exactly as before and Lane C's contract is
+        # untouched. It has to be *in* the snapshot rather than only in the
+        # prompt: `facts_used` is validated against the snapshot, so this is
+        # what lets the model cite the number instead of asserting it.
+        snapshot = with_idle_fact(await self._snapshot(mandate), mandate, state)
         record.snapshot = snapshot
 
         if reason := self._cooldown_reason(vault, mandate):

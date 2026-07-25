@@ -20,6 +20,7 @@ from agent.chain.stub import StubVaultClient
 from agent.config import Settings
 from agent.loop.cycle import DecisionCycle
 from agent.loop.engine import LlmDecisionEngine
+from agent.loop.idle import HARNESS_SOURCE, IDLE_FACT_ID
 from agent.loop.store import ActionJournal
 from agent.mandate.store import MandateStore
 from agent.model.backends.scripted import ScriptedBackend
@@ -110,14 +111,55 @@ async def test_a_good_decision_executes_and_is_journaled(tmp_path):
 
 
 async def test_the_snapshot_only_contains_permitted_sources(tmp_path):
-    """`permitted_data_sources` is the access-control mechanism, not a hint."""
+    """`permitted_data_sources` is the access-control mechanism, not a hint.
+
+    It governs which **external providers** the agent may consult. The harness's
+    own derived facts are exempt and deliberately so: `vault:idle-capital` is
+    computed from the vault's on-chain state, which the agent already holds and
+    did not have to be granted. Marking it `harness` rather than borrowing a
+    provider's name is what keeps that distinction legible in the feed — a
+    derived number must never be attributable to The Graph.
+    """
     mandate = fixtures.mandate().model_copy(update={"permitted_data_sources": ["messari"]})
     cycle, _, _, _ = _build(tmp_path, [_good_decision()], mandate=mandate)
 
     action = await cycle.run(VAULT)
 
-    sources = {fact.source for fact in action.snapshot.facts}
-    assert sources == {"messari"}, f"consulted a source the mandate did not grant: {sources}"
+    providers = {f.source for f in action.snapshot.facts if f.source != HARNESS_SOURCE}
+    assert providers == {"messari"}, f"consulted a source the mandate did not grant: {providers}"
+
+
+async def test_the_snapshot_carries_the_idle_capital_fact(tmp_path):
+    """Citable, so the feed can show "deployed because 68% was idle" with the
+    number attached rather than the agent asserting it."""
+    cycle, _, _, _ = _build(tmp_path, [_good_decision()])
+
+    action = await cycle.run(VAULT)
+
+    idle = [f for f in action.snapshot.facts if f.id == IDLE_FACT_ID]
+    assert len(idle) == 1, "exactly one idle fact per tick"
+    # Golden vault: 70% uncommitted USDC, 20% cash floor -> 50% idle.
+    assert idle[0].value == 0.5
+    assert idle[0].source == HARNESS_SOURCE
+
+
+async def test_a_decision_may_cite_the_idle_fact(tmp_path):
+    """Layer 4 validates `facts_used` against the snapshot, so a fact that is
+    not in it cannot be cited. This is what makes the number un-inventable."""
+    citing = json.dumps(
+        {
+            "action": "hold",
+            "reasoning": "Half the book is idle but the yields on offer do not cover the move.",
+            "facts_used": [IDLE_FACT_ID],
+            "confidence": 0.7,
+        }
+    )
+    cycle, _, _, _ = _build(tmp_path, [citing])
+
+    action = await cycle.run(VAULT)
+
+    assert action.status == "held"
+    assert action.decision.facts_used == [IDLE_FACT_ID]
 
 
 # ── holding ───────────────────────────────────────────────────────────────
