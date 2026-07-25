@@ -1,9 +1,15 @@
 # Lane D — Venues (`/venues`)
 
-**Owner:** Lane D instance · **Claimed:** 2026-07-25 02:10 · **Scope:** master plan §10 Lane D MVP
+**Owner:** Lane D instance · **Claimed:** 2026-07-25 02:10 · **Scope:** master plan §10 Lane D MVP,
+extended by Wave 1 (Aave) and Wave 2 (§7).
 
-Lane D owns both sponsor *execution* paths and nothing else. It turns a `VenueIntent` into an
+Lane D owns the *execution* paths and nothing else. It turns a `VenueIntent` into an
 `ExecutionPlan` — concrete calldata the vault executes. It never touches `/contracts`.
+
+> **§1–§8 below are the original MVP plan and are kept as written**, because the reasoning that
+> produced the two-venue design is still the reasoning the lane runs on. **§9 records what actually
+> happened after it** — two more venues, three things the plan did not anticipate, and the four
+> findings that changed how the lane works. Read §9 for current state; read §1–§8 for why.
 
 ---
 
@@ -156,3 +162,89 @@ dependency on Foundry being installed. Aqua second — higher risk, needs the WS
 stable pairs, `XYCConcentrate` for concentrated ranges, Dutch-auction/TWAP programs. All are new
 `Opcode` compositions in `buildXYCProgram`'s shape; the adapter, port and plan builder do not change,
 which is the payoff from putting the encoding in Solidity behind one entry point.
+
+---
+
+## 9. What actually happened — Wave 1 and Wave 2
+
+Appended rather than rewritten (Rule 2: plans are living documents). The MVP plan above is sound and
+still describes the spine of the lane. Four things changed materially.
+
+### 9.1 Two venues became four
+
+| Venue | Role | Custody | Added |
+|---|---|---|---|
+| `uniswap` | taker — rotates what the vault holds | `rotational` | MVP |
+| `aqua` | maker — earns fees on what it holds | **`virtual`** — tokens never leave | MVP |
+| `aave` | lender — earns interest | `claim` (1:1 **rebasing** aToken) | Wave 1 |
+| `morpho` | lender — curated MetaMorpho | `claim` (**appreciating** 4626 share) | Wave 2 |
+
+Aave closed a measured gap: the `aave` data source had contributed 204 facts about lending yields
+across 36 ticks and **no intent type could act on any of them**. Morpho proved
+`SupplyIntent`/`WithdrawIntent` were genuinely venue-agnostic — neither shape changed.
+
+The `custody` distinction turned out to matter more than expected and is now a first-class field in
+the manifest. Flatten those three values into "the vault has a position" and a reader concludes
+`totalAssets()` is broken when it is exactly right.
+
+### 9.2 Two questions now gate every new venue
+
+Both were learned expensively; both are answerable from deployed bytecode in about ten minutes.
+
+1. **Can a keyless contract act here?** The vault has no private key. Uniswap needed Permit2's
+   signature-free `approve`; Aqua needed `useAquaInsteadOfSignature = true`; **Limitless had no
+   equivalent and was not built.**
+2. **What does the vault receive, and can `totalAssets()` value it?** Aave's aToken rebases 1:1, so
+   the underlying's Chainlink feed is *correct* for it — that property was doing far more work than
+   it looked like. Morpho Blue returns **nothing** (not an ERC-20); MetaMorpho returns an
+   appreciating 4626 share with no feed.
+
+Asking these first is the single biggest efficiency change in the lane. The prediction-market gate
+cost most of its timebox because question 1 was asked third.
+
+### 9.3 A missing price feed is not a dead end
+
+The most useful thing learned this wave. `CuratedVault.priceFeed(token)` needs something that
+answers **`IAggregatorV3`** — not a Chainlink-*operated* feed. Lane A's own `MockAggregatorV3`
+proves it.
+
+So `venues/aqua/solidity/src/ERC4626PriceFeed.sol` composes `convertToAssets(1 share) × underlying
+USD price` and *is* a feed. **No `contracts/` change was required**, which matters because it landed
+during Lane A's adversarial security pass. Valuing a MetaMorpho share as plain USDC understates by
+**760 bps** and worsens every block.
+
+The subtle part: **timestamps pass through from the underlying feed, never invented.**
+`convertToAssets` is always current, so reporting `block.timestamp` would make the feed *always look
+fresh* and silently defeat the vault's staleness check on the half that can actually go stale.
+
+### 9.4 Findings that changed the lane's own code
+
+| Finding | Consequence |
+|---|---|
+| **The deployed SwapVM is not the default branch.** Opcodes are *positions* in `AquaOpcodes`, not a hex enum — `XYCSwap` is 17 on chain and `0x50` on `main`. | Pinned to v1.0.1; the builder derives opcodes from 1inch's own table via function pointers, so **no opcode number appears in our source**. |
+| **`safeBalances()` non-zero does not mean fillable.** A ship with no approvals looks perfect and can never be filled. | Fillability gates on the **vault→Aqua allowance**. My first version of this check would have passed on a dead position — Lane B caught it. |
+| **The Uniswap `minOut` cannot be read per-leg.** Pure-V3 splits carry per-leg minimums; V3+V4 routes carry **zeros** plus one trailing `SWEEP`. Both seen minutes apart. | Tests assert the *effective aggregate*. A grep gives a false negative; a per-leg check gives a false alarm. |
+| **A tight band and a stale fork do not mix.** The API quotes live, the fork executes hours behind — ~70 bps of drift against a 50 bps band. | `V3TooLittleReceived` on the fork is **direction-dependent**, so it comes and goes with the market. Fork runs want ~150 bps. |
+
+### 9.5 What the lane ships beyond adapters
+
+- **`venues.manifest()`** — what each venue does, in JSON, no network I/O. A test fails if it ever
+  diverges from the registry. Exists because a hardcoded list hid the fully-built Aave venue for a
+  whole wave.
+- **`venues.reverts.describe(selector)`** — eleven revert selectors across Uniswap, Permit2, Aqua,
+  MetaMorpho and the vault, each with cause *and* fix. Exists because `0x39d35496` blocked R5 for
+  hours while every hypothesis was about 1inch; it was Uniswap's.
+- **`venues.aqua.assert_position_fillable()`** — the R5 gate.
+
+### 9.6 Still open, none of it blocking
+
+| Item | Owner |
+|---|---|
+| Register the MetaMorpho valuation (3 steps, #66) — makes `morpho` live | whoever owns `scripts/` |
+| `GET /venues` serving `manifest()` (#73) | Lane B |
+| `UNISWAP_SLIPPAGE_BPS=150` for fork runs (#74) | whoever runs the stack |
+| **Uniswap Developer Feedback Form** | **a human** — `FEEDBACK.md` is written |
+| Taker fill demo | needs 1inch's deployed SwapVM source; explicitly *not* on the critical path |
+
+**Test counts at close of Wave 2:** 173 Python, 46 Foundry (1 skipped and documented — the taker
+fill).
