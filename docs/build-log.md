@@ -8,6 +8,116 @@ the hackathon window.
 
 ---
 
+## 2026-07-25 — Lane B: clearing the request queue, and two answers that were "no"
+
+Three open rows addressed to this lane. All three turned out to be about the same thing: what the
+system *claims*, versus what is actually true when you measure it.
+
+### #46 · 4.70s of `/state`, and only ten of the twenty-eight round trips were ours
+
+The request predicted an N+1 over holdings and suggested checking whether `/state` used Lane A's
+`holdings()`. It did. **Counting the requests rather than reasoning about them changed the
+diagnosis**: the read issued 28 JSON-RPC calls and **18 were `eth_chainId`**.
+
+`web3/middleware/validation.py` does `w3_chain_id = await async_w3.eth.chain_id` inside its
+per-request path, so every `eth_call` silently bought a second round trip for a value nothing in
+this repo asks for. It is invisible from the application side — there is no `chain_id` in our code
+to grep for.
+
+**Dropping `ValidationMiddleware` would fix it and is the wrong fix.** What it validates is that a
+signed transaction's declared `chainId` matches the node's. For a component whose entire trust model
+is *"the agent holds a key and executes directly"*, a guard against signing against the wrong chain
+is not overhead. So the guard stays and the answer is cached — safe specifically because a chain id
+cannot change for the life of a connection.
+
+**The cache alone got 28 to 17, not to 11**, which is the part worth recording. Once the vault reads
+were batched, all eight missed an empty cache simultaneously and all eight asked. The fetch is
+coalesced under a lock — and it is a lock rather than a warm-up call because a reconnect re-forms
+the herd.
+
+The genuine N+1 was the other ten: eight independent vault reads awaited one at a time, then a
+`symbol()` per token inside the holdings loop. Now two `gather` waves — what the vault knows about
+itself, then the token metadata that needed the holdings list to exist. Base-asset decimals come out
+of `holdings()` rather than a ninth call. **28 → 11 cold, 8 warm.**
+
+Symbols and decimals are cached because they are immutable, and **only successful lookups are** —
+caching a failure would pin a token to its truncated-address placeholder for the life of the
+process, turning one dropped RPC call into a permanently mislabelled holding.
+
+Two things about the tests. They assert **peak concurrency**, not just the call count, because a
+count cannot tell the two apart: fifteen calls issued one at a time and fifteen issued together are
+identical by count and 3.3s apart on the fork. And the timing assertion is **differential across two
+latencies**, because a single read carries ~0.15s of one-off ABI-parsing cost that dwarfs a fast
+local latency; subtracting two runs cancels it. Both flaked on the first attempt under suite load,
+and both fixes are honest rather than loosened bounds: peak concurrency is measured on the *warm*
+read (on the cold one the chain-id lock serializes wave 1, so the metric was reporting the lock),
+and the timing takes the best of three, since scheduling noise only ever adds and a minimum cannot
+be made to look faster than the code is.
+
+Found on the way: the placeholder for an unreadable token used a UTF-8 ellipsis, and it reaches the
+model's prompt through `_render_holdings`. **No fixture covers a token whose `symbol()` reverted**,
+so the prompt's ASCII guard could never have caught it.
+
+### #50 · the frozen interface disagreeing with itself
+
+Lane A reported that `VaultState.share_price` is 18-decimal where the schema says
+`convertToAssets(1e18)`, which is 6-decimal, and asked only that the two agree.
+
+They cannot, and not because of anything either lane did. **`vault-state.schema.json` *describes*
+one thing and `fixtures/vault-state.json` *carries* another** — `1002506265664160401` against its
+own `total_assets`/`total_supply`, which is the dimensionless ratio × 10¹⁸, not `convertToAssets`.
+Lane A read the prose; this lane followed the fixture. Both faithful, ~10¹² apart since Wave 0.
+
+Nothing could have caught it, and that is the reusable lesson: **every lane's tests validate against
+the fixtures and nothing validates against the descriptions.** A JSON Schema `description` is
+documentation with the authority of a comment.
+
+Kept the fixture's value — changing it ripples through four lanes' tests for a field Lane E does not
+render, and the 6-decimal form is lossy in a way that matters (a USDC vault's share price cannot
+move until it has gained 0.0001%, so early performance renders as a flat line). Pinned the transform
+between the two conventions in a test, documented both columns in the README, and filed the
+description fix with Lane F as #77.
+
+One correction went back with it. The unblock-by-default §6 trap table had hardened this into *"it
+is 6-decimal; `999952` is correct, `1e18` is the error"*. Neither is an error. That sentence would
+have sent the next reader hunting a bug that does not exist — which is a worse outcome than the
+inconsistency it was written to prevent.
+
+### #71 · a mandate hash that stops matching is usually telling the truth
+
+Lane F measured that adding `tolerance_band_pct = 0.05` moved `mandate_hash` for every already-
+deployed vault: the field materializes when the stored JSON is parsed, so it enters the canonical
+form and shifts the digest. They offered the obvious fix — hash the stored bytes, immune to schema
+evolution — and left the call here.
+
+**Declined, for two reasons.**
+
+It would not work in this system. `MandateStore` writes a re-serialization and
+`GET /vault/{addr}/mandate` returns another, so a depositor is never handed the preimage. Hashing
+bytes nobody can obtain moves verification from wrong to impossible.
+
+And the mismatch is **true**. A vault deployed before that delta is now curated by a harness that
+will accept a decision 5% over `max_position_pct` — on a mandate whose depositors were promised a
+hard cap. The effective mandate genuinely changed. A digest engineered to keep matching would be an
+on-chain assertion that nothing had, which is precisely the claim the hash exists to make
+falsifiable. **The right move was not to silence the signal but to explain it.**
+
+`GET /vault/{addr}/mandate/verification` separates the three reasons a recompute can differ:
+*matches*, *amended* (version > 1 — genesis binds version 1), *schema drift* (naming each field the
+stored mandate does not mention), and only if none of those apply, *unverified* — the one that
+should alarm anybody. Version is checked **before** drift because it is the more specific answer;
+Lane F noted the shared demo vault has both causes at once and nearly attributed the amendment to
+their own delta.
+
+This needed `MandateStore.load_raw()`, because `load()` cannot answer the question — parsing is what
+adds the field.
+
+The pre-delta scenario is reconstructed in the tests and asserted to *still* mismatch. That is a
+**statement test rather than a regression test**: it fails if someone later makes the hash immune,
+which should require a conversation rather than a commit.
+
+---
+
 ## 2026-07-25 — Lane F: the Wave 2 schema delta, and the field the plan did not name
 
 **What changed.** `packages/schema/` gained, in all three mirrors at once:
