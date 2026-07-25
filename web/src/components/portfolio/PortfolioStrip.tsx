@@ -2,7 +2,12 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { z } from 'zod'
-import { useAccount } from 'wagmi'
+// This app mounts no WagmiProvider — it drives the wallet through @wagmi/core
+// imperatively (see app/providers.tsx). Importing the React-hooks `useAccount`
+// from 'wagmi' therefore threw WagmiProviderNotFoundError and took the whole
+// page down. `@/lib/chain/account` exposes the same {address, isConnected}
+// shape over the core API, which is what every other component here uses.
+import { useAccount } from '@/lib/chain/account'
 import { Card, CardBody } from '@/components/ui/Card'
 import { Stat, StatRow } from '@/components/ui/Stat'
 import { API_BASE } from '@/lib/api/routes'
