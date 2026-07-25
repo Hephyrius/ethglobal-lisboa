@@ -107,7 +107,8 @@ class AquaVenue:
             token.lower(): int(amount)
             for token, amount in zip(resolved, intent.amounts, strict=True)
         }
-        fee_bps = (intent.program.fee_bps if intent.program else None) or self._default_fee_bps
+        chosen_fee = intent.program.fee_bps if intent.program else None
+        fee_bps = chosen_fee if chosen_fee is not None else self._default_fee_bps
         salt = self._salt_for(vault, resolved, fee_bps)
 
         strategy = await self.builder.build_strategy(
@@ -128,9 +129,17 @@ class AquaVenue:
         plan = ExecutionPlan(
             venue=VENUE_KEY,
             steps=steps,
+            # Say whose choice the fee was. A decision that omitted `program`
+            # did not pick 30 bps — this adapter did — and printing the number
+            # without that distinction is an unsourced claim about the most
+            # scrutinised part of the 1inch integration. Lane E declined to
+            # infer a curve from an absent program for exactly this reason, and
+            # was right to; this is the provenance they were missing.
             expected_effect=(
                 f"ship a {fee_bps / 100:g}% constant-product position into Aqua "
                 f"({strategy.strategy_hash[:10]}…) — tokens stay in the vault"
+                + ("" if chosen_fee is not None else " · fee is the venue default, "
+                   "not chosen by the decision")
             ),
             # No router quote and no price impact: a maker posts liquidity and
             # waits. Leaving these unset is the honest answer, and it keeps the

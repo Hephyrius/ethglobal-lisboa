@@ -289,3 +289,46 @@ class TestAgainstAnvil:
         assert len(plan.steps) == 3
         assert plan.steps[2].calldata.startswith("0x" + selector(AQUA_SHIP).hex())
         assert len(plan.steps[2].calldata) > 500, "ship calldata should embed the strategy"
+
+
+class TestFeeProvenance:
+    """A decision that omits `program` did not choose the fee — the adapter did.
+
+    Lane E declined to render a curve for an intent with no `program`, because
+    printing one would be an unsourced claim about the most scrutinised part of
+    the 1inch integration. They were right, and this is the provenance they
+    were missing: the plan now says whose choice the fee was.
+    """
+
+    async def test_a_defaulted_fee_is_labelled_as_the_venue_default(self, venue):
+        plan = await venue.plan(
+            AquaShipIntent(tokens=["USDC", "WETH"], amounts=["1000000", "1000000"]),
+            _vault(),
+        )
+        assert "venue default" in (plan.expected_effect or "")
+
+    async def test_a_chosen_fee_is_not_labelled_as_a_default(self, venue):
+        plan = await venue.plan(
+            AquaShipIntent(
+                tokens=["USDC", "WETH"],
+                amounts=["1000000", "1000000"],
+                program=AquaProgram(shape="xyc", fee_bps=5),
+            ),
+            _vault(),
+        )
+        assert "venue default" not in (plan.expected_effect or "")
+        assert "0.05%" in (plan.expected_effect or "")
+
+    async def test_an_explicit_zero_fee_counts_as_chosen(self, venue):
+        """`fee_bps=0` is a decision, not an absence — `or` would have silently
+        replaced it with the 30 bps default."""
+        plan = await venue.plan(
+            AquaShipIntent(
+                tokens=["USDC", "WETH"],
+                amounts=["1000000", "1000000"],
+                program=AquaProgram(shape="xyc", fee_bps=0),
+            ),
+            _vault(),
+        )
+        assert venue._builder.calls[-1]["fee_bps"] == 0
+        assert "venue default" not in (plan.expected_effect or "")
