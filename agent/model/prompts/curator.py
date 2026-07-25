@@ -156,16 +156,52 @@ def _render_gaps(snapshot: MarketSnapshot) -> str:
 
 
 def _render_holdings(vault: VaultState | None) -> str:
+    """Current holdings **with their weights already computed.**
+
+    Observed failure, and the reason this does the arithmetic rather than the
+    model: given `1,750.0000 USDC` and `0.4034 WETH`, a 3B model reported *"403.4
+    WETH, which is a 23.1% allocation (0.4034 / 1750 * 100)"* — a misread
+    magnitude, a division across two different units, and a wrong answer, from
+    which it concluded the book was balanced and declined to rebalance. The true
+    split was about 70/30.
+
+    Weighing a portfolio needs a price, and asking a small model to apply one to
+    raw token amounts is asking for exactly that. The vault already values every
+    holding through the same Chainlink feed `totalAssets()` uses, and it crosses
+    the wire on `Holding.value_in_asset` — so the weights are given, in the same
+    units the mandate expresses targets in, and the model only has to compare
+    numbers to numbers.
+    """
     if vault is None or not vault.holdings:
         return ""
-    lines = ["", "The vault currently holds:"]
+
+    total = int(vault.total_assets or 0)
+    scale = 10**vault.asset_decimals
+    lines = [
+        "",
+        f"THE VAULT CURRENTLY HOLDS. Total value {total / scale:,.2f} in base asset units:",
+    ]
+
     for holding in vault.holdings:
         decimals = holding.decimals if holding.decimals is not None else 18
         amount = int(holding.balance) / (10**decimals)
+
+        if holding.value_in_asset is not None and total > 0:
+            value = int(holding.value_in_asset)
+            weight = f"{value / total:.1%} of the vault"
+            valued = f"worth {value / scale:,.2f}, {weight}"
+        else:
+            valued = "value unknown this tick"
+
         committed = (
-            f" (committed to {holding.committed_to_venue})" if holding.committed_to_venue else ""
+            f" [committed to {holding.committed_to_venue}]" if holding.committed_to_venue else ""
         )
-        lines.append(f"- {amount:,.4f} {holding.symbol}{committed}")
+        lines.append(f"- {amount:,.6f} {holding.symbol}: {valued}{committed}")
+
+    lines.append(
+        "These percentages are already computed for you. Compare them directly with your "
+        "target weights; do not recalculate them from the token amounts."
+    )
     return "\n".join(lines)
 
 

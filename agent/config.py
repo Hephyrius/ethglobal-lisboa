@@ -76,7 +76,14 @@ class Settings:
     model_name: str = "qwen2.5:3b-instruct-q4_K_M"
     ollama_base_url: str = "http://localhost:11434/v1"
     vllm_base_url: str = "http://localhost:8000/v1"
-    model_timeout_s: float = 120.0
+    #: Generous on purpose. Ollama evicts an idle model after ~5 minutes, so the
+    #: first tick after a quiet spell pays a ~2 GB reload from disk on top of
+    #: inference. Measured: a warm decision is ~33s, a cold one blew through a
+    #: 120s budget and surfaced as `ModelUnavailable` — a timeout that reads as
+    #: "the server is down" when the server is merely slow. Set
+    #: `OLLAMA_KEEP_ALIVE=30m` on the Ollama server before a demo; `keep_alive`
+    #: in the request body is ignored by its OpenAI-compatible endpoint.
+    model_timeout_s: float = 300.0
     #: Attempts at a schema-valid, mandate-legal decision before the cycle is
     #: recorded as `rejected`. Three is enough to recover from the malformed
     #: output small open models produce, and few enough that a model which

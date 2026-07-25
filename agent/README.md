@@ -398,6 +398,22 @@ trusting a different tag:
 uv run python -m agent.bench --model <tag> --runs 3
 ```
 
+> ### ⚠️ Before a demo: `OLLAMA_KEEP_ALIVE=30m`
+>
+> **Ollama evicts an idle model after ~5 minutes.** The next tick then pays a ~2 GB reload from disk
+> before it can generate — a warm decision measured 33s, the first cold one blew past a 120s budget
+> and surfaced as `ModelUnavailable`, which reads as *"the server is down"* when the server is merely
+> slow. That is a demo-shaped failure: it happens precisely when the stack has been sitting idle
+> while someone explains the architecture.
+>
+> Two mitigations, both applied:
+> - `model_timeout_s` now defaults to **300s** so a cold load completes rather than being misreported.
+> - Set **`OLLAMA_KEEP_ALIVE=30m` on the Ollama server** (it is a server-side environment variable).
+>   Passing `keep_alive` in the request body does **not** work — verified: Ollama's
+>   OpenAI-compatible endpoint silently ignores it and the TTL stays at 5 minutes.
+>
+> `curl localhost:11434/api/ps` shows what is resident and when it expires.
+
 > **The model's prose is not as trustworthy as its decisions.** On the first live run it cited fact
 > `f6` — a $12.4M *liquidity* figure — as "the highest headline APY of 10.43%". A real id, an
 > invented value. It passed all four validation layers, because grounding catches fabricated **ids**,
