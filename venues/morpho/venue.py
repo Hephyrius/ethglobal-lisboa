@@ -27,6 +27,25 @@ being deployed and registered as the share token's valuation. Until then
 `_assert_valued` refuses to build a plan, because supplying into a token the
 vault cannot value makes `totalAssets()` fall by the amount supplied and nothing
 errors.
+
+## Known limitation: withdrawal liquidity is not checked at plan time
+
+A MetaMorpho vault lends into Morpho Blue markets, so a redeem can exceed what
+is currently recallable — the shares are real, the liquidity is out on loan.
+`redeem` then reverts with `ERC4626ExceededMaxRedeem`.
+
+This adapter builds static calldata and makes no RPC call, deliberately and in
+line with the other venues, so it **does not** consult `maxRedeem` first. The
+failure is loud rather than silent (the batch reverts, nothing is misaccounted)
+and `venues.reverts` decodes it with the fix: read `maxRedeem(vault)` and redeem
+that, repeating as liquidity returns.
+
+Choosing a *curated* vault rather than a raw Morpho Blue market already avoids
+the sharper version of this hazard — Lane C found a live `USDC/HERMES` market at
+**100% utilisation quoting 297,892% APY**, where a supply simply cannot be
+withdrawn. A curator allocating across markets is what stands between the vault
+and that, which is worth noting in a project about curation: here we are the
+depositor into someone else's curated book.
 """
 
 from __future__ import annotations

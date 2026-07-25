@@ -118,6 +118,26 @@ KNOWN_REVERTS: Final[dict[str, KnownRevert]] = {
             "collides by design. Dock first, or change the fee/pair.",
         ),
         _entry(
+            "ERC4626ExceededMaxRedeem(address,uint256,uint256)",
+            "MetaMorpho (ERC-4626)",
+            "the redeem asked for more shares than the vault can currently honour; "
+            "arguments are (owner, requested, max)",
+            "Not an accounting error — it is **withdrawal liquidity**. A MetaMorpho "
+            "vault allocates into Morpho Blue markets, and when those are near full "
+            "utilisation the supply is lent out and cannot be recalled on demand. "
+            "Read `maxRedeem(vault)` and redeem that instead, then repeat as "
+            "liquidity returns. Lane C's #68 is the same hazard seen from the data "
+            "side: a Morpho market at 100% utilisation cannot be exited.",
+        ),
+        _entry(
+            "ERC4626ExceededMaxWithdraw(address,uint256,uint256)",
+            "MetaMorpho (ERC-4626)",
+            "the asset-denominated withdrawal exceeds what the vault can honour now",
+            "Same cause as ExceededMaxRedeem — check `maxWithdraw(vault)`. Prefer "
+            "redeeming shares over withdrawing assets for a full exit; shares are "
+            "exact while an asset figure computed off-chain is already stale.",
+        ),
+        _entry(
             "TargetNotAllowed(address)",
             "CuratedVault (Lane A)",
             "execute() refused a target that is not on the vault's allowlist",
