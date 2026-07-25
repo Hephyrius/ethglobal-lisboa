@@ -4372,3 +4372,150 @@ still there, but the load-bearing guard is now the Foundry test that runs agains
 Solidity bound test failed the same way for a different reason: it asserted `opcode < 35`, v1.0.1's
 length, which is loose enough to admit every wrong number this bug produced. It is pinned to the
 deployed table's 28 now.
+
+---
+
+## Lane A · Wave 3 — a pause that narrows a power, and an exit that needs no market
+
+Two deliverables, five decisions worth the ink, and one finding that was about the test suite rather
+than the vault.
+
+### The pause does not contradict the trust model, because the power already shipped
+
+`CuratedVault`'s header said *"no human override, no pause, no emergency withdrawal ... a deliberate,
+locked decision"*, and the request was for a pause. Read at face value that is a reversal.
+
+It is not, and the reason is worth stating precisely: **`setTargetAllowed(target, false)` is
+`onlyRole(GUARDIAN_ROLE)`**. A guardian who flipped every target off had already stopped all trading.
+That capability shipped in the MVP. What it lacked was atomicity — one transaction per target, so a
+partial halt was reachable — an event a dashboard could explain, and any way for the agent to
+*unwind* afterwards rather than merely being frozen out.
+
+So `pause()` was written as a narrowing, and the header rewritten to say what the guardian can and
+cannot do rather than to claim an absence that was never quite true. The claim that replaced it is
+stronger and checkable: **no state this contract can be in blocks an exit.**
+
+### The boundary is the entire feature, so it is a test and not a promise
+
+`withdraw`, `redeem` and `redeemInKind` are never pausable. A guardian able to freeze depositor exits
+would hold strictly more power than the agent it exists to contain — it would be a rug vector wearing
+a safety feature's name. `test_withdrawalSucceedsWhilePaused` is the assertion, and it is the single
+most important line in the new suite.
+
+Deposits stay open too. Blocking them would be a liveness power the guardian does not need, and the
+test pins it so that changing it later has to be a decision.
+
+### "Cash must not fall", not "cash must strictly increase" — and `dock()` is why
+
+The plan specified the wind-down rule as *"the base-asset balance must have strictly increased and no
+non-base balance may have increased."* Implemented literally, that rejects the first step of every
+Aqua unwind.
+
+Under Pattern 1 an Aqua position is an **encumbrance against tokens that never left the vault**, so
+`dock()` moves no balances at all. Its balance delta is exactly zero, which fails a strict-increase
+test. The rule as shipped is *base non-decreasing, every registered holding non-increasing* — which
+admits `dock()`, admits an Aave `withdraw` that lands in a later transaction, and still refuses every
+purchase. The plan's intent survives intact: while paused, the agent can only convert the book to
+cash. What changed is that the rule no longer forbids the mechanism it exists to enable.
+
+The weaker-looking form is also the **compositional** one, which is the better property. Each paused
+call individually leaves cash non-decreasing and every holding non-increasing, so *any sequence* of
+them does. Convergence on cash is a theorem about the whole pause window, not a hope about each call.
+
+Two things are deliberately *not* claimed, because both would be overclaims and a judge would find
+them:
+
+- **It constrains direction, not price.** A batch dumping 6,000 USDC of WETH for one wei satisfies
+  it. `test_windDownConstrainsDirectionNotPrice` asserts that the contract permits it. Execution
+  quality is `minOut`'s job, paused or not.
+- **`approveVenue` is exempt.** Selling through a router means approving it first, so a wind-down
+  that cannot approve cannot unwind. That leaves a compromised agent able to grant an allowance to an
+  allowlisted venue and have it pulled in a later transaction, which the direction rule never sees.
+  The exposure is identical paused or not — it is bounded by the allowlist — but it is why the claim
+  is "can only convert the book to cash" and not "can do nothing".
+
+### `redeemInKind` is always callable, and that is a deviation in the safer direction
+
+The plan said *"available while paused"*. It ships callable in every state, because gating the
+unconditional exit behind the guardian's switch would hand the guardian a say in **when depositors
+may leave** — the precise power the pause is forbidden to have. An always-open door also turns out to
+be strictly safer under oracle error in *both* directions: `redeem` overpays when a feed overstates
+and underpays when it understates, while an in-kind slice is exact regardless, because it reads no
+feed.
+
+Two arithmetic decisions inside it:
+
+**The denominator is the virtual one.** Payouts are `balance · shares / (totalSupply + 10^12)` — the
+same denominator `previewRedeem` uses — so the basket is worth at most what the front door quoted.
+Using the real supply instead would have emptied the vault exactly rather than leaving a ~10^-10
+residue, but it would also have made the emergency door the *more generous* one, which is an
+arbitrage rather than an emergency exit. The residue is the better trade.
+
+**It is oracle-free, and therefore not oracle-exact.** Flooring a raw balance and flooring its
+valuation do not commute, so a redeemer can leave with up to one unit of the base asset — 0.000001
+USDC per valued token — more than their exact quote. Closing that gap means pricing the payout, which
+reintroduces the oracle dependency that being unconditional depends on not having. Bounded, asserted,
+and written down rather than rounded away.
+
+### The fuzzer failed a check that was right about deposits and wrong about this
+
+Adding `redeemInKind` to the invariant handler immediately broke
+`invariant_entryAndExitNeverExtractValue`, which says entering or leaving must not lower the share
+price. The shrunk sequence was a donation into an empty vault, then a one-USDC deposit, then an
+in-kind exit.
+
+**The vault was fine; the measurement was not.** `convertToAssets(1e18)` divides by
+`totalSupply + 10^12`. When supply is tiny that denominator is about 10^12, so a **single unit** of
+valuation rounding surfaces as ~10^6 in the read-out. `deposit` and `redeem` had never tripped it
+because they only move the base asset, whose valuation is exact — `redeemInKind` is the first action
+to move a *priced* holding. The share-price check is a proxy whose resolution depends on supply.
+
+So the proxy is not applied to it, and the exact property is asserted instead: value removed must not
+exceed value quoted, with the one unit above as the stated tolerance. That is a strictly stronger
+check than the one it replaced. The general lesson is the one this suite keeps re-learning: **a
+measurement calibrated on one action is not automatically valid for the next one.**
+
+Deep run re-measured rather than inherited: **12 invariants, 65,536 calls each, 786,432 in total,
+zero failures, 279s.**
+
+### Deployer attribution lives on the factory so it cannot become a permission
+
+`VaultFactory` had `_isVault` and `vaults()` and no notion of an owner, and at genesis the *agent*
+submits `createVault` — so even `msg.sender` records the agent. A vault someone deployed and never
+deposited into was invisible to any ownership check based on `balanceOf`, which is exactly the
+one-click archetype case.
+
+Three choices inside the fix:
+
+**Stored on the factory, not the vault.** The vault must not be able to read it. Attribution the
+vault can see is attribution that can quietly grow into an authorization check three commits later;
+keeping it out of the clone's storage makes that impossible rather than merely discouraged.
+
+**`agent` gave up its topic slot.** Lane E asked (#92) for `deployer` indexed *and* for the existing
+arguments left where they were. Both are satisfiable in argument order but not in topics: a
+non-anonymous event has three, and `VaultCreated` already spent all three. `agent` was the one to
+drop, because at genesis every vault shares one agent key — an index that selects the entire set
+indexes nothing. `asset` kept its slot: "every USDC vault" is a filter someone will actually run.
+
+**Asserted, not proven, and said so.** Anyone may call `createVault` claiming any `deployer`. That is
+tolerable for exactly one reason — it confers nothing — and
+`test_deployerIsAClaimAndGrantsNoPowers` demonstrates the attack and then shows it bought the
+attributed address no powers, no shares and no access. `SECURITY.md` §11 says never to gate on it,
+because the real risk is a later lane treating `vaultsOf` as an ACL.
+
+### Test-tree artifacts are no longer committed
+
+`contracts/out/` is committed on purpose — it is how this lane publishes ABIs — but that was never
+true of the *test* tree, and it was costing twice. Those 16 artifacts are most of the diff noise on
+any `contracts/` commit, and their solc metadata embeds dozens of IPFS CIDs that a credential scanner
+reads as high-entropy secrets, which blocked commits of source that had nothing to do with them. The
+repo's own `scripts/check-secrets.sh` already skips these paths for that reason.
+
+The `src/` artifacts stay committed and are refreshed with the new ABI. That part matters more than
+it looks: `agent/chain/abi.py` falls back to `out/**` when `abis/` is missing, so a *stale* published
+artifact is worse than an absent one — absent fails, stale silently serves the wrong ABI.
+
+### What did not change
+
+No existing contract behaviour. Every Wave 2 test still passes unmodified, `totalAssets()` and the
+valuation path are untouched, and the role graph is as frozen as it was. **106 → 142 tests.**
