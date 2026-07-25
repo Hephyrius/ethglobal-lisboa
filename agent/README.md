@@ -58,6 +58,7 @@ Plus three additions that are **not** part of the freeze:
 | `GET /vault/{addr}/mandate` | `Mandate` | Cross-lane request #5. `VaultState` carries only `mandate_hash`, so the mandate viewer had no source for a vault the browser did not itself create. |
 | `GET /vault/{addr}/mandate/verification` | `MandateVerificationResponse` | Cross-lane request #71. Whether the stored mandate still hashes to what the chain recorded — and, when it does not, **which of three reasons applies**. |
 | `GET /genesis/sources` | `{sources[], venues[]}` | The genesis flow asks the user to grant data sources. That list must come from what Lane C actually registered, not a copy hardcoded in the dApp. |
+| `GET /venues` | Lane D's manifest array, **unwrapped and unmodelled** | Cross-lane request #73. The manifest existed in Python but nothing served it, so the browser could only see bare venue keys. Deliberately no `response_model`: the shape is Lane D's and not frozen, so validating it here would silently drop their next field. A 503 (never `[]`) when the manifest cannot be resolved — `[]` would claim there are no venues. |
 | `GET /health` | see below | Reports **which provider each seam actually resolved to**. |
 
 ### Status codes

@@ -97,6 +97,11 @@ class Settings:
     #: "module:attribute" pointing at Lane D's venue registry, e.g.
     #: "venues:registry". Unset -> the fixture venue.
     venue_registry_ref: str | None = None
+    #: Lane D's capability manifest, served verbatim by `GET /venues`
+    #: (#73). Defaulted rather than optional because it is a pure
+    #: description with no credentials and no I/O, so there is nothing to
+    #: opt into — if the package is absent the route says so with a 503.
+    venue_manifest_ref: str = "venues:manifest"
 
     # ── chain ─────────────────────────────────────────────────────────────
     rpc_url: str = "http://localhost:8540"
@@ -144,6 +149,7 @@ def _build() -> Settings:
         max_validation_retries=_env_int("AGENT_MAX_VALIDATION_RETRIES", d.max_validation_retries),
         data_registry_ref=_env_or_none("AGENT_DATA_REGISTRY"),
         venue_registry_ref=_env_or_none("AGENT_VENUE_REGISTRY"),
+        venue_manifest_ref=_env("AGENT_VENUE_MANIFEST", d.venue_manifest_ref),
         rpc_url=_env("ANVIL_RPC_URL", d.rpc_url),
         agent_private_key=_env_or_none("AGENT_PRIVATE_KEY"),
         factory_address=_env_or_none("VAULT_FACTORY_ADDRESS"),

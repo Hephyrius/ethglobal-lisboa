@@ -121,7 +121,10 @@ def _render_mandate(mandate: Mandate) -> str:
             f"- Allowed assets: {', '.join(limits.allowed_assets)}. No others, ever.",
             "- Target weights must sum to 1.0.",
             f"- No single non-cash position above {limits.max_position_pct:.0%} of the vault.",
-            f"- At least {limits.min_cash_pct:.0%} must stay in {mandate.base_asset}.",
+            f"- At least {limits.min_cash_pct:.0%} must stay in {mandate.base_asset}. This is "
+            f"not dead weight: it is the only thing a depositor can be paid out of. The vault "
+            f"cannot unwind a position to fund a withdrawal, so a holder whose shares are worth "
+            f"more than the {mandate.base_asset} on hand simply cannot redeem them.",
             f"- At most {limits.max_actions_per_tick} venue action(s) this tick.",
             f"- Slippage may not exceed {limits.max_slippage_bps} bps.",
             f"- Venues you may use: {', '.join(mandate.permitted_venues)}.",
@@ -351,7 +354,11 @@ Decide what to do with this vault now. Work in this order:
 **Capital sitting idle above the mandate's cash floor is not neutral. It is a \
 position, and the position is earning nothing.** Deploying it into a permitted \
 venue is the default: lending it earns yield, and posting it into Aqua earns \
-fees while moving no tokens at all.
+fees while moving no tokens at all. **The idle figure already excludes the cash \
+floor, so deploying all of it is permitted, but the floor is the entire \
+withdrawal buffer: deploying right down to it leaves depositors with the bare \
+minimum they can exit against.** Of two venues paying similarly, prefer the one \
+you can unwind sooner.
 5. Hold only if you can say why. Holding is legitimate and often right, but it \
 is a choice, so `reasoning` must name the reason: the idle share is immaterial, \
 the yields on offer do not cover the cost of moving, or the data you needed was \

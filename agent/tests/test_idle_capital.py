@@ -29,6 +29,7 @@ from agent.loop.idle import (
     is_material,
     with_idle_fact,
 )
+from agent.model.prompts.curator import decision_messages
 
 USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 WETH = "0x4200000000000000000000000000000000000006"
@@ -267,3 +268,48 @@ def test_the_reflection_stays_empty_with_nothing_to_say():
     from agent.loop.reflection import build_reflection
 
     assert build_reflection([], []).render() == ""
+
+
+# ── the counterweight (cross-lane #76) ────────────────────────────────────
+
+
+def test_the_prompt_says_the_cash_floor_is_the_withdrawal_buffer(mandate):
+    """Lane A measured that a vault can be solvent and still unable to pay a
+    withdrawal: `totalAssets()` 15,000 with only 9,000 liquid, and the revert
+    surfaces from the *token*, so on screen it reads as a broken vault rather
+    than an illiquid one. The vault cannot unwind a position to fund an exit.
+
+    That makes `min_cash_pct` the only thing keeping the vault withdrawable —
+    a soft off-chain guarantee, not a contract one — and it lands directly
+    against everything B1 added to push idle capital out. The floor is already
+    enforced, so this is not a new limit; it is the prompt no longer implying
+    that cash at the floor is waste.
+    """
+    # Joined, not messages[0]: the limits and the decision procedure render in
+    # the user turn while the persona renders in the system one, and a test that
+    # picks the wrong index passes for the wrong reason or fails for no reason.
+    prompt = "\n".join(
+        m["content"]
+        for m in decision_messages(mandate, fixtures.market_snapshot(), fixtures.vault_state())
+    )
+
+    assert "the only thing a depositor can be paid out of" in prompt
+    assert "cannot unwind a position to fund a withdrawal" in prompt
+
+
+def test_the_deploy_instruction_names_the_cost_of_going_to_the_floor(mandate):
+    """B1 says deploying is the default and that is still the instruction. What
+    changed is that the sentence no longer stops there: an agent that deploys to
+    the floor has maximised yield and minimised the buffer depositors leave
+    through, and it should know it is making that trade."""
+    # Joined, not messages[0]: the limits and the decision procedure render in
+    # the user turn while the persona renders in the system one, and a test that
+    # picks the wrong index passes for the wrong reason or fails for no reason.
+    prompt = "\n".join(
+        m["content"]
+        for m in decision_messages(mandate, fixtures.market_snapshot(), fixtures.vault_state())
+    )
+
+    assert "Deploying it into a permitted venue is the default" in prompt
+    assert "the floor is the entire withdrawal buffer" in prompt
+    assert "prefer the one you can unwind sooner" in prompt
