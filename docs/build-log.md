@@ -4787,3 +4787,104 @@ And the `[+N chars cut]` marker means a hostile label is now **partly** truncate
 rather than shown whole. That is a real behaviour change from what the first version of these notes
 claimed: the evidence lives in the journal, and the prompt carries only enough for the model to
 notice and say so.
+
+---
+
+## Lane A · Wave 3 — the redeploy, and a determinism claim that was never true
+
+The operator authorised restarting the shared fork. Doing it turned up a wrong claim this repo had
+been repeating since the MVP, in a file I wrote.
+
+### "A cold deploy at nonce 0 is deterministic" — no
+
+`contracts/README.md` had a reassuring warning box: redeploying overwrites the addresses file, *but*
+a cold deploy signed by anvil #0 at nonce 0 reproduces the same vault address, so a clean replay is
+less disruptive than it sounds. I repeated that to four lanes in `#105` as part of the argument that
+the restart was cheap.
+
+The addresses all changed. Factory `0x0282…302D → 0xA783…B146`, implementation
+`0xd5a7…67ce → 0xed1e…E74B`, demo vault `0x0E2c…B5d1 → 0xBD44…50cd`.
+
+**The claim contains its own refutation.** A CREATE address is `keccak(deployer, nonce)`, and the
+fork deployer is **anvil account #0 — a key whose private key is printed in Foundry's documentation.**
+Thousands of people have it. They transact from it on real chains, constantly. So a fork does not
+start that account at nonce 0; it *inherits the real one*:
+
+| Fork block | anvil #0 nonce on Base |
+|---|---|
+| 49,077,772 (old) | 3,393,100 |
+| 49,166,831 (new) | 3,393,112 |
+
+Twelve transactions from strangers in ~89k blocks, and every deployed address moves. The deploy only
+ever *looked* deterministic because nobody had restarted the fork at a different block.
+
+**What actually makes a fork deploy reproducible is pinning `FORK_BLOCK_NUMBER`**, because that fixes
+the inherited nonce too. It is currently unset. Corrected in the README, in `#110`, and in
+`DEPLOY.md`, and filed as a request rather than changed under the lane that owns `.env`.
+
+The general shape is one worth keeping: **"deterministic" was a property of the account, and the
+account is not ours.** It is the same class of error as assuming a mock's decimals generalise —
+a local fact quietly promoted to a global one.
+
+### Guards for a deploy that cannot be taken back
+
+Almost everything genesis sets is immutable: the role graph is frozen and there is no valuation
+setter for anyone. So the deploy script's job is to make the unrecoverable configurations
+unreachable, and it now refuses three more:
+
+**`agent == guardian`, on real networks only.** One key holding both roles is neither. `SECURITY.md`
+§12's whole claim is that the guardian may halt trading but never name a trade, and the agent may
+trade but never halt itself; a single account does both, and the frozen role graph means it can never
+be separated afterwards. Deliberately *not* enforced on a fork, where one operator holding everything
+is normal and harmless — and that asymmetry is asserted, so it reads as a decision rather than a gap.
+
+**A named network on the wrong chain.** Every address in the script is a Base mainnet address. One
+wrong `--rpc-url` and they are seven empty accounts and a "price feed" that is nothing, frozen into a
+vault. The code checks below would catch it too, but this fails first and says *why* instead of naming
+one arbitrary address.
+
+**Every allowlisted target must hold code, and the feed must be readable.** The second half is the
+one worth the ink: the feed is checked by calling **`ChainlinkPriceLib.readPrice` — the exact function
+`totalAssets()` will call — with the exact `priceMaxAge` this vault is about to freeze.** So the
+deploy cannot produce a vault whose accounting reverts on first use. A wrong address, a feed reporting
+zero, an incomplete round, or an answer already older than the bound all abort with the library's own
+named error. On a fork `priceMaxAge` is 0, which disables the staleness leg here exactly as it does in
+the vault: **the guard is as strict as the vault will be and no stricter**, which is the property that
+keeps it from failing fork deploys the vault would have been perfectly happy with.
+
+### Two post-deploy checks, because they ask different questions
+
+`check-deployment.sh` already asked *"is the deployed bytecode the source in this repo?"* — a question
+about **compilation**, and the thing that makes "reviewed against this code" mean anything.
+
+`VerifyDeployment.s.sol` asks *"is the live contract configured the way the published file claims, and
+can it actually function?"* — a question about **state**. A vault passes the first and fails the
+second in every way that matters: right code and the wrong agent; right code and an allowlist missing
+the router every plan targets; right code and a feed that stopped answering, so `totalAssets()` reverts
+and nobody can deposit or withdraw. It checks the published chain id, code at all three addresses, the
+vault's registration with its factory, asset/agent/guardian/mandate/`priceMaxAge` against the file,
+**the role graph frozen on chain rather than in the source**, allowlist set equality, every feed
+readable at the vault's own bound, `totalAssets()` and `holdings()` returning, and the Wave 3 surface
+present. It never broadcasts, so it is safe against mainnet at any time.
+
+Two implementation notes, both of which cost a run:
+
+- **`address(this)` is rejected in forge scripts.** Script contracts are ephemeral, so their address
+  means nothing — a fixed probe constant instead.
+- **A staticcall probe cannot prove `redeemInKind` exists.** Even for zero shares it is a *write*:
+  `_spendAllowance` and `_burn` both touch storage and emit at zero, so a staticcall reverts on a
+  perfectly healthy vault. A real call in simulation runs the whole payout path instead, which is the
+  stronger check anyway, and nothing is broadcast because there is no `startBroadcast` in the file.
+
+### Why any of this mattered here
+
+Lane B's `#99` note is the sharpest framing of the problem the redeploy solved, and it applies to the
+deploy tooling as much as to the vault: **a stale component that answers plausibly is worse than one
+that is down.** `paused() == false` from a vault with no `pause()` is byte-identical to `false` from
+a healthy vault. Nothing in the response, the feed or `/health` distinguishes them — so "the guardian
+can halt trading without touching your money" would have been demonstrated by a vault that silently
+ignores `pause()`, and the failure would have been a banner that never appears rather than an error
+anyone could see.
+
+`VerifyDeployment` exists so that question has an answer that is not "trust me": it is the one check
+that distinguishes a Wave 3 vault from a pre-Wave-3 clone, and it is now a gate rather than a memory.
