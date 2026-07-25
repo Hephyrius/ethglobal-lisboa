@@ -147,6 +147,33 @@ model.
 Built by Lane D's Uniswap adapter from a live quote (750 USDC → ~0.403526 WETH quoted, 0.403383
 delivered — 0.035% off, well inside tolerance), submitted by this lane as a single `executeBatch`.
 
+### Every transaction this lane has sent, and what each one taught
+
+| tx | driver | outcome |
+|---|---|---|
+| `0x789066d4…` | plan submitted directly | ✅ the gate: 2,500 USDC → 1,750 USDC + 0.4034 WETH |
+| `0x129da1a0…` | **fully autonomous tick**, 0 retries | ⚠️ right diagnosis, **wrong direction** — sold the underweight asset, 70/30 → 79/21 |
+| `0x704f54a2…` | **fully autonomous tick**, 0 retries | ⚠️ right direction, **`pct_of_holdings: 1.0`** — 79/21 → **0/100**, breaching two mandate limits |
+
+The loop demonstrably runs end to end on its own. It also produced two bad trades in a row, and
+**every validation layer then in place passed both** — correctly, because each decision was
+internally consistent in every respect except the one that mattered. That is the honest headline
+finding of this lane, and it is why there are now six layers rather than four:
+
+- **Layer 5 — direction.** You may not sell an asset already below its target, nor buy one already
+  above it.
+- **Layer 6 — projected outcome.** The swap is projected forward at current valuations and the
+  *result* is checked: the mandate's cash floor and position ceiling must survive, and a book that
+  was materially off target must end closer to it.
+
+Both compare the decision against **reality**, not against the mandate's text. The structural gap
+they close is that mandate limits were being applied to what the model *declared it wanted* and never
+to what its trade would actually *do*. Declared intent and realised effect are different things, and
+only the second one spends money.
+
+Weights come from the vault's own `value_in_asset` — the Chainlink figure `totalAssets()` is built
+from — so the checks agree with the contract rather than forming a second opinion.
+
 ### Run it
 
 ```sh
