@@ -789,6 +789,49 @@ path shapes and remembers the first that answers.
 
 ---
 
+## 2026-07-25 — Lane D: the agent refused every trade over one unset environment variable
+
+**What changed.** `UNISWAP_SLIPPAGE_BPS` wired from the environment through `VenueConfig` and
+`get_venue()` into `UniswapVenue(default_slippage_bps=…)`, closing cross-lane requests 26 and 32 and
+unblocking rung **R4** of the e2e plan. `price_impact_bps()` added and surfaced in `expected_effect`.
+77 Python tests green.
+
+**Why this mattered more than its size.** Both ends of the fix already existed —
+`QuoteRequest.slippage_bps` and `UniswapVenue(default_slippage_bps=…)` — and nothing connected them,
+so the adapter was always built with `None` and the Uniswap API applied its own **250 bps** default.
+This lane reported that faithfully, the harness compared it against the golden mandate's **50 bps**
+ceiling, and rejected. **The symptom is an agent that reasons correctly over live Graph data and then
+declines to trade** — which reads as a model or prompt problem and costs hours in the wrong place. It
+was one environment variable.
+
+**Requesting the bound is better than tolerating a looser one.** The alternative fix — raise the
+mandate's ceiling to 300 — was explicitly rejected in request 32 and rightly: a mandate that
+advertises "conservative, low drawdown" while permitting 3% slippage is exactly the inconsistency a
+judge notices, and the real fill was 5 bps. Requesting 50 bps means the constraint is baked into the
+swap calldata's `minimumAmount`, so the agent tells Uniswap the bound it is actually under rather
+than accepting a looser one and checking afterwards. Verified live: request `slippageTolerance: 0.5`
+→ response `slippage: 0.5`, plan reports 50 bps, harness accepts.
+
+**Tolerance and impact are different numbers and the distinction is now explicit.**
+`expected_slippage_bps` stays the *bound* — it is what the harness checks, and a ceiling must be
+compared against a worst case, not an expectation. Reporting the API's `priceImpact` there would
+have made plans pass more easily while understating the risk the mandate exists to cap. Instead
+`price_impact_bps()` is reported separately in `expected_effect` ("~5 bps price impact"), so the feed
+shows the bound and the estimate side by side. A judge reading "50 bps tolerance, 5 bps impact"
+learns more than either number alone.
+
+**A bad value now fails loudly.** `UNISWAP_SLIPPAGE_BPS=abc` or `=10001` raises rather than falling
+back to `None` — silently ignoring a typo'd bound would restore the exact failure this change exists
+to remove, and the fallback is indistinguishable from success.
+
+**Test hygiene note.** Two tests asserting the *absent* case failed once `.env` carried the variable,
+because `VenueConfig.from_env()` loads it. Fixed with a `no_dotenv` fixture that neutralises
+`load_env`, following the hermetic pattern Lane C established in `data/tests/conftest.py`. Tests
+about a code path should not depend on the developer's local configuration — on a demo machine, where
+the variable is always set, those assertions would otherwise be unprovable.
+
+---
+
 ## 2026-07-25 — Lane D: our SwapVM programs were compiled against the wrong version of SwapVM
 
 **What changed.** `@1inch/swap-vm` pinned from the default branch to **v1.0.1**;

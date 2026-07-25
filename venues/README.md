@@ -131,6 +131,32 @@ the decision loop alive.
 | **`UNISWAP_API_KEY`** | Required for the `uniswap` venue only. `uniswap_key` also accepted (the pre-Wave-0 name). |
 | **`ANVIL_RPC_URL` / `BASE_RPC_URL`** | Required for the `aqua` venue. Needs `eth_call` **state-override** support. **Verified: the public `https://mainnet.base.org` supports it**, as do anvil and Alchemy — so this venue needs no archive endpoint and no deployment. |
 | `DEPLOYMENTS_FILE` | Optional. Points the allowlist reader at a manifest other than `deployments/base-fork.json`. |
+| **`UNISWAP_SLIPPAGE_BPS`** | **Set this to the mandate's `max_slippage_bps`** (50 for the golden mandate). See below — without it every Uniswap plan is rejected. |
+
+### `UNISWAP_SLIPPAGE_BPS` — set it, or the agent never trades
+
+Unset, the Uniswap API applies its own default tolerance of **250 bps**, which
+this lane faithfully reports as `expected_slippage_bps`. The harness then
+rejects the plan for exceeding a tighter mandate ceiling. The symptom is an
+agent that reasons perfectly over live data and then refuses every trade — which
+reads as a model problem and is actually one environment variable.
+
+Set it and the API returns a quote at *that* tolerance, so the number the
+harness checks equals the bound the mandate imposes, by construction:
+
+```sh
+UNISWAP_SLIPPAGE_BPS=50      # matches the golden mandate
+```
+
+Requesting the bound is also the honest form: it is baked into the swap
+calldata's `minimumAmount`, so the agent tells Uniswap the constraint it is
+actually under rather than accepting a looser one and checking afterwards.
+
+**Tolerance is not impact.** `expected_slippage_bps` is the *bound* — the most
+the trade can lose. `expected_effect` additionally reports the API's estimated
+**price impact**, which is typically far smaller (5 bps against a 50 bps bound
+on a 1,000 USDC trade). The harness checks the bound, because a ceiling must be
+compared against a worst case; the feed shows both.
 | `AQUA_PROGRAM_BUILDER_ADDRESS` | Optional. Set it to use a deployed builder instead of the state-override path — needed only on endpoints without override support. |
 | Python | `eth-abi`, `eth-utils`, `httpx`, `pydantic` (root `venues` extra: `uv sync --all-extras`) |
 | Foundry | **Not required to use this lane.** Only to regenerate `aqua/program_builder.json`. |

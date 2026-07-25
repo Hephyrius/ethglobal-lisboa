@@ -104,17 +104,40 @@ def describe(quote: dict[str, Any]) -> str:
         return "swap via Uniswap"
 
 
-def slippage_bps(quote: dict[str, Any]) -> int | None:
-    """`quote.slippage` is a PERCENT float (2.5 means 2.5%). The mandate ceiling
-    it gets compared against is in basis points, so convert here — the one place
-    that knows the API's unit."""
-    raw = quote.get("slippage")
+def _percent_to_bps(raw: Any) -> int | None:
     if raw is None:
         return None
     try:
         return max(0, round(float(raw) * 100))
     except (TypeError, ValueError):
         return None
+
+
+def slippage_bps(quote: dict[str, Any]) -> int | None:
+    """The slippage **tolerance** in basis points.
+
+    `quote.slippage` is a PERCENT float (2.5 means 2.5%); the mandate ceiling it
+    is compared against is in basis points, so convert here — the one place that
+    knows the API's unit.
+
+    This is a *bound*, not an estimate: it is what gets baked into the swap
+    calldata's `minimumAmount`, so it is the most the trade can lose to price
+    movement. Reported rather than `price_impact_bps` deliberately — the harness
+    checks this against the mandate ceiling, and a ceiling must be compared
+    against a worst case, not an expectation. Set `UNISWAP_SLIPPAGE_BPS` to the
+    mandate's own ceiling and the two agree by construction.
+    """
+    return _percent_to_bps(quote.get("slippage"))
+
+
+def price_impact_bps(quote: dict[str, Any]) -> int | None:
+    """The API's estimate of actual price impact, in basis points.
+
+    Typically far below the tolerance — 5 bps against a 50 bps bound on a
+    1,000 USDC trade. Surfaced for the decision feed, never used for the
+    mandate check.
+    """
+    return _percent_to_bps(quote.get("priceImpact"))
 
 
 def build_plan(
@@ -182,10 +205,17 @@ def build_plan(
         )
     )
 
+    # The feed shows the bound and the estimate side by side. A judge reading
+    # "50 bps tolerance, 5 bps impact" learns more than either number alone.
+    effect = describe(quote)
+    impact = price_impact_bps(quote)
+    if impact is not None:
+        effect = f"{effect} (~{impact} bps price impact)"
+
     plan = ExecutionPlan(
         venue=VENUE_KEY,
         steps=steps,
-        expected_effect=describe(quote),
+        expected_effect=effect,
         expected_slippage_bps=slippage_bps(quote),
         quote_expires_at=now + QUOTE_TTL,
     )

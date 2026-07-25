@@ -20,9 +20,16 @@ if TYPE_CHECKING:  # avoids importing every adapter (and its deps) at module loa
 
 
 def _uniswap() -> Venue:
+    from .config import VenueConfig
     from .uniswap.venue import UniswapVenue
 
-    return UniswapVenue()
+    # Carry the slippage bound from the environment into the adapter. Without
+    # this the Uniswap API applies its own 250 bps default and the harness
+    # rejects every plan against a tighter mandate ceiling — see cross-lane
+    # requests 26 and 32. Set UNISWAP_SLIPPAGE_BPS to the mandate's
+    # max_slippage_bps.
+    config = VenueConfig.from_env()
+    return UniswapVenue(config=config, default_slippage_bps=config.uniswap_slippage_bps)
 
 
 def _aqua() -> Venue:

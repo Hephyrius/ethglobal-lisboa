@@ -51,11 +51,38 @@ class MissingCredentialError(RuntimeError):
     to get it, because 'None' three frames deep is not a diagnosis."""
 
 
+def _int_or_none(name: str) -> int | None:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return None
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        raise ValueError(
+            f"{name}={raw!r} is not an integer number of basis points"
+        ) from None
+    if not 0 <= value <= 10_000:
+        raise ValueError(f"{name}={value} is outside 0..10000 basis points")
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class VenueConfig:
     uniswap_api_key: str | None
     uniswap_api_base: str
     rpc_url: str
+    #: Slippage tolerance requested from the Uniswap API, in basis points.
+    #:
+    #: Set this to the mandate's `max_slippage_bps`. Without it the API applies
+    #: its own default — 250 bps — and the harness then rejects the plan for
+    #: exceeding a tighter mandate ceiling, which is how a 50 bps mandate ends
+    #: up refusing every trade even though the real price impact is ~5 bps.
+    #:
+    #: Requesting it is also the *honest* form: the agent tells Uniswap the
+    #: bound it is actually under, and that bound is baked into the swap
+    #: calldata's `minimumAmount`, rather than accepting a looser one and
+    #: checking afterwards.
+    uniswap_slippage_bps: int | None
 
     @classmethod
     def from_env(cls) -> VenueConfig:
@@ -64,6 +91,7 @@ class VenueConfig:
             uniswap_api_key=_first_set(_UNISWAP_KEY_NAMES),
             uniswap_api_base=os.environ.get("UNISWAP_API_BASE", UNISWAP_API_BASE).rstrip("/"),
             rpc_url=_first_set(_RPC_NAMES) or _PUBLIC_BASE_RPC,
+            uniswap_slippage_bps=_int_or_none("UNISWAP_SLIPPAGE_BPS"),
         )
 
     def require_uniswap_key(self) -> str:
