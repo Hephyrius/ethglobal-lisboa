@@ -30,7 +30,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from curator_schema import AllocationDecision, ExecutionPlan, Mandate, VaultState
+from curator_schema import (
+    AllocationDecision,
+    ConstraintWarning,
+    ExecutionPlan,
+    Mandate,
+    VaultState,
+)
 
 __all__ = [
     "Violation",
@@ -39,6 +45,9 @@ __all__ = [
     "check_projected_outcome",
     "check_plan",
     "describe",
+    "apply_band",
+    "banded_warnings",
+    "BANDABLE",
 ]
 
 #: Weights are model-generated decimals, so an exact sum to 1.0 is not a fair
@@ -48,15 +57,120 @@ __all__ = [
 WEIGHT_SUM_TOLERANCE = 0.01
 
 
+#: The only constraints the tolerance band may bend, and the reason each one
+#: qualifies: they are **aims**, so landing at 61% against a 60% cap is the
+#: rounding artefact of a swap that priced a hair differently, not a breach of
+#: intent.
+#:
+#: Everything absent from this set is outside the band **by design**, and the
+#: omissions carry more weight than the inclusions:
+#:
+#: - `max_slippage_bps` — a ceiling that was already compared against a bound
+#:   rather than an estimate (#33). Banding it means paying 5% more than the
+#:   mandate's stated maximum cost, silently.
+#: - `allowed_assets`, `permitted_venues`, `permitted_data_sources` — not
+#:   numeric. There is no "5% of an asset that is not permitted".
+#: - `max_actions_per_tick`, `rebalance_cooldown_seconds` — anti-churn limits.
+#:   A band on those is just a bigger limit.
+BANDABLE = frozenset({"max_position_pct", "min_cash_pct", "target_allocation"})
+
+
 @dataclass(frozen=True)
 class Violation:
-    """One breach, phrased so it can be handed straight back to the model."""
+    """One breach, phrased so it can be handed straight back to the model.
+
+    The numeric fields are what let a breach be *banded* rather than rejected.
+    A violation that cannot state its limit and its actual value is never
+    banded, whatever its name — the band has to be measurable to be applied,
+    and guessing the magnitude of a breach in order to forgive it is worse than
+    rejecting it.
+    """
 
     field: str
     message: str
+    #: The `MandateConstraints` field that bent, or "target_allocation" for
+    #: drift. `None` means this violation is not a candidate for the band.
+    constraint: str | None = None
+    #: Asset symbol when the constraint is per-asset.
+    subject: str | None = None
+    #: The mandate's own value, and the value that breached it.
+    limit: float | None = None
+    actual: float | None = None
 
     def __str__(self) -> str:
         return f"{self.field}: {self.message}"
+
+    @property
+    def bandable(self) -> bool:
+        return (
+            self.constraint in BANDABLE
+            and self.limit is not None
+            and self.actual is not None
+        )
+
+    def overage(self) -> float | None:
+        """How far past the limit, as a fraction of the limit.
+
+        Relative rather than absolute: a 1pp overshoot on a 60% cap is a 1.7%
+        miss, while the same point on a 5% floor is a 20% one, and a band
+        expressed in percent has to mean the same thing in both.
+        """
+        if self.limit is None or self.actual is None:
+            return None
+        if self.limit == 0:
+            # No proportion of zero. A floor of zero cannot be breached, and a
+            # cap of zero admits no band at all.
+            return None if self.actual == 0 else float("inf")
+        return abs(self.actual - self.limit) / abs(self.limit)
+
+
+def apply_band(
+    violations: list[Violation], mandate: Mandate
+) -> tuple[list[Violation], list[ConstraintWarning]]:
+    """Split breaches into those that still reject and those the band forgives.
+
+    Wave 2 §3.1: *"make the rules less rigid — violation allowed within a
+    threshold of mandate ±5%."* The danger is that "less rigid" becomes "no
+    rules", so three things hold:
+
+    - Only `BANDABLE` constraints bend. See that set for why each omission is an
+      omission and not an oversight.
+    - The overage is measured **against the mandate**, never against last tick.
+      Comparing to the previous state is what lets a ratchet walk the book away
+      from its mandate 5% at a time without ever tripping a rejection.
+    - Every forgiveness produces a `ConstraintWarning`, so a banded acceptance
+      reaches the action, the feed and the reflection. A band nobody can see is
+      indistinguishable from no rule at all.
+    """
+    band = mandate.constraints.tolerance_band_pct
+    if band <= 0:
+        return violations, []
+
+    hard: list[Violation] = []
+    warnings: list[ConstraintWarning] = []
+
+    for violation in violations:
+        overage = violation.overage() if violation.bandable else None
+        if overage is None or overage > band:
+            hard.append(violation)
+            continue
+
+        warnings.append(
+            ConstraintWarning(
+                constraint=violation.constraint,
+                subject=violation.subject,
+                limit=violation.limit,
+                actual=violation.actual,
+                band_pct=band,
+                message=(
+                    f"{violation.constraint} bent by {overage:.1%} of its limit "
+                    f"({violation.actual:.2%} against {violation.limit:.2%}), inside the "
+                    f"{band:.0%} tolerance band. Accepted, and still steering back."
+                )[:300],
+            )
+        )
+
+    return hard, warnings
 
 
 def describe(violations: list[Violation]) -> str:
@@ -121,6 +235,10 @@ def _check_allocations(
                 "target_allocations",
                 f"{allocation.asset} at {allocation.weight:.2%} exceeds the "
                 f"{limits.max_position_pct:.0%} single-position ceiling",
+                constraint="max_position_pct",
+                subject=allocation.asset,
+                limit=limits.max_position_pct,
+                actual=allocation.weight,
             )
         )
 
@@ -131,6 +249,10 @@ def _check_allocations(
                 "target_allocations",
                 f"holds {cash:.2%} in {mandate.base_asset} but the mandate requires at "
                 f"least {limits.min_cash_pct:.0%} in cash",
+                constraint="min_cash_pct",
+                subject=mandate.base_asset,
+                limit=limits.min_cash_pct,
+                actual=cash,
             )
         )
 
@@ -444,6 +566,10 @@ def check_projected_outcome(
                 "venue_intents",
                 f"this trade would leave {cash:.1%} in {mandate.base_asset}, below the "
                 f"{limits.min_cash_pct:.0%} cash floor. Sell less",
+                constraint="min_cash_pct",
+                subject=mandate.base_asset,
+                limit=limits.min_cash_pct,
+                actual=cash,
             )
         )
 
@@ -456,6 +582,10 @@ def check_projected_outcome(
                     "venue_intents",
                     f"this trade would take {asset} to {weight:.1%}, above the "
                     f"{limits.max_position_pct:.0%} single-position ceiling. Buy less",
+                    constraint="max_position_pct",
+                    subject=asset,
+                    limit=limits.max_position_pct,
+                    actual=weight,
                 )
             )
 
@@ -537,3 +667,18 @@ def check_plan(plan: ExecutionPlan, mandate: Mandate) -> list[Violation]:
             )
         ]
     return []
+
+
+def banded_warnings(
+    decision: AllocationDecision, mandate: Mandate, vault: VaultState | None
+) -> list[ConstraintWarning]:
+    """Every constraint this decision bent and was forgiven for.
+
+    Recomputed after validation rather than threaded out of it. The checks are
+    pure functions over data the caller already holds, so a second pass costs
+    nothing measurable and keeps `validate_decision`'s signature — which several
+    dozen tests and the whole retry loop are written against.
+    """
+    _, from_targets = apply_band(check_decision(decision, mandate), mandate)
+    _, from_outcome = apply_band(check_projected_outcome(decision, mandate, vault), mandate)
+    return [*from_targets, *from_outcome]

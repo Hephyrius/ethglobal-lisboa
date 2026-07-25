@@ -51,6 +51,7 @@ from curator_schema.ports import ModelBackend
 from pydantic import ValidationError
 
 from ..mandate.constraints import (
+    apply_band,
     check_decision,
     check_projected_outcome,
     check_rebalance_direction,
@@ -215,8 +216,11 @@ def validate_decision(
             "Fix these fields and return the corrected JSON object."
         ) from exc
 
-    # 3 — mandate
-    if violations := check_decision(decision, mandate):
+    # 3 — mandate. A breach inside the tolerance band is accepted with a
+    # recorded warning rather than rejected (Wave 2 §3.1); `apply_band` decides
+    # which constraints may bend and which never do.
+    hard, _ = apply_band(check_decision(decision, mandate), mandate)
+    if violations := hard:
         raise ValueError(
             f"your decision breaches the mandate — {describe(violations)}. "
             "Return a corrected decision that respects these limits."
@@ -234,7 +238,8 @@ def validate_decision(
         )
 
     # 6 — projected outcome. Checks where the trade LANDS, not what it claims.
-    if violations := check_projected_outcome(decision, mandate, vault):
+    hard_outcome, _ = apply_band(check_projected_outcome(decision, mandate, vault), mandate)
+    if violations := hard_outcome:
         raise ValueError(
             f"your trade would land the vault in a state the mandate forbids — "
             f"{describe(violations)}. Resize the swap and return a corrected decision."

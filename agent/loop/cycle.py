@@ -41,6 +41,7 @@ from curator_schema import (
 from ..clock import to_utc, utcnow
 from ..config import Settings
 from ..mandate.amend import AmendmentRejected, apply_amendment
+from ..mandate.constraints import banded_warnings
 from ..mandate.store import MandateNotFound, MandateStore
 from ..model.openai_compat import ModelUnavailable
 from ..model.validation import DecisionRejected
@@ -133,6 +134,9 @@ class DecisionCycle:
 
         decision = result.decision
         provenance = _provenance(self._engine, retries=result.retries)
+        # A banded acceptance must reach the action, the feed and the reflection
+        # (Wave 2 §3.1). A band nobody can see is indistinguishable from no rule.
+        record.warnings = banded_warnings(decision, mandate, state)
 
         mandate = self._maybe_amend(vault, mandate, decision, record)
 
@@ -306,6 +310,7 @@ class _Recorder:
         self._started = started
         self._timestamp = utcnow()
         self.snapshot: MarketSnapshot | None = None
+        self.warnings: list = []
         self.mandate_version: int | None = None
         self.mandate_version_after: int | None = None
 
@@ -319,6 +324,7 @@ class _Recorder:
             mandate_version_before=self.mandate_version,
             mandate_version_after=self.mandate_version_after or self.mandate_version,
             duration_ms=int((perf_counter() - self._started) * 1000),
+            warnings=self.warnings,
             **fields,
         )
         self._journal.append(action)
