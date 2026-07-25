@@ -92,9 +92,54 @@ require `UNISWAP_API_KEY` to be present.
 | `SwapIntent` | `uniswap` | 3 steps: ERC-20 approve → Permit2 approve → router execute |
 | `AquaShipIntent` | `aqua` | 3 steps: approve token A → approve token B → `Aqua.ship()` |
 | `AquaDockIntent` | `aqua` | 1 step: `Aqua.dock()` |
+| `SupplyIntent` | `aave` | 2 steps: ERC-20 approve pool → `Pool.supply(asset, amount, vault, 0)` |
+| `WithdrawIntent` | `aave` | 1 step: `Pool.withdraw(asset, amount, vault)` |
 
 Routing an intent to the wrong adapter raises `UnsupportedIntentError` rather
 than returning an empty plan — a wiring bug should be loud.
+
+### The three venues do genuinely different jobs
+
+**Uniswap rotates what the vault holds. Aqua earns fees on what it already
+holds. Aave earns interest on what it already holds.** Only the first changes
+the vault's exposure, which is why the harness's target-closing rule applies to
+swaps and to nothing else — a supply that leaves every weight untouched is not a
+failed rebalance.
+
+Aave was added in Wave 1 to close a measured gap: the `aave` data source
+contributed **204 facts about lending yields** across the first 36 ticks, and no
+intent type could act on any of them. The agent read *"Aave pays 3.5% on USDC"*
+and its only possible response was a Uniswap swap.
+
+### Two things about lending that will bite if you skip them
+
+**`onBehalfOf` is always the vault.** Aave credits the aToken to that address.
+Anything else hands the position to a party that is not the custodian, on a call
+that succeeds — no revert, no log, nothing to notice.
+
+**A vault that cannot value the aToken must not supply.** `totalAssets()` counts
+the base asset plus *registered* valued tokens, so supplying into a vault that
+does not know `aBasUSDC` makes its reported worth fall by exactly the amount
+supplied. Every depositor's share price drops and nothing errors.
+
+`AaveVenue` refuses at plan time when the aToken is absent from the deployment
+manifest's allowlist. Per-vault valuations are **immutable after `initialize`**,
+so this is a property of when a vault was created:
+
+```sh
+./scripts/expand-universe.sh   # registers aBasUSDC → USDC/USD, aBasWETH → ETH/USD
+                               # then create a NEW vault; existing ones cannot lend
+```
+
+An aToken is a 1:1 rebasing claim, so it is correctly valued by the
+**underlying's** Chainlink feed — no new contract and no pegged-oracle shim.
+Both aToken addresses were confirmed two ways on the fork:
+`UNDERLYING_ASSET_ADDRESS()` and `Pool.getReserveData(asset)[8]`.
+
+Downstream, `Holding.represents` carries the fold: `aBasUSDC` represents `USDC`,
+so allocation weights, mandate targets and the allocation chart all treat a
+supplied balance as the underlying exposure it is. Without it a mandate allowing
+`["USDC","WETH"]` sees a vault holding 50% of an asset it never permitted.
 
 ---
 

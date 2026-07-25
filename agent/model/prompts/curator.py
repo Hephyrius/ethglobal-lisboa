@@ -228,14 +228,27 @@ def _render_holdings(vault: VaultState | None) -> str:
         else:
             valued = "value unknown this tick"
 
-        committed = (
-            f" [committed to {holding.committed_to_venue}]" if holding.committed_to_venue else ""
-        )
+        # A receipt token has to read as its underlying, or the model sees an
+        # asset its mandate never permitted and tries to "correct" a position
+        # that is exactly what the mandate asked for.
+        if holding.represents:
+            name = (
+                f"{holding.represents} supplied to {holding.committed_to_venue or 'a venue'} "
+                f"(held as {holding.symbol}, still counts as your {holding.represents})"
+            )
+            committed = ""
+        else:
+            name = holding.symbol
+            committed = (
+                f" [committed to {holding.committed_to_venue}]"
+                if holding.committed_to_venue
+                else ""
+            )
         # The raw balance is here because an Aqua ship is denominated in base
         # units. Without it the model has to compute 0.672 WETH -> 18 decimals
         # itself, which is exactly the kind of arithmetic it gets wrong.
         lines.append(
-            f"- {amount:,.6f} {holding.symbol} (base units: {holding.balance}): "
+            f"- {amount:,.6f} {name} (base units: {holding.balance}): "
             f"{valued}{committed}"
         )
 
@@ -282,12 +295,23 @@ Return exactly this JSON shape:
   "confidence": 0.0
 }}
 
-There are exactly two kinds of venue intent.
+There are four kinds of venue intent, and they do different jobs. Only the \
+first one changes what the vault is exposed to; the others put an existing \
+holding to work without changing the allocation at all.
 
 To CHANGE what the vault holds, swap through Uniswap. `pct_of_holdings` is the \
 fraction of the input token's holdings to sell:
 {{"venue": "uniswap", "kind": "swap", "token_in": "A", "token_out": "B", \
 "pct_of_holdings": 0.0}}
+
+To EARN INTEREST on an asset the vault already holds, supply it to Aave. The \
+vault receives an interest-bearing receipt token which it holds itself. This \
+does NOT change your allocation - supplying USDC leaves you just as long USDC, \
+it simply earns the lending rate while you hold it:
+{{"venue": "aave", "kind": "supply", "asset": "A", "pct_of_holdings": 0.0}}
+
+To GET IT BACK, withdraw. Omit `amount` to redeem the whole position:
+{{"venue": "aave", "kind": "withdraw", "asset": "A"}}
 
 To EARN FEES on what the vault already holds, post it as passive liquidity in \
 Aqua. The tokens never leave the vault. Aqua records a claim against them, so \
@@ -297,6 +321,12 @@ never post more than the vault holds:
 {{"venue": "aqua", "kind": "ship", "tokens": ["A", "B"], \
 "amounts": ["<base units of A>", "<base units of B>"], \
 "program": {{"shape": "xyc", "fee_bps": 30}}}}
+
+Idle cash earns nothing. If the book already matches your targets and a lending \
+market pays a rate worth having, supplying is usually better than doing nothing \
+- but check the cost of the transaction against what the extra yield earns over \
+the time you expect to hold it. A few basis points of extra yield is not worth \
+capturing if the trade costs more than it returns.
 
 If you choose "hold", omit `venue_intents` entirely. If you choose any other \
 action, you must supply the venue intents that carry it out. An action with no \

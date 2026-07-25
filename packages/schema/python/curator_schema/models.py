@@ -52,7 +52,10 @@ class Mandate(Frozen):
     #: Registry keys resolved by the data layer. Granting a new source is a
     #: mandate edit, not a code change — this is the extension point.
     permitted_data_sources: list[str] = Field(min_length=1)
-    permitted_venues: list[Literal["uniswap", "aqua"]] = Field(min_length=1)
+    #: "aave" joined in Wave 1. Kept a closed Literal rather than a free
+    #: string: a mandate naming a venue with no adapter produces a vault
+    #: whose agent proposes trades the harness can only ever reject.
+    permitted_venues: list[Literal["uniswap", "aqua", "aave"]] = Field(min_length=1)
     created_at: datetime | None = None
     risk_posture: Literal["conservative", "balanced", "aggressive"] = "balanced"
     update_rules: str | None = Field(default=None, max_length=1000)
@@ -180,7 +183,39 @@ class AquaDockIntent(Frozen):
     strategy_hash: Bytes32
 
 
-VenueIntent = SwapIntent | AquaShipIntent | AquaDockIntent
+class SupplyIntent(Frozen):
+    """Deposit an asset into a lending market to earn interest.
+
+    The gap this closes: the `aave` data source contributed 204 facts about
+    lending yields across the first 36 ticks, and there was no intent type that
+    could act on any of them. The agent read yields it structurally could not
+    capture, and its only possible response to "Aave pays 3.5% on USDC" was a
+    Uniswap swap between USDC and WETH.
+
+    Custody is preserved. The vault supplies and receives the aToken, which it
+    holds itself — nothing is delegated and `onBehalfOf` is always the vault.
+    """
+
+    venue: Literal["aave"] = "aave"
+    kind: Literal["supply"] = "supply"
+    asset: str
+    amount: Uint256Str | None = None
+    #: Easier for a model to get right than base units, same as SwapIntent.
+    pct_of_holdings: float | None = Field(default=None, ge=0, le=1)
+
+
+class WithdrawIntent(Frozen):
+    """Redeem a supplied asset from a lending market back into the vault."""
+
+    venue: Literal["aave"] = "aave"
+    kind: Literal["withdraw"] = "withdraw"
+    asset: str
+    #: Omit for "all of it" — `type(uint256).max` at the adapter, which is how
+    #: Aave expresses a full withdrawal without racing accrued interest.
+    amount: Uint256Str | None = None
+
+
+VenueIntent = SwapIntent | AquaShipIntent | AquaDockIntent | SupplyIntent | WithdrawIntent
 
 
 class MandateAmendment(Frozen):
@@ -288,6 +323,17 @@ class Holding(Frozen):
     #: Venue key if this balance backs an open position. Flags encumbrance,
     #: not location — the vault still custodies it.
     committed_to_venue: str | None = None
+    #: The symbol this holding is economically equivalent to, when it is not
+    #: itself. `aBasUSDC` represents `USDC`.
+    #:
+    #: Exists so nothing downstream has to know what an aToken is. A receipt
+    #: token is not a new exposure — supplying USDC to Aave does not make the
+    #: vault less long USDC — so allocation weights, mandate targets and the
+    #: allocation chart must all fold it back. Without this, a mandate allowing
+    #: ["USDC","WETH"] sees a vault holding 50% of an asset it never permitted,
+    #: and every constraint layer fights a position that is exactly what the
+    #: mandate asked for.
+    represents: str | None = None
 
 
 class AquaStrategy(Frozen):
@@ -397,6 +443,8 @@ __all__ = [
     "SwapIntent",
     "AquaShipIntent",
     "AquaDockIntent",
+    "SupplyIntent",
+    "WithdrawIntent",
     "AquaProgram",
     "VenueIntent",
     "MandateAmendment",

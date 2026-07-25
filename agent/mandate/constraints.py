@@ -142,6 +142,12 @@ def _intent_assets(intent) -> list[str]:
         return [intent.token_in, intent.token_out]
     if intent.kind == "ship":
         return list(intent.tokens)
+    if intent.kind in {"supply", "withdraw"}:
+        # Named as the UNDERLYING, never the aToken. The mandate grants "USDC",
+        # and supplying it is still a USDC decision — requiring the mandate to
+        # also list "aBasUSDC" would leak a protocol's receipt-token naming into
+        # a document a human wrote.
+        return [intent.asset]
     return []
 
 
@@ -198,6 +204,14 @@ def _check_intents(
                         f"cannot swap {intent.token_in} for itself",
                     )
                 )
+        elif intent.kind == "supply":
+            if intent.amount is None and intent.pct_of_holdings is None:
+                problems.append(
+                    Violation(
+                        f"venue_intents[{position}]",
+                        "a supply needs either amount or pct_of_holdings; neither was set",
+                    )
+                )
         elif intent.kind == "ship" and len(intent.tokens) != len(intent.amounts):
             problems.append(
                 Violation(
@@ -243,21 +257,52 @@ def _check_action_coherence(decision: AllocationDecision) -> list[Violation]:
 _DIRECTION_TOLERANCE = 0.01
 
 
+#: Intent kinds that change what the vault is *exposed to*.
+#:
+#: A supply moves USDC into aUSDC and a ship posts a balance as liquidity;
+#: neither changes how long the vault is any asset. Only a swap does. The
+#: distinction matters because the target-closing rule below asks "if you claim
+#: to be closing an allocation gap, close it" — a question that is incoherent
+#: for an intent that was never about allocation.
+_EXPOSURE_MOVING_KINDS = {"swap"}
+
+
+def _exposure_symbol(holding) -> str:
+    """The symbol a holding should be weighed under.
+
+    A receipt token is not a new exposure: supplying USDC to Aave does not make
+    the vault less long USDC, it makes it long USDC *and* earning. So aBasUSDC
+    weighs as USDC, via `Holding.represents`, which the chain client sets.
+
+    Without this a mandate allowing ["USDC", "WETH"] sees a vault holding 50% of
+    an asset it never permitted, and every layer below fights a position that is
+    exactly what the mandate asked for.
+    """
+    return holding.represents or holding.symbol
+
+
 def _current_weights(vault: VaultState) -> dict[str, float]:
     """Each asset's share of the vault, by the vault's own valuation.
 
     Uses `value_in_asset` — the Chainlink figure `totalAssets()` is built from —
     so this agrees with the contract rather than with a second opinion. Holdings
     the vault could not price are omitted rather than counted as zero.
+
+    Receipt tokens are folded into their underlying (`_exposure_symbol`), so a
+    vault holding 500 USDC and 500 aBasUSDC reads as 100% USDC — which is what
+    it is.
     """
     total = int(vault.total_assets or 0)
     if total <= 0:
         return {}
-    return {
-        h.symbol: int(h.value_in_asset) / total
-        for h in vault.holdings
-        if h.value_in_asset is not None
-    }
+
+    weights: dict[str, float] = {}
+    for holding in vault.holdings:
+        if holding.value_in_asset is None:
+            continue
+        symbol = _exposure_symbol(holding)
+        weights[symbol] = weights.get(symbol, 0.0) + int(holding.value_in_asset) / total
+    return weights
 
 
 def check_rebalance_direction(
@@ -424,6 +469,18 @@ def check_projected_outcome(
     # where it can land. The shared golden fixture is exactly that case: it
     # declares a 70/30 target on a book already at 70/30 and then trades, which
     # is legal but not a correction.
+    # Only judged when the decision actually moves exposure. A supply or a ship
+    # leaves every weight exactly where it was, so `after == before` for every
+    # asset — and without this gate the rule below would reject *every* deploy
+    # into a lending market on any vault not already sitting precisely on its
+    # target. The rule is "if you claim to be closing a gap, close it"; an
+    # intent that was never about allocation makes no such claim.
+    moves_exposure = any(
+        intent.kind in _EXPOSURE_MOVING_KINDS for intent in decision.venue_intents or []
+    )
+    if not moves_exposure:
+        return problems
+
     targets = {a.asset: a.weight for a in decision.target_allocations or []}
     current = _current_weights(vault)
     for asset, target in targets.items():

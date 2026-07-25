@@ -42,6 +42,11 @@
             "type": ["string", "null"],
             "default": null,
             "description": "Venue key if this balance backs an open position (e.g. 'aqua'). Still custodied by the vault — this flags encumbrance, not location."
+          },
+          "represents": {
+            "type": ["string", "null"],
+            "default": null,
+            "description": "The symbol this holding is economically equivalent to, when it is not itself — aBasUSDC represents USDC. A receipt token is not a new exposure, so allocation weights, mandate targets and charts must fold it back to the underlying. Without this, a mandate allowing [USDC, WETH] sees a vault holding 50% of an asset it never permitted, and every constraint layer fights a position that is exactly what the mandate asked for."
           }
         }
       }

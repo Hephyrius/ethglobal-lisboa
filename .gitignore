@@ -47,3 +47,11 @@ Thumbs.db
 
 # A verbatim copy of .env — never track it (see docs/active-work.md)
 env.txt
+
+# Match the shape, not one filename. `.env*` did not cover `env.txt`, which is
+# how a full copy of the real .env reached a commit via `git add -A`. The next
+# one will be called something else.
+*env.txt
+env*.txt
+*.env.local
+secrets.*

@@ -38,6 +38,7 @@ from web3.logs import DISCARD
 
 from ..config import Settings
 from .abi import ERC20_ABI, load_abi
+from .receipts import underlying_symbol
 
 __all__ = ["Web3VaultClient"]
 
@@ -133,6 +134,19 @@ class Web3VaultClient:
                     value_in_asset=str(value_in_asset),
                 )
             )
+
+        # Second pass, because resolving a receipt token's underlying prefers a
+        # symbol the vault is already reporting — which needs every holding
+        # named first. See `agent/chain/receipts.py` for why this matters:
+        # unfolded, a supplied balance reads as an asset the mandate never
+        # permitted and every constraint layer fights it.
+        symbols = {h.token.lower(): h.symbol for h in holdings}
+        holdings = [
+            h.model_copy(update={"represents": represented, "committed_to_venue": "aave"})
+            if (represented := underlying_symbol(h.token, symbols)) is not None
+            else h
+            for h in holdings
+        ]
 
         return VaultState(
             address=self._w3.to_checksum_address(vault),

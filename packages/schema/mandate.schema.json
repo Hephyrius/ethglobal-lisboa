@@ -96,7 +96,7 @@
     "permitted_venues": {
       "type": "array",
       "minItems": 1,
-      "items": { "type": "string", "enum": ["uniswap", "aqua"] },
+      "items": { "type": "string", "enum": ["uniswap", "aqua", "aave"] },
       "description": "Registry keys for execution venues the agent may use."
     },
     "risk_posture": {

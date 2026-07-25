@@ -119,6 +119,44 @@
             "kind": { "const": "dock" },
             "strategy_hash": { "$ref": "#/$defs/bytes32" }
           }
+        },
+        {
+          "type": "object",
+          "title": "SupplyIntent",
+          "description": "Deposit an asset into a lending market to earn interest. Closes the gap where the agent could read Aave's yields and had no intent type able to act on any of them. Custody is preserved — the vault supplies and holds the aToken itself, and onBehalfOf is always the vault.",
+          "required": ["venue", "kind", "asset"],
+          "additionalProperties": false,
+          "properties": {
+            "venue": { "const": "aave" },
+            "kind": { "const": "supply" },
+            "asset": { "type": "string" },
+            "amount": {
+              "$ref": "#/$defs/uint256String",
+              "description": "Base units. Mutually exclusive with pct_of_holdings."
+            },
+            "pct_of_holdings": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Fraction of the vault's balance of this asset."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "title": "WithdrawIntent",
+          "description": "Redeem a supplied asset from a lending market back into the vault.",
+          "required": ["venue", "kind", "asset"],
+          "additionalProperties": false,
+          "properties": {
+            "venue": { "const": "aave" },
+            "kind": { "const": "withdraw" },
+            "asset": { "type": "string" },
+            "amount": {
+              "$ref": "#/$defs/uint256String",
+              "description": "Omit for all of it. The adapter sends type(uint256).max, which is how Aave expresses a full withdrawal without racing interest accrued between quoting and mining."
+            }
+          }
         }
       ]
     },

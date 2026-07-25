@@ -41,7 +41,7 @@ export const Mandate = z
     /** Registry keys resolved by the data layer. Granting a source is a
      *  mandate edit, not a code change — the extension point for new providers. */
     permitted_data_sources: z.array(z.string()).min(1),
-    permitted_venues: z.array(z.enum(['uniswap', 'aqua'])).min(1),
+    permitted_venues: z.array(z.enum(['uniswap', 'aqua', 'aave'])).min(1),
     created_at: z.string().datetime().optional(),
     risk_posture: z.enum(['conservative', 'balanced', 'aggressive']).default('balanced'),
     update_rules: z.string().max(1000).optional(),
@@ -156,10 +156,35 @@ export const AquaDockIntent = z
   })
   .strict()
 
+/** Deposit into a lending market to earn interest. Custody is preserved: the
+ *  vault supplies and holds the aToken itself, and `onBehalfOf` is always the
+ *  vault. Closes the gap where the agent read Aave yields it could not act on. */
+export const SupplyIntent = z
+  .object({
+    venue: z.literal('aave'),
+    kind: z.literal('supply'),
+    asset: z.string(),
+    amount: Uint256Str.optional(),
+    pct_of_holdings: z.number().min(0).max(1).optional(),
+  })
+  .strict()
+
+/** Redeem a supplied asset back into the vault. Omit `amount` for all of it. */
+export const WithdrawIntent = z
+  .object({
+    venue: z.literal('aave'),
+    kind: z.literal('withdraw'),
+    asset: z.string(),
+    amount: Uint256Str.optional(),
+  })
+  .strict()
+
 export const VenueIntent = z.discriminatedUnion('kind', [
   SwapIntent,
   AquaShipIntent,
   AquaDockIntent,
+  SupplyIntent,
+  WithdrawIntent,
 ])
 
 export const MandateAmendment = z
@@ -250,6 +275,10 @@ export const Holding = z
     /** Venue key if this balance backs an open position. Flags encumbrance,
      *  not location — the vault still custodies it. */
     committed_to_venue: z.string().nullable().default(null),
+    /** The symbol this holding is economically equivalent to, when it is not
+     *  itself — `aBasUSDC` represents `USDC`. Fold it back before computing any
+     *  weight: a receipt token is not a new exposure. */
+    represents: z.string().nullable().default(null),
   })
   .strict()
 

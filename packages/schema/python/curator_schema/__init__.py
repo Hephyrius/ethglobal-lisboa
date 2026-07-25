@@ -32,11 +32,13 @@ from .models import (
     PerformanceSummary,
     SourceError,
     SourceNote,
+    SupplyIntent,
     SwapIntent,
     TargetAllocation,
     VaultPerformance,
     VaultState,
     VenueIntent,
+    WithdrawIntent,
 )
 
 __all__ = [
@@ -61,11 +63,13 @@ __all__ = [
     "PerformanceSummary",
     "SourceError",
     "SourceNote",
+    "SupplyIntent",
     "SwapIntent",
     "TargetAllocation",
     "VaultPerformance",
     "VaultState",
     "VenueIntent",
+    "WithdrawIntent",
 ]
 
 __version__ = "0.1.0"

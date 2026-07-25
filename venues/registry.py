@@ -38,9 +38,20 @@ def _aqua() -> Venue:
     return AquaVenue()
 
 
+def _aave() -> Venue:
+    from .aave.venue import AaveVenue
+
+    return AaveVenue()
+
+
 _FACTORIES: Final[dict[str, Callable[[], Venue]]] = {
     "uniswap": _uniswap,
     "aqua": _aqua,
+    # Added in Wave 1. One module plus this line — the same extension shape the
+    # data registry uses, exercised on a third real provider. The three venues
+    # are deliberately different in kind: Uniswap rotates what the vault holds,
+    # Aqua earns fees on what it already holds, Aave earns interest on it.
+    "aave": _aave,
 }
 
 #: Registered keys, for the genesis UI and for validating a mandate.

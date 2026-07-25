@@ -201,6 +201,55 @@ if [ "$DRY_RUN" -eq 1 ]; then
   exit 0
 fi
 
-COUNT="$(cast call "$FACTORY" "defaultTargets()(address[])" --rpc-url "$RPC" | tr ',' '\n' | grep -c '0x' || true)"
+# ── republish the manifest ────────────────────────────────────────────────────────────────────────
+#
+# `deployments/base-fork.json` → `executeAllowlist.targets` is what every lane reads to decide
+# whether a plan's target will be accepted, and `Deploy.s.sol` wrote it as a snapshot of the
+# factory defaults *at deploy time*. Having just widened those defaults, the file is now stale in a
+# way that fails closed but confusingly: `venues` refuses to emit a plan targeting the Aave pool,
+# and the error reads as a venue bug rather than as "the manifest predates this change".
+#
+# So the manifest is rewritten from `defaultTargets()`, which is the authority for what a vault
+# created from now on will allow. Existing vaults still allow only what they were born with — that
+# gap is real and is why the venue adapters check the aToken explicitly before supplying.
+#
+# Rewritten with awk rather than jq: jq is not installed on the macOS handoff machine and adding a
+# dependency to a script whose whole job is one array would be a poor trade.
+
+TARGETS_RAW="$(cast call "$FACTORY" "defaultTargets()(address[])" --rpc-url "$RPC")"
+COUNT="$(echo "$TARGETS_RAW" | tr ',' '\n' | grep -c '0x' || true)"
+
+echo "Republishing executeAllowlist in $DEPLOYMENTS ($COUNT target(s))…"
+echo "$TARGETS_RAW" | tr -d '[] ' | tr ',' '\n' | grep '^0x' > "$DEPLOYMENTS.targets.tmp"
+
+awk -v listfile="$DEPLOYMENTS.targets.tmp" '
+  /"targets": \[/ {
+    print
+    n = 0
+    while ((getline line < listfile) > 0) { addrs[n++] = line }
+    close(listfile)
+    for (i = 0; i < n; i++) {
+      printf "      \"%s\"%s\n", addrs[i], (i < n - 1 ? "," : "")
+    }
+    skip = 1
+    next
+  }
+  skip && /\]/ { skip = 0; print; next }
+  skip { next }
+  { print }
+' "$DEPLOYMENTS" > "$DEPLOYMENTS.tmp"
+
+# Only replace the real file once the rewrite has produced something plausible. A truncated
+# manifest would take down every lane at once, and a half-written one is worse than a stale one.
+if grep -q '"VaultFactory"' "$DEPLOYMENTS.tmp" && grep -q '"executeAllowlist"' "$DEPLOYMENTS.tmp"; then
+  mv "$DEPLOYMENTS.tmp" "$DEPLOYMENTS"
+  echo "  manifest updated"
+else
+  echo "  refused to write a manifest missing VaultFactory or executeAllowlist — left as-is" >&2
+  rm -f "$DEPLOYMENTS.tmp"
+fi
+rm -f "$DEPLOYMENTS.targets.tmp"
+
+echo
 echo "Done. The factory now carries $COUNT default target(s)."
 echo "Existing vaults are UNCHANGED by design — create a new vault to use the wider universe."
