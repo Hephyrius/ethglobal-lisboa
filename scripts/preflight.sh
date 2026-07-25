@@ -114,7 +114,17 @@ SEEDED="${SEED_ACCOUNTS:-}"
 ACC="${SEEDED%%,*}"
 ACC="${ACC:-0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266}"
 if [ -n "$CHAIN" ]; then
-  BAL="$(json_str "$(rpc eth_call "[{\"to\":\"$USDC\",\"data\":\"0x70a08231000000000000000000000000${ACC#0x}\"},\"latest\"]")" result)"
+  # The rpc call is hoisted into its own variable rather than nested directly inside
+  # json_str's own $( ). Under the bash 3.2 that macOS still ships, a $( ) containing
+  # escaped quotes, nested inside another $( ), loses those escapes — which leaves the
+  # `{...}` here unquoted, so brace expansion splits `[{A,B},"latest"]` into TWO words
+  # and rpc gets called twice with malformed params. It returns no `result`, BAL comes
+  # back empty, and preflight reports a funded account as holding nothing. The other rpc
+  # calls in this file survive only because none of them contain braces.
+  #
+  # Verified on macOS bash 3.2.57: nested fails, hoisted works. Do not re-inline this.
+  BAL_RAW="$(rpc eth_call "[{\"to\":\"$USDC\",\"data\":\"0x70a08231000000000000000000000000${ACC#0x}\"},\"latest\"]")"
+  BAL="$(json_str "$BAL_RAW" result)"
   if [ -n "$BAL" ] && [ "$BAL" != "0x0000000000000000000000000000000000000000000000000000000000000000" ]; then
     ok "demo account funded — $((16#${BAL#0x} / 1000000)) USDC"
   else
