@@ -87,8 +87,11 @@ ExecutionPlan(
 
 Guarantees you can rely on:
 
-1. **Steps are ordered.** Approvals always precede the call that needs them.
-   Execute in order; a partially-applied plan is a real outcome to record.
+1. **Steps are ordered, and the order is not optional.** Approvals always
+   precede the call that needs them. Execute in order — `executeBatch` is ideal
+   since it applies the plan atomically. For Uniswap a missing approval reverts.
+   **For Aqua it does not revert — it silently produces a dead position** (see
+   Assumptions below); do not "optimise" approval steps away.
 2. **Every `target` is checked against the agreed allowlist** before the plan is
    returned (`PlanValidationError` otherwise), so an unknown target fails here
    with a message naming the seam rather than as an opaque on-chain revert.
@@ -189,8 +192,15 @@ shaped every design decision here.
   conventional AMM LP position could not do this — which is exactly why Aqua is
   load-bearing rather than cosmetic.
 - **Approvals are re-emitted on every plan** rather than checked first. A
-  redundant approve costs gas and always succeeds; a missing one reverts the
-  whole plan.
+  redundant approve costs gas and always succeeds.
+- **An Aqua ship with no approvals does not fail — it produces a dead
+  position.** Verified on a fork against the real contract: `ship()` records
+  full virtual balances and returns a valid strategy hash even with zero
+  allowance, because shipping moves nothing and the allowance is only consumed
+  when a taker fills. The position then looks healthy in every observable way
+  and is never fillable. This is the one place in this lane where dropping a
+  step causes silent failure rather than a revert, so the approval steps are
+  load-bearing and must not be optimised away.
 - **Aqua approvals are for the exact shipped amount**, not `type(uint256).max`
   (which 1inch's own tests use). A vault holds other people's money.
 - **The Aqua strategy salt is deterministic**, derived from vault state. A

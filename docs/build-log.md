@@ -413,6 +413,43 @@ path shapes and remembers the first that answers.
 
 ---
 
+## 2026-07-25 — Lane D: a contract maker works, and an Aqua ship can fail silently
+
+**What changed.** `venues/aqua/solidity/test/VaultRelayFork.t.sol` — 7 fork tests running a complete
+Aqua `ExecutionPlan` through a vault-shaped relay against the real deployed Aqua. 25 Foundry tests
+total.
+
+**The gap this closed.** `AquaShipFork.t.sol` pranks a plain address, so `msg.sender` at Aqua is an
+EOA. In production the maker is the **vault** — a contract with no key — and calls arrive relayed
+through `execute()`. That is a materially different path, and it is the entire reason
+`useAquaInsteadOfSignature = true` exists. Now proven rather than assumed: a contract maker can ship,
+balances are credited to the vault (not to the agent that authorised the call), and dock works the
+same way. The relay is a minimal stand-in built from Lane A's *published* `execute`/`executeBatch`
+signature — it does not test their vault, which is theirs to test, and no `contracts/` source was
+read.
+
+**The finding, which arrived as a failing test I had written wrongly.** I asserted that shipping
+before the approvals land would revert. **It does not.** `ship()` succeeds with zero allowance,
+records full virtual balances, and returns a valid strategy hash.
+
+That is correct Aqua behaviour once stated plainly: shipping moves nothing, so there is nothing to
+approve *yet* — the allowance is consumed later, when a taker fills and Aqua `pull()`s from the
+maker's wallet. But the consequence is worse than a revert. **A plan that omitted the approval steps
+would look completely successful** — non-zero balances, valid hash, no error anywhere — and then
+quietly never be filled. The position would earn nothing and nothing would say why.
+
+So the approval steps in `AquaVenue.plan()` are not defensive ordering; they are the only thing that
+makes the position real, and their absence is undetectable at execution time. That is now pinned by
+two tests (`…SucceedsButLeavesThePositionUnfillable` and `…LeavesTheAllowancesAFillRequires`), and
+corrected in `calldata.py` and the README — all three of which previously said "a missing approve
+reverts the plan", which is true for Uniswap and false for Aqua.
+
+Worth noting how this surfaced: the test was written to confirm something I believed, and it was the
+*failure* that carried the information. A test that had passed would have left the wrong model in
+place and the wrong claim in the README.
+
+---
+
 ## 2026-07-25 — Lane D: allowlist is now read from Lane A's manifest, not hardcoded
 
 **What changed.** `addresses.EXPECTED_ALLOWLIST` (a compiled-in constant) became

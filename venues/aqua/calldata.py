@@ -32,6 +32,14 @@ AQUA_DOCK: Final[str] = "dock(address,bytes32,address[])"
 def approve_step(token: str, amount: int) -> ExecutionStep:
     """Let Aqua pull `amount` of `token` from the vault when a taker fills.
 
+    **Not optional, and its absence is silent.** Verified on a fork: `ship()`
+    succeeds with no allowance at all — it records full virtual balances and
+    returns a valid strategy hash — because shipping moves nothing and the
+    allowance is only consumed later, when a taker fills and Aqua `pull()`s.
+    A plan that omitted these steps would look completely successful and then
+    quietly never be filled. So these are what make the position real, not
+    defensive ordering.
+
     Approved for exactly the shipped amount rather than `type(uint256).max`
     (which is what 1inch's own tests use). A vault holds other people's money;
     an unbounded standing allowance to any contract is a worse default than
