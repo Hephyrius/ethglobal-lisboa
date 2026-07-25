@@ -2161,6 +2161,126 @@ one file.
 
 ---
 
+## 2026-07-25 — Lane B Wave 2: idle capital, personas, the soft band, and the scoreboard
+
+**What changed.** All five §5 deliverables. 349 tests, ruff clean.
+
+### B1 · Idle capital, without a rule that punishes holding
+
+The headline feedback is that the agent swaps and then sits on cash. The
+tempting fix — a validation layer that rejects `hold` — is the one the plan
+explicitly forbids, and rightly: `hold` is a first-class answer and a harness
+that punishes it churns the vault, which is the failure the six layers exist to
+prevent. Pressure went into the prompt and the scoreboard; the gate still only
+decides legality.
+
+Three parts. The **fact** is derived in `agent/loop/idle.py` and appended to the
+snapshot *after* the registry returns, so Lane C's contract is untouched. It has
+to live in the snapshot rather than only in the prompt because layer 4 validates
+`facts_used` against it — that is precisely what lets the feed show *"deployed
+because 68% of the book was idle"* with the number attached instead of the agent
+asserting it. The **prompt** says idle capital above the floor is a position that
+earns nothing, deploying is the default, and holding is legitimate but must name
+its reason. The **drag** in the reflection prices what that costs.
+
+**Idle means "beyond the cash the mandate requires, and backing nothing."**
+Capital behind an Aqua position is *encumbered, not idle*, even though the tokens
+are still in the vault — that distinction is the whole Pattern 1 claim, and a
+naive balance check would tell the agent to deploy money it has already deployed.
+That is the boundary test.
+
+The drag leads with an **annualised rate** and follows with the accumulated
+figure, deliberately. Over a hackathon's timescale the accumulation is
+single-digit basis points, and leading with it would teach exactly the wrong
+lesson — that idling is free. Its window is measured from the last cycle that
+actually *moved* capital, because holds and rejections changed nothing and
+counting them would reset the clock on a position that never moved.
+
+Every leg returns `None` rather than `0.0` when it cannot be known. "We could not
+price the drag" and "the drag is nothing" are different statements.
+
+### B3 · The band bends three constraints and never the other five
+
+`BANDABLE` is a closed set of three, pinned by a test, and **the omissions carry
+more weight than the inclusions**: `max_slippage_bps` never bends (a ceiling was
+already compared against a bound rather than an estimate — banding it means
+silently paying more than the mandate's stated maximum cost), allowlists never
+bend (there is no "5% of an asset that is not permitted"), anti-churn limits never
+bend (a band there is just a bigger limit). Each has its own test.
+
+**The ratchet guard is structural rather than bolted on.** Every check compares
+against the mandate's own number and never against last tick, so a book that has
+already drifted gets *less* room rather than a fresh 5%. Tested by walking 62%
+then 66% and asserting the second rejects.
+
+Overage is **relative to the limit**: a percentage point against a 60% cap is a
+1.7% miss and the same point against a 5% floor is 20%, and a band expressed in
+percent has to mean the same thing in both.
+
+Implemented by enriching `Violation` with the numbers rather than changing every
+signature, so `validate_decision` and several dozen tests were untouched. A
+violation that cannot state its limit and its actual value is never banded
+whatever its name — guessing the size of a breach in order to forgive it is worse
+than rejecting it.
+
+**An interaction worth recording:** `WEIGHT_SUM_TOLERANCE` already grants 1
+absolute percentage point, and 5% of a 20% floor is *also* 1pp. Against the golden
+mandate the band and the pre-existing slack coincide exactly, so the band can
+never be observed acting on `min_cash_pct` there — it only adds room above a 20%
+floor. The test says so rather than silently proving nothing.
+
+### B2 · Personas are taste; constraints are law
+
+The structural guarantee is already absolute and is stronger than any test:
+**`check_decision` never receives the persona**, and no check reads
+`Mandate.persona`. There is no code path by which appetite could loosen a bound,
+so the tests guard against a future edit introducing one.
+
+What the persona changes is the prompt, and that matters for a different reason.
+A model that *believes* it has permission burns the tick producing decisions the
+harness rejects, and its `reasoning` tells a depositor it was allowed to do
+something it was not. So the block states "this is who you are, not what you may
+do" in as many words, and that sentence is tested.
+
+Conviction is tested at all three settings against the same oversized decision
+and produces identical verdicts — it steers sizing *within* `max_position_pct`.
+
+Every shipped preset is tested too, since preset personas are prompt input
+written in another lane's file: each renders, each stays ASCII, and none can
+widen its own mandate.
+
+### B4 · The scoreboard
+
+Wave 1 computed `risk_adjusted_return` and nothing consumed it, so the agent had
+an objective in its system prompt and no measurement of it. It now opens the
+reflection, and the line says what would *not* raise it — "raising return by
+taking more swing does not raise it" — because the ratio alone does not
+communicate that.
+
+When there is not enough history it says so, and adds that an absent measurement
+argues for neither trading nor holding. A fabricated `0.0` would read as "doing
+nothing scores fine", which is the exact lesson B1 is trying to unteach. A vault
+with *no* record still renders nothing at all: a block whose only content is "we
+cannot score you" is noise.
+
+### B5 · Genesis offers the presets, cost in the same breath
+
+`index.json` carries a `headline` and a `tradeoff` each, and the tradeoff is the
+half a user needs — "lend USDC only" sounds strictly safe until you read that it
+gives up every source of return except lending. The prompt is instructed to give
+both together, and is told **not** to present any preset as the safe or obvious
+choice: which tradeoff is acceptable is the user's judgement, and a model
+nominating a default is making a risk decision on their behalf. A genesis flow
+that lists benefits and omits costs is a sales page, and this one produces a
+mandate no human can change afterwards.
+
+**The ASCII guard now covers the genesis prompt, which had never had one.** It
+found five em dashes immediately, plus one arriving from Lane F's preset copy —
+which is exactly why preset prose is coerced on the way in rather than trusted.
+That guard has now caught four regressions across two prompts.
+
+---
+
 ## 2026-07-25 — Lane B: the Aqua ship reaches the feed, and a gap all six layers passed
 
 **What changed.** Lane E's #51 closed, one validation hole found and shut, and the prompt taught two
