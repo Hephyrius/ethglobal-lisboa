@@ -1,32 +1,41 @@
-"""Graph · Token API — spot prices for the assets a mandate permits.
+"""Graph · Token API — spot prices derived from executed DEX swaps.
 
 Separate from `messari` on purpose, and the separation is the point: this
 source knows nothing about subgraphs, speaks REST rather than GraphQL, uses a
 *different credential*, and contributes a different `Fact.kind`. Two sources
-that share no code path merging into one snapshot is the registry design
-working, demonstrated with providers we actually ship rather than a hypothetical.
+sharing no code path merging into one snapshot is the registry design working,
+demonstrated with providers we actually ship.
 
-## Credential
+## There is no price endpoint on Base — and that is by design
 
-The Token API is not the subgraph gateway. It authenticates with its own
-bearer JWT from The Graph Market. `Settings` falls back to `GRAPH_API_KEY`
-when `TOKEN_API_KEY` is unset because one credential often covers both, but a
-401 here does not mean the gateway key is wrong.
+`/networks` reports Base indexed for `balances`, `dexes` and `transfers` only;
+there is no `prices` category. Price on this chain is therefore *derived from
+executed swaps*, which makes this source mechanically independent of an oracle
+— see `sources/chainlink.py` for the oracle view of the same number.
 
-## Endpoint discovery
+## The orientation trap, and why we do not read the API's `price` field
 
-The Token API moved hosts and path layout during its beta (its documentation
-currently redirects to Pinax, a Graph core developer). Rather than hard-code
-one guess, the source tries a short ordered list of known path shapes and
-remembers the first that answers. `curator-data verify-live` prints which one
-worked, so the list can be trimmed to the survivor once confirmed. This costs
-at most a couple of 404s on the first call of a process, and it means a path
-change degrades to "slightly slower" instead of "source is dead".
+`/evm/swaps` returns a `price` field, and it **flips with the direction of the
+swap**. Verified live on the WETH/USDC pool, consecutive swaps:
+
+    WETH -> USDC   price = 1858.0228     (USDC per WETH)
+    USDC -> WETH   price =    0.0005     (WETH per USDC)
+
+Reading `price` off the most recent swap is therefore a coin flip between the
+right number and one wrong by a factor of ~3.4 million. Nothing about the
+response says which you got.
+
+So the price is **computed from both legs, matched by contract address**:
+whichever side is the quote token supplies the numerator, whichever is the
+target supplies the denominator. That is orientation-proof by construction. A
+**median over several swaps** then resists a single fat-fingered trade — one
+$0.08 swap in the sample above priced 0.4% off the rest.
 """
 
 from __future__ import annotations
 
 import logging
+import statistics
 from typing import Any
 
 import httpx
@@ -39,65 +48,60 @@ from .tokens import address_for, known_symbols
 
 logger = logging.getLogger(__name__)
 
-#: Tried in order; `{address}` and `{network}` are substituted. The first that
-#: returns a parseable price wins and is reused for the rest of the process.
-#:
-#: Order verified by probe on 2026-07-25 against the live host: the first two
-#: return HTTP 401 (route exists, needs a credential) while the older
-#: `/prices/evm/{address}` shape returns 404 (route does not exist). The 404
-#: shapes are kept last rather than deleted — this API moved hosts and layout
-#: once already during its beta, and a stale entry costs one wasted request
-#: while a missing one costs the whole source.
-PRICE_PATHS: tuple[str, ...] = (
-    "/evm/prices?network={network}&contract={address}",
-    "/evm/ohlc/prices?network={network}&contract={address}&interval=1h&limit=1",
-    "/prices/evm/{address}?network_id={network}",
-    "/ohlc/prices/evm/{address}?network_id={network}&interval=1h&limit=1",
-)
+#: Tokens accepted as the USD leg of a pool. A swap priced against one of these
+#: is a USD price to within the peg. Ordered by preference.
+QUOTE_TOKENS: tuple[str, ...] = ("USDC", "USDbC", "DAI")
+
+#: Rows per request. **10 is the free plan's hard ceiling** — verified live,
+#: `limit=20` returns `403 forbidden: Parameter 'limit' exceeds ...`. Enough to
+#: median out one odd trade, and raising it silently breaks every call.
+MAX_PAGE = 10
+
+#: Swaps averaged per price.
+SWAP_SAMPLE = MAX_PAGE
+
+#: Candidate pools examined when discovering one for a token.
+POOL_SAMPLE = MAX_PAGE
 
 #: The Token API's identifier for Base mainnet.
 NETWORK_IDS: dict[str, str] = {"base": "base"}
 
 
-def _first_number(payload: Any, keys: tuple[str, ...]) -> float | None:
-    """Pull the first numeric value under any of `keys`, at any depth.
+#: Markers that identify a 403 as a plan/parameter complaint rather than a
+#: rejected credential. Live text: "Parameter 'limit' exceeds ...".
+_QUOTA_MARKERS = ("parameter", "limit", "exceeds", "quota", "plan")
 
-    The OHLC and spot endpoints return differently-shaped bodies (`data[]` of
-    candles vs a flat object), and the shape has changed at least once during
-    the beta. Searching by key name rather than by path means both work and a
-    third shape probably will too.
-    """
-    if isinstance(payload, dict):
-        for key in keys:
-            if key in payload:
-                value = payload[key]
-                if isinstance(value, (int, float)):
-                    return float(value)
-                if isinstance(value, str):
-                    try:
-                        return float(value)
-                    except ValueError:
-                        pass
-        for value in payload.values():
-            found = _first_number(value, keys)
-            if found is not None:
-                return found
-    elif isinstance(payload, list):
-        for item in payload:
-            found = _first_number(item, keys)
-            if found is not None:
-                return found
-    return None
+
+def _is_quota_complaint(body: str) -> bool:
+    lowered = (body or "").lower()
+    return any(marker in lowered for marker in _QUOTA_MARKERS)
+
+
+def _norm(address: str | None) -> str:
+    """Addresses come back lowercase; our tables are checksummed."""
+    return (address or "").strip().lower()
+
+
+def _leg(swap: dict, side: str) -> tuple[str, float | None]:
+    """(address, token amount) for the input or output side of a swap."""
+    token = swap.get(f"{side}_token") or {}
+    value = swap.get(f"{side}_value")
+    try:
+        amount = float(value) if value is not None else None
+    except (TypeError, ValueError):
+        amount = None
+    return _norm(token.get("address")), amount
 
 
 class TokenApiSource(BaseSource):
-    """USD spot prices for permitted assets."""
+    """USD spot prices for permitted assets, derived from executed swaps."""
 
     key = "token_api"
     provides = ("price",)
     description = (
-        "USD spot prices and token metadata from The Graph's Token API. Prices the "
-        "assets a mandate permits so the agent can value non-base holdings."
+        "USD spot prices from The Graph's Token API, derived from executed DEX swaps "
+        "on Base. Mechanically independent of an oracle, so it cross-validates "
+        "Chainlink rather than repeating it."
     )
 
     def __init__(
@@ -110,8 +114,9 @@ class TokenApiSource(BaseSource):
         self.settings = settings
         self._client = client
         self._owns_client = client is None
-        #: Sticky once discovered — see "Endpoint discovery" above.
-        self._working_path: str | None = None
+        #: symbol -> (pool address, quote token address). Discovery is one
+        #: request, and the answer does not change within a run.
+        self._pools: dict[str, tuple[str, str]] = {}
 
     @property
     def client(self) -> httpx.AsyncClient:
@@ -121,16 +126,17 @@ class TokenApiSource(BaseSource):
 
     async def fetch(self, assets: list[str]) -> list[Fact]:
         if not self.settings.token_api_key:
-            # Raising is right here, unlike a per-token failure: with no
-            # credential *nothing* can be fetched, so this is a whole-source
-            # failure and belongs in errors[] as one clear line.
+            # Whole-source failure: with no credential nothing can be fetched,
+            # so this belongs in errors[] as one clear line.
             raise RuntimeError(
-                "TOKEN_API_KEY (or GRAPH_API_KEY) is not set - the Token API needs a "
-                "bearer token from The Graph Market"
+                "TOKEN_API_KEY is not set - the Token API needs its own bearer JWT from "
+                "The Graph Market. GRAPH_API_KEY is rejected with 401."
             )
 
         network = NETWORK_IDS.get(self.settings.chain, self.settings.chain)
         builder = FactBuilder(self.key, chain=self.settings.chain)
+        quotes = {_norm(address_for(q, self.settings.chain)) for q in QUOTE_TOKENS}
+        quotes.discard("")
 
         facts: list[Fact] = []
         for symbol in dict.fromkeys(a.strip().upper() for a in assets if a and a.strip()):
@@ -138,61 +144,146 @@ class TokenApiSource(BaseSource):
             if address is None:
                 self.note(
                     f"no known contract address for {symbol} on {self.settings.chain} "
-                    f"(known: {', '.join(known_symbols(self.settings.chain))}) — "
+                    f"(known: {', '.join(known_symbols(self.settings.chain))}) - "
                     f"add it to curator_data/sources/tokens.py"
                 )
                 continue
 
-            price = await self._price(address, network, symbol)
-            if price is None:
+            if _norm(address) in quotes:
+                # The quote leg cannot be priced against itself. Its price is a
+                # peg assumption, and asserting one here would be inventing a
+                # number — the Chainlink source carries a real feed for it.
+                self.note(
+                    f"{symbol} is a quote token on this venue; a dex-derived price against "
+                    f"itself is meaningless - use an oracle source for it"
+                )
                 continue
-            facts.append(
-                builder.usd("price", builder.subject(token=symbol), price)
-            )
+
+            price = await self._price(symbol, address, network, quotes)
+            if price is not None:
+                facts.append(builder.usd("price", builder.subject(token=symbol), price))
         return facts
 
-    async def _price(self, address: str, network: str, symbol: str) -> float | None:
-        """USD price for one token, or None with a note explaining why not."""
-        paths = (
-            (self._working_path,) if self._working_path else PRICE_PATHS
+    # ── price ─────────────────────────────────────────────────────────────
+
+    async def _price(
+        self, symbol: str, address: str, network: str, quotes: set[str]
+    ) -> float | None:
+        pool = await self._pool_for(symbol, address, network, quotes)
+        if pool is None:
+            return None
+        pool_address, quote_address = pool
+
+        swaps = await self._get(
+            f"/evm/swaps?network={network}&pool={pool_address}&limit={SWAP_SAMPLE}"
         )
-        last_problem = "no endpoint answered"
+        if swaps is None:
+            self.note(f"price for {symbol} unavailable: no swaps returned for pool {pool_address}")
+            return None
 
-        for template in paths:
-            url = self.settings.token_api_url.rstrip("/") + template.format(
-                address=address, network=network
+        target = _norm(address)
+        observations: list[float] = []
+        for swap in swaps:
+            in_addr, in_amount = _leg(swap, "input")
+            out_addr, out_amount = _leg(swap, "output")
+            legs = {in_addr: in_amount, out_addr: out_amount}
+            target_amount = legs.get(target)
+            quote_amount = legs.get(quote_address)
+            # Orientation-proof: which side the token sat on is irrelevant.
+            if target_amount and quote_amount and target_amount > 0:
+                observations.append(quote_amount / target_amount)
+
+        if not observations:
+            self.note(f"price for {symbol} unavailable: no usable swap legs in the last "
+                      f"{SWAP_SAMPLE} trades")
+            return None
+
+        price = statistics.median(observations)
+        return price if price > 0 else None
+
+    async def _pool_for(
+        self, symbol: str, address: str, network: str, quotes: set[str]
+    ) -> tuple[str, str] | None:
+        """Find the deepest pool pairing `address` with a USD quote token.
+
+        Discovered rather than hard-coded: a pinned pool address is one more
+        thing to go stale between now and the demo, and discovery is a single
+        request whose answer is cached for the process.
+        """
+        cached = self._pools.get(symbol)
+        if cached is not None:
+            return cached
+
+        pools = await self._get(
+            f"/evm/pools?network={network}&token={address}&limit={POOL_SAMPLE}"
+        )
+        if pools is None:
+            self.note(f"price for {symbol} unavailable: pool discovery returned nothing")
+            return None
+
+        target = _norm(address)
+        best: tuple[int, str, str] | None = None
+        for pool in pools:
+            in_addr = _norm((pool.get("input_token") or {}).get("address"))
+            out_addr = _norm((pool.get("output_token") or {}).get("address"))
+            if target not in (in_addr, out_addr):
+                continue
+            counterpart = out_addr if target == in_addr else in_addr
+            if counterpart not in quotes:
+                continue
+            # `transactions` is the closest thing to depth the API exposes, and
+            # the busiest pool is the one least moved by a single trade.
+            activity = int(pool.get("transactions") or 0)
+            if best is None or activity > best[0]:
+                best = (activity, str(pool.get("pool")), counterpart)
+
+        if best is None:
+            self.note(
+                f"price for {symbol} unavailable: no pool pairs it with a USD quote token "
+                f"({', '.join(QUOTE_TOKENS)}) among the top {POOL_SAMPLE}"
             )
-            try:
-                response = await self.client.get(url, headers=self._headers())
-            except httpx.HTTPError as exc:
-                last_problem = f"{type(exc).__name__}: {exc}"
-                continue
+            return None
 
-            if response.status_code in (401, 403):
-                # Credential problems are not per-path; stop trying.
-                raise RuntimeError(
-                    f"Token API rejected the credential (HTTP {response.status_code})"
-                )
-            if response.status_code >= 400:
-                last_problem = f"HTTP {response.status_code}"
-                continue
+        resolved = (best[1], best[2])
+        self._pools[symbol] = resolved
+        return resolved
 
-            try:
-                body = response.json()
-            except ValueError:
-                last_problem = "non-JSON response"
-                continue
+    # ── transport ─────────────────────────────────────────────────────────
 
-            price = _first_number(body, ("price_usd", "priceUsd", "usd", "close", "price"))
-            if price is None or price <= 0:
-                last_problem = "response contained no usable price"
-                continue
+    async def _get(self, path: str) -> list[dict] | None:
+        """GET a Token API route, returning its `data` rows or None."""
+        url = self.settings.token_api_url.rstrip("/") + path
+        try:
+            response = await self.client.get(url, headers=self._headers())
+        except httpx.HTTPError as exc:
+            self.note(f"Token API unreachable: {type(exc).__name__}: {exc}")
+            return None
 
-            self._working_path = template
-            return price
+        # A 403 is NOT necessarily a credential problem here: the free plan
+        # returns 403 for an over-large `limit` too. Killing the whole source
+        # over a page-size mistake would be the same misclassification as
+        # treating the subgraph gateway's auth error as a schema error.
+        if response.status_code == 403 and _is_quota_complaint(response.text):
+            self.note(f"Token API plan limit hit on {path.split('?')[0]}: {response.text[:120]}")
+            return None
+        if response.status_code in (401, 403):
+            # A real credential problem is not per-route; fail the whole source.
+            raise RuntimeError(
+                f"Token API rejected the credential (HTTP {response.status_code}) - "
+                f"TOKEN_API_KEY must be a Graph Market JWT, not GRAPH_API_KEY"
+            )
+        if response.status_code >= 400:
+            self.note(f"Token API returned HTTP {response.status_code} for {path.split('?')[0]}")
+            return None
 
-        self.note(f"price for {symbol} unavailable: {last_problem}")
-        return None
+        try:
+            body: Any = response.json()
+        except ValueError:
+            self.note(f"Token API returned non-JSON for {path.split('?')[0]}")
+            return None
+
+        rows = body.get("data") if isinstance(body, dict) else None
+        return rows if rows else None
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -211,4 +302,4 @@ def make_token_api_source(settings: Settings) -> TokenApiSource:
     return TokenApiSource(settings)
 
 
-__all__ = ["TokenApiSource", "make_token_api_source", "PRICE_PATHS"]
+__all__ = ["TokenApiSource", "make_token_api_source", "QUOTE_TOKENS", "SWAP_SAMPLE"]

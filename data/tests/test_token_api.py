@@ -1,4 +1,13 @@
-"""Token API source: endpoint discovery, price extraction, degradation."""
+"""Token API source: pool discovery, orientation-proof pricing, degradation.
+
+The orientation tests are the important ones. `/evm/swaps` exposes a `price`
+field that **flips with the direction of the swap** — verified live on the
+WETH/USDC pool, consecutive trades returned `1858.0228` and `0.0005`. Reading
+it off the latest swap is a coin flip between the right number and one wrong by
+a factor of ~3.4 million, and nothing in the response says which you got.
+
+Every fixture below uses real values observed on 2026-07-25.
+"""
 
 from __future__ import annotations
 
@@ -6,9 +15,64 @@ import httpx
 import pytest
 
 from curator_data.config import Settings
-from curator_data.sources.token_api import TokenApiSource
+from curator_data.sources.token_api import MAX_PAGE, TokenApiSource
 
 SETTINGS = Settings(token_api_key="jwt-test", token_api_url="https://token-api.example")
+
+WETH = "0x4200000000000000000000000000000000000006"
+USDC = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
+POOL = "0xb4cb800910b228ed3d0834cf79d697127bbb00e5"
+
+
+def _token(address: str, symbol: str, decimals: int) -> dict:
+    return {"address": address, "symbol": symbol, "decimals": decimals}
+
+
+def _pool(pool: str = POOL, transactions: int = 34_002_146, other: str = USDC) -> dict:
+    return {
+        "pool": pool,
+        "protocol": "uniswap_v3",
+        "input_token": _token(WETH, "WETH", 18),
+        "output_token": _token(other, "USDC", 6),
+        "fee": 100,
+        "transactions": transactions,
+        "network": "base",
+    }
+
+
+def _swap_weth_to_usdc(weth: float, usdc: float) -> dict:
+    return {
+        "pool": POOL,
+        "input_token": _token(WETH, "WETH", 18),
+        "output_token": _token(USDC, "USDC", 6),
+        "input_value": weth,
+        "output_value": usdc,
+        "price": usdc / weth,  # the API's own field, in this direction
+    }
+
+
+def _swap_usdc_to_weth(usdc: float, weth: float) -> dict:
+    return {
+        "pool": POOL,
+        "input_token": _token(USDC, "USDC", 6),
+        "output_token": _token(WETH, "WETH", 18),
+        "input_value": usdc,
+        "output_value": weth,
+        "price": weth / usdc,  # SAME pool, inverted field
+    }
+
+
+def _router(pools: list[dict] | None = None, swaps: list[dict] | None = None):
+    """Route /evm/pools and /evm/swaps the way the live API does."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/evm/pools" in request.url.path:
+            return httpx.Response(200, json={"data": pools if pools is not None else [_pool()]})
+        if "/evm/swaps" in request.url.path:
+            return httpx.Response(200, json={"data": swaps or []})
+        return httpx.Response(404, json={"status": 404, "code": "route_not_found"})
+
+    return handler
 
 
 def _source(handler) -> TokenApiSource:
@@ -17,73 +81,145 @@ def _source(handler) -> TokenApiSource:
     )
 
 
-async def test_price_becomes_a_usd_fact_with_provenance():
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"data": [{"price_usd": 3218.44}]})
+# ── the orientation trap ──────────────────────────────────────────────────
 
-    facts = await _source(handler).fetch(["WETH"])
+
+async def test_price_is_correct_when_the_latest_swap_is_inverted():
+    """A USDC->WETH swap must not yield a price of 0.0005."""
+    swaps = [_swap_usdc_to_weth(48.428320, 0.026060)]  # live values
+    facts = await _source(_router(swaps=swaps)).fetch(["WETH"])
 
     assert len(facts) == 1
+    assert 1800 < facts[0].value < 1900, "read the API's flipped price field"
+
+
+async def test_price_is_stable_across_mixed_swap_directions():
+    """Both directions of the same pool must agree to within noise."""
+    swaps = [
+        _swap_weth_to_usdc(0.016074, 29.865872),
+        _swap_usdc_to_weth(48.428320, 0.026060),
+        _swap_weth_to_usdc(0.004956, 9.206119),
+        _swap_usdc_to_weth(63.399796, 0.034120),
+    ]
+    facts = await _source(_router(swaps=swaps)).fetch(["WETH"])
+    assert 1855 < facts[0].value < 1860
+
+
+async def test_a_single_odd_trade_does_not_move_the_price():
+    """Median, not mean: one fat-fingered swap should not set the price."""
+    swaps = [_swap_weth_to_usdc(0.01, 18.57) for _ in range(5)]
+    swaps.append(_swap_weth_to_usdc(0.01, 1857.0))  # 100x outlier
+    facts = await _source(_router(swaps=swaps)).fetch(["WETH"])
+    assert 1850 < facts[0].value < 1865
+
+
+async def test_the_fact_carries_provenance_and_the_right_unit():
+    facts = await _source(_router(swaps=[_swap_weth_to_usdc(0.01, 18.58)])).fetch(["WETH"])
     fact = facts[0]
     assert fact.kind == "price"
     assert fact.unit == "usd"
-    assert fact.value == 3218.44
     assert fact.source == "token_api"
     assert fact.subject.token == "WETH"
 
 
-async def test_endpoint_discovery_falls_through_404s_and_then_sticks():
-    """The Token API moved paths during beta; a 404 must not kill the source."""
-    attempted: list[str] = []
+# ── pool discovery ────────────────────────────────────────────────────────
+
+
+async def test_the_busiest_usd_paired_pool_is_chosen():
+    """`transactions` is the closest thing to depth the API exposes."""
+    requested: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        attempted.append(str(request.url))
-        if "ohlc" not in request.url.path:
-            return httpx.Response(404, text="not found")
-        return httpx.Response(200, json={"data": [{"close": 3218.44}]})
+        requested.append(str(request.url))
+        if "/evm/pools" in request.url.path:
+            return httpx.Response(
+                200,
+                json={
+                    "data": [
+                        _pool(pool="0xquiet", transactions=10),
+                        _pool(pool="0xbusy", transactions=34_000_000),
+                    ]
+                },
+            )
+        return httpx.Response(200, json={"data": [_swap_weth_to_usdc(0.01, 18.58)]})
+
+    await _source(handler).fetch(["WETH"])
+    assert any("pool=0xbusy" in url for url in requested)
+
+
+async def test_pool_discovery_is_cached_across_calls():
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        if "/evm/pools" in request.url.path:
+            return httpx.Response(200, json={"data": [_pool()]})
+        return httpx.Response(200, json={"data": [_swap_weth_to_usdc(0.01, 18.58)]})
 
     source = _source(handler)
-    facts = await source.fetch(["WETH"])
-    assert facts[0].value == 3218.44
-    first_pass = len(attempted)
-    assert first_pass > 1, "expected fallthrough past the 404s"
-
-    # Second call reuses the discovered path rather than re-walking the list.
-    attempted.clear()
     await source.fetch(["WETH"])
-    assert len(attempted) == 1
+    await source.fetch(["WETH"])
+    assert calls.count("/evm/pools") == 1
 
 
-async def test_ohlc_close_is_read_when_no_flat_price_field_exists():
+async def test_a_pool_with_no_usd_leg_is_rejected():
+    """Pricing WETH against a random token is not a USD price."""
+    degen = "0x4ed4e862860bed51a9570b96d89af5e1b0efefed"
+    source = _source(_router(pools=[_pool(other=degen)]))
+
+    assert await source.fetch(["WETH"]) == []
+    assert "no pool pairs it with a USD quote token" in source.drain_notes()[0]
+
+
+async def test_page_size_never_exceeds_the_plan_ceiling():
+    """limit=20 returns 403 on the free plan. Verified live."""
+    urls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        urls.append(str(request.url))
+        if "/evm/pools" in request.url.path:
+            return httpx.Response(200, json={"data": [_pool()]})
+        return httpx.Response(200, json={"data": [_swap_weth_to_usdc(0.01, 18.58)]})
+
+    await _source(handler).fetch(["WETH"])
+    assert urls, "expected requests"
+    for url in urls:
+        limit = int(url.split("limit=")[1].split("&")[0])
+        assert limit <= MAX_PAGE, url
+
+
+# ── degradation ───────────────────────────────────────────────────────────
+
+
+async def test_a_plan_limit_403_does_not_kill_the_whole_source():
+    """A page-size complaint is not a rejected credential."""
+
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
-            200, json={"data": [{"open": 3200.0, "high": 3250.0, "low": 3180.0, "close": 3218.44}]}
+            403,
+            json={"status": 403, "code": "forbidden",
+                  "message": "Parameter 'limit' exceeds the maximum allowed"},
         )
 
-    facts = await _source(handler).fetch(["WETH"])
-    assert facts[0].value == 3218.44
-
-
-async def test_unknown_symbol_is_noted_with_the_fix_rather_than_guessed():
-    """Guessing a contract address on a system that trades is unacceptable."""
-
-    def handler(request: httpx.Request) -> httpx.Response:  # pragma: no cover
-        raise AssertionError("must not call the API for an unknown symbol")
-
     source = _source(handler)
-    facts = await source.fetch(["NOTAREALTOKEN"])
-
-    assert facts == []
-    note = source.drain_notes()[0]
-    assert "NOTAREALTOKEN" in note
-    assert "tokens.py" in note  # names where to fix it
+    assert await source.fetch(["WETH"]) == []  # degraded, not raised
+    assert any("plan limit" in n for n in source.drain_notes())
 
 
-async def test_rejected_credential_raises_for_the_whole_source():
+async def test_a_genuine_credential_403_still_fails_the_source():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, json={"status": 403, "code": "forbidden",
+                                         "message": "invalid token"})
+
+    with pytest.raises(RuntimeError, match="credential"):
+        await _source(handler).fetch(["WETH"])
+
+
+async def test_a_401_fails_the_source_naming_the_right_credential():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(401, text="unauthorized")
 
-    with pytest.raises(RuntimeError, match="401"):
+    with pytest.raises(RuntimeError, match="Graph Market JWT"):
         await _source(handler).fetch(["WETH"])
 
 
@@ -98,27 +234,37 @@ async def test_missing_credential_raises_before_any_request():
         await source.fetch(["WETH"])
 
 
-async def test_one_unpriceable_token_does_not_lose_the_other():
-    def handler(request: httpx.Request) -> httpx.Response:
-        # The contract address travels as a query parameter, so match the whole
-        # URL rather than just the path.
-        if "4200" in str(request.url):  # WETH
-            return httpx.Response(503, text="unavailable")
-        return httpx.Response(200, json={"price_usd": 1.0})
+async def test_a_quote_token_is_not_priced_against_itself():
+    """USDC's price here would be a peg assumption, not an observation."""
+    source = _source(_router(swaps=[_swap_weth_to_usdc(0.01, 18.58)]))
+    facts = await source.fetch(["USDC"])
 
-    source = _source(handler)
-    facts = await source.fetch(["WETH", "USDC"])
-
-    assert [f.subject.token for f in facts] == ["USDC"]
-    assert any("WETH" in n for n in source.drain_notes())
+    assert facts == []
+    assert "quote token" in source.drain_notes()[0]
 
 
-async def test_nonsense_price_is_rejected_rather_than_reported():
-    """A zero price would value the vault's holdings at nothing."""
+async def test_unknown_symbol_is_noted_with_the_fix_rather_than_guessed():
+    source = _source(_router())
+    assert await source.fetch(["NOTAREALTOKEN"]) == []
+    note = source.drain_notes()[0]
+    assert "NOTAREALTOKEN" in note and "tokens.py" in note
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"price_usd": 0})
 
-    source = _source(handler)
+async def test_no_swaps_returns_no_price_rather_than_a_wrong_one():
+    source = _source(_router(swaps=[]))
     assert await source.fetch(["WETH"]) == []
     assert source.drain_notes()
+
+
+async def test_a_zero_amount_swap_is_skipped_not_divided_by():
+    swaps = [_swap_weth_to_usdc(0.01, 18.58)]
+    swaps.insert(0, {
+        "pool": POOL,
+        "input_token": _token(WETH, "WETH", 18),
+        "output_token": _token(USDC, "USDC", 6),
+        "input_value": 0.0,
+        "output_value": 0.0,
+    })
+    facts = await _source(_router(swaps=swaps)).fetch(["WETH"])
+    assert len(facts) == 1
+    assert 1850 < facts[0].value < 1865
