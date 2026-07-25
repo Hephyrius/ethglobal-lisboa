@@ -248,3 +248,67 @@ fresh* and silently defeat the vault's staleness check on the half that can actu
 
 **Test counts at close of Wave 2:** 173 Python, 46 Foundry (1 skipped and documented — the taker
 fill).
+
+---
+
+## 10. Wave 3 — the bounty audit, and the claim that got stronger
+
+**Assigned:** §6 of the Wave 3 plan — audit this lane's sponsor integrations against four criteria
+(to spec · full potential · **not shoehorned** · actually working), and confront three named weak
+points. Deliverable: [`venues/AUDIT.md`](../venues/AUDIT.md).
+
+### 10.1 The three weak points, answered
+
+| Weak point | Answer |
+|---|---|
+| *"The SwapVM taker fill has never been demonstrated"* (#29) | ✅ **Closed.** The fill runs against the real deployed contracts. We may now say the vault **market-makes**. |
+| *"Uniswap Track 2 is our weakest claim"* | 🟡 **Argued properly, and criterion 2 is a flat no.** Recommendation filed as #104; the call to submit or drop is Lane F's. |
+| *"Is Aqua load-bearing or decorative?"* | ✅ **Load-bearing — but not for the reason the removal test gives.** See below. |
+
+### 10.2 What #29 actually was
+
+The prior note said *"the deployed instruction table matches no published swap-vm source"* and
+recommended asking 1inch at the venue. Both halves were wrong in instructive ways.
+
+**The finding was bigger than stated: no published tag matches at all.** The deployed table carries
+an `XYCConcentrate` entry v1.0.1 lacks, so `Controls._salt` and `Fee._flatFeeAmountInXD` each sat
+one opcode low — we were asking the VM to run **Decay where we meant Salt**.
+
+**And the answer never required a human.** The contract is verified on Blockscout and ships its own
+`AquaOpcodes.sol`. It was one HTTP request away for an entire wave. *Ask the chain before asking a
+person.*
+
+The table was **read, not inferred** — almost every instruction parses its arguments first and
+reverts with an error naming itself, so a one-instruction program per index fingerprints the whole
+table. The probe and the verified source agree on all 28 entries. Guessing an offset from a single
+revert would have been quicker and is exactly what must not happen: a wrong opcode is a *silently
+mispriced* position, which is worse than no position.
+
+**A second, independent bug sat behind the first.** v1.0.1 packs one more taker-traits slice than
+the deployed contract parses, silently clearing `isExactIn`. The symptom was not a revert but a
+quote that was **arithmetically perfect for a trade nobody asked for**.
+
+### 10.3 The criterion-3 answer worth keeping
+
+The removal test — *if this were removed, would the product still work?* — passes for Aqua, and
+proves less than it looks: it is true of **every** venue individually, which is what a venue port is
+for. The sharper question is whether Aqua does something no other venue can, that the product needs.
+
+It does. **The vault is a contract with no private key**, and Aqua is the only one of four venues
+where it earns *while keeping custody* (`custody: virtual`; the others are `claim` or `rotational`).
+That is downstream of the locked Pattern 1 decision, not of a sponsor mapping.
+
+**The part this lane cannot certify** — how often Lane B's loop actually chooses Aqua — is filed as
+a question (#105) rather than written into an audit as an assumption.
+
+### 10.4 Two lessons kept because they cost the most
+
+- **A skipped test is not a weaker assertion, it is no assertion.** A Python test pinned the wrong
+  opcodes and read green for two waves, because it is a `live` test that skips without a local RPC.
+- **`ship()` never executes the program.** Every wrong-opcode variant encoded cleanly, shipped
+  successfully and returned a valid hash. The first thing that runs a program is a taker's fill —
+  so the fill test is the only thing that can tell you encoding still works.
+
+**Test counts at close of Wave 3:** **185 Python, 44 Foundry** — including the 5 taker-fill tests
+that were skipped for two waves, and 4 new ones that re-read the deployed opcode table off-chain
+every run.

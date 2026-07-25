@@ -496,35 +496,61 @@ venues/
     solidity/        standalone Foundry project (NOT contracts/)
       src/SwapVMProgramBuilder.sol
       build.sh       recompile + republish the artifact
-  tests/             37 tests; fixtures/ holds recorded API responses
+  tests/             185 tests; fixtures/ holds recorded API responses
 ```
 
 **Why the SwapVM program is built in Solidity.** Programs are packed bytecode
 (`opcode ‖ argLength ‖ args`). Reimplementing that in Python would mean a second,
 unverified copy of 1inch's instruction format, and any drift yields a program
 that encodes cleanly and behaves wrongly with real money behind it. The builder
-inherits 1inch's `AquaOpcodes` and passes **function pointers** to their
-`ProgramBuilder`, which resolves each to its index in their own instruction
-table at compile time — so no opcode number appears in our source at all.
+passes **function pointers** to their `ProgramBuilder`, which resolves each to
+its index in an instruction table at compile time — so no opcode number appears
+in our source at all.
 
-> ### ⚠️ Verification status of the Aqua program
+> ### ✅ Verification status of the Aqua program — the fill works
 >
-> **Verified against the real deployed contracts on a Base fork:** `ship()`,
-> `dock()`, virtual balances, the zero-token-movement custody invariant, and
-> contract-maker support (`useAquaInsteadOfSignature`). These are solid.
+> **Verified end to end against the real deployed contracts on a Base fork:**
+> `ship()`, `dock()`, virtual balances, the zero-token-movement custody
+> invariant, contract-maker support (`useAquaInsteadOfSignature`), **and the
+> taker fill** — a third party swaps against the vault's position, real ERC-20s
+> move in both directions, and the vault earns its maker fee.
 >
-> **Not yet verified: that the strategy prices correctly when executed.**
-> `Aqua.ship()` stores the strategy as opaque bytes and never runs it — the
-> first execution is a taker fill. The deployed SwapVM's instruction table does
-> not match any published swap-vm source we can find: it reads index 20 as
-> `Decay` where v1.0.1 puts `Salt`, and no probed index produced a real
-> constant-product quote. Details, evidence and the next step are in the header
-> of `aqua/solidity/test/AquaTakerFillFork.t.sol`, which is committed but
-> skipped rather than passing on a claim we cannot support.
+> **So the honest claim is now "the vault market-makes", not merely "the vault
+> ships positions".** Five tests in `aqua/solidity/test/AquaTakerFillFork.t.sol`
+> were `vm.skip`ped for two waves and are green.
 >
-> `@1inch/swap-vm` is **pinned to v1.0.1** because the default branch encodes
-> instructions completely differently (`XYCSwap` = `0x50` there, `17` in the
-> deployed positional scheme). Do not unpin without re-checking the deployment.
+> #### Which opcode table, and why it is not the npm package's
+>
+> **No published swap-vm tag matches the contract deployed on Base.** Only
+> `0.0.1`–`0.0.6`, `v1.0.0` and `v1.0.1` exist; the deployed table matches none.
+> It carries an extra `XYCConcentrate._xycConcentrateGrowLiquidityXD` entry that
+> v1.0.1 does not have, which pushes everything after it up by one:
+>
+> | instruction | v1.0.1 | **deployed** |
+> |---|---|---|
+> | `XYCSwap._xycSwapXD` | 17 | **17** |
+> | `Controls._salt` | 20 | **21** |
+> | `Fee._flatFeeAmountInXD` | 21 | **22** |
+>
+> So opcodes come from **`src/DeployedAquaOpcodes.sol`**, transcribed from the
+> deployed contract's own verified source, and `@1inch/swap-vm` v1.0.1 supplies
+> only the instruction *sources*. `test/SwapVMOpcodeTable.t.sol` re-reads the
+> table off the chain every run and fails if the transcription drifts.
+>
+> #### The rule this taught us, which is more useful than the fix
+>
+> **`ship()` never executes the program.** Every wrong-opcode variant we have
+> shipped — the `main` branch's hex enum (`XYCSwap` = `0x50`), and v1.0.1's
+> off-by-one — encoded cleanly, shipped successfully, returned a valid strategy
+> hash, and produced a position that looked healthy in every observable way.
+> **The first thing that runs the program is a taker's fill.** If you change
+> anything about program encoding, the fill test is the only thing that can
+> tell you it still works.
+>
+> The same shape of bug bit the taker side independently: v1.0.1 packs one more
+> taker-traits slice than the deployed contract parses, which silently clears
+> `isExactIn`. The symptom was not a revert but a quote that was arithmetically
+> perfect for a trade nobody asked for. See `test/DeployedTakerTraits.sol`.
 
 ---
 
@@ -549,7 +575,7 @@ Solidity tests (needs Foundry, in `wsl -d Ubuntu-24.04`):
 ```sh
 cd venues/aqua/solidity
 forge test                                   # 13 encoding tests, offline
-forge test --fork-url $BASE_RPC_URL          # + 5 against REAL deployed Aqua
+forge test --fork-url $BASE_RPC_URL          # 44 total, incl. the taker fill
 sh build.sh                                  # recompile + republish the artifact
 ```
 
