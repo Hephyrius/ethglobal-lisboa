@@ -16,12 +16,45 @@ model asks for.
   calculation would silently start meaning something else.
 - **`base_asset` stays in `allowed_assets`.** Otherwise the vault cannot legally
   hold its own denomination and `min_cash_pct` becomes unsatisfiable.
+- **`allowed_assets` may not grow beyond what the vault can price.** See below;
+  this is the one that fails silently and permanently.
 - **`version` is assigned here, always +1.** Left to the model it collides,
   sticks, or jumps; it is the audit trail's ordering key.
 - **The result must satisfy the full `Mandate` schema.** A patch producing an
   invalid mandate is rejected whole. There is no partial application.
 
 Anything that fails is rejected and the previous mandate stands unchanged.
+
+## Why widening `allowed_assets` is checked in code and not left to the rule
+
+The golden mandate's `update_rules` permit new assets *"if they have a Chainlink
+Base feed"*, and that sentence became **literally true and unsafe** in the same
+wave. Lane C reported (#65) that wstETH, cbETH and rETH all now have Chainlink
+Base feeds — but every LST feed on Base is **18-decimal and ETH-quoted**, not the
+8-decimal USD the vault assumes. Read as USD, wstETH prices at $12,399,811,032.
+Lane C composes with ETH/USD in Python; `CuratedVault.totalAssets()` takes
+**one** feed per token and cannot compose.
+
+That combination is the worst failure mode this component has:
+
+1. the model reads a rule that the asset satisfies, and amends honestly;
+2. nothing downstream objects, because the amended mandate now permits it;
+3. the vault buys it and `totalAssets()` cannot see it — so the vault's reported
+   worth *falls by the amount spent* and the share price collapses;
+4. **`priceFeed` registrations are immutable after `initialize`**, so the vault
+   cannot be repaired. Only redeployment fixes it, and depositors are already in.
+
+So the free-text rule is not the gate. The gate is `offerable_assets()` — the
+same symbols-the-venue-layer-can-resolve intersection genesis offers, curated on
+exactly the "verified on-chain *and* has a verified feed" basis this needs.
+
+Two properties worth stating. **Only additions are checked**: an asset already in
+the mandate stays, because a vault deployed under an older universe must remain
+amendable at all. And it **fails closed** — if the venue layer cannot be imported,
+`offerable_assets()` falls back to the two assets every deployment has had, and a
+widening amendment is refused. Refusing to widen when pricing cannot be verified
+costs a rejected amendment, which is logged and recoverable; the other direction
+costs the share price, permanently.
 """
 
 from __future__ import annotations
@@ -30,6 +63,8 @@ import logging
 
 from curator_schema import Mandate, MandateAmendment
 from pydantic import ValidationError
+
+from .universe import offerable_assets
 
 __all__ = ["AmendmentRejected", "apply_amendment"]
 
@@ -79,6 +114,18 @@ def apply_amendment(current: Mandate, amendment: MandateAmendment) -> Mandate:
         raise AmendmentRejected(
             f"patch removes the base asset {updated.base_asset} from allowed_assets, "
             "leaving the vault unable to hold its own denomination"
+        )
+
+    # Additions only: a vault deployed under an older universe keeps whatever it
+    # already names, or it could never be amended again.
+    added = set(updated.constraints.allowed_assets) - set(current.constraints.allowed_assets)
+    if unpriceable := sorted(added - set(offerable_assets())):
+        raise AmendmentRejected(
+            f"patch adds {', '.join(unpriceable)} to allowed_assets, which the vault cannot "
+            f"price. A Chainlink Base feed is not sufficient — every LST feed on Base is "
+            f"ETH-quoted, the vault reads one feed per token and cannot compose, and its "
+            f"valuations are immutable after deployment. Buying an asset totalAssets() cannot "
+            f"see makes the share price fall by the amount spent, permanently."
         )
 
     log.info(

@@ -210,3 +210,119 @@ def test_amendment_changes_the_hash(mandate):
     """A depositor must be able to see that the mandate moved."""
     updated = apply_amendment(mandate, _amend(risk_posture="aggressive"))
     assert mandate_hash(updated) != mandate_hash(mandate)
+
+
+# ── the asset the vault cannot price (cross-lane #65) ─────────────────────
+
+
+def test_an_amendment_cannot_add_an_asset_the_vault_cannot_price():
+    """**The one that fails silently and permanently.**
+
+    Lane C reported that wstETH, cbETH and rETH now all have Chainlink Base
+    feeds, which makes the golden mandate's `update_rules` — *"new assets if they
+    have a Chainlink Base feed"* — literally true for them. But every LST feed on
+    Base is 18-decimal and ETH-quoted, not the 8-decimal USD the vault assumes;
+    read as USD, wstETH prices at $12,399,811,032. Lane C composes with ETH/USD
+    in Python. `CuratedVault.totalAssets()` takes one feed per token and cannot.
+
+    So a model could amend honestly, nothing downstream would object, the vault
+    would buy an asset `totalAssets()` cannot see, and the share price would fall
+    by the amount spent — with `priceFeed` registrations immutable after
+    `initialize`, so only redeployment fixes it.
+    """
+    from curator_schema import MandateAmendment
+
+    from agent.mandate.amend import AmendmentRejected, apply_amendment
+
+    current = fixtures.mandate()
+    widened = current.constraints.model_copy(
+        update={"allowed_assets": [*current.constraints.allowed_assets, "wstETH"]}
+    )
+
+    with pytest.raises(AmendmentRejected, match="cannot price"):
+        apply_amendment(
+            current,
+            MandateAmendment(
+                rationale="wstETH has a Chainlink Base feed, so the update rules permit it.",
+                patch={"constraints": widened.model_dump(mode="json", exclude_none=True)},
+            ),
+        )
+
+
+def test_the_rejection_says_why_a_chainlink_feed_is_not_enough():
+    """The message is the model's only correction signal, and "not allowed" would
+    invite it to try again with the same reasoning."""
+    from curator_schema import MandateAmendment
+
+    from agent.mandate.amend import AmendmentRejected, apply_amendment
+
+    current = fixtures.mandate()
+    widened = current.constraints.model_copy(
+        update={"allowed_assets": [*current.constraints.allowed_assets, "rETH"]}
+    )
+
+    with pytest.raises(AmendmentRejected) as caught:
+        apply_amendment(
+            current,
+            MandateAmendment(
+                rationale="Adding rETH.",
+                patch={"constraints": widened.model_dump(mode="json", exclude_none=True)},
+            ),
+        )
+
+    message = str(caught.value)
+    assert "Chainlink Base feed is not sufficient" in message
+    assert "cannot compose" in message
+    assert "immutable" in message
+
+
+def test_an_amendment_may_still_add_an_asset_the_venue_layer_resolves():
+    """The guard must not freeze the universe. Lane D's token table is curated on
+    exactly the basis this needs, so anything in it is fair game."""
+    from curator_schema import MandateAmendment
+
+    from agent.mandate.amend import apply_amendment
+    from agent.mandate.universe import offerable_assets
+
+    current = fixtures.mandate()
+    candidates = [a for a in offerable_assets() if a not in current.constraints.allowed_assets]
+    if not candidates:
+        pytest.skip("the golden mandate already names every offerable asset")
+
+    widened = current.constraints.model_copy(
+        update={"allowed_assets": [*current.constraints.allowed_assets, candidates[0]]}
+    )
+    updated = apply_amendment(
+        current,
+        MandateAmendment(
+            rationale=f"Adding {candidates[0]}, which the venue layer resolves.",
+            patch={"constraints": widened.model_dump(mode="json", exclude_none=True)},
+        ),
+    )
+
+    assert candidates[0] in updated.constraints.allowed_assets
+    assert updated.version == current.version + 1
+
+
+def test_an_asset_already_in_the_mandate_survives_an_unrelated_amendment():
+    """Additions only. A vault deployed under an older universe must stay
+    amendable, or one widening of the token table would strand it."""
+    from curator_schema import MandateAmendment
+
+    from agent.mandate.amend import apply_amendment
+
+    legacy = fixtures.mandate()
+    legacy = legacy.model_copy(
+        update={
+            "constraints": legacy.constraints.model_copy(
+                update={"allowed_assets": [*legacy.constraints.allowed_assets, "wstETH"]}
+            )
+        }
+    )
+
+    updated = apply_amendment(
+        legacy,
+        MandateAmendment(rationale="Tightening the cash floor.", patch={"objective": "Steady."}),
+    )
+
+    assert "wstETH" in updated.constraints.allowed_assets
