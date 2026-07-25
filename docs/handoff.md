@@ -525,14 +525,12 @@ Full interface in [data/README.md](../data/README.md).
   of USDC on real Base to `X402_PRIVATE_KEY` (`0x64D2…fBb7`) and it should settle at $0.01/query.
   Enable with `X402_ENABLED=true`. It is off by default and falls back to the API key on any
   failure, so it cannot break a demo.
-- **`uvx curator-mcp` does not work yet** — the packages are not on PyPI. `uv pip install
-  ./data/curator_mcp` works today from a clone (verified in a clean 3.10 venv outside the repo).
-  Publishing needs only a token: run **`./data/publish.sh`** for a dry run that builds all three and
-  proves they install from wheels alone, then `--publish` with `UV_PUBLISH_TOKEN` set. Note it also
-  publishes `curator-schema`, which is Wave 0's package.
-- **The golden mandate does not grant `chainlink`** (request #43), so a live tick prices WETH from a
-  single source and gets **no USDC price at all**. One word in `permitted_data_sources` fixes it at
-  no latency cost.
+- ~~`uvx curator-mcp` does not work~~ — **published 2026-07-25.** `curator-schema` 0.1.0,
+  `curator-data` 0.2.0, `curator-mcp` 0.2.0 are on PyPI; `uvx curator-mcp` verified from a clean
+  machine. Next release: `./data/publish.sh` (dry run) then `--publish`. **Bump the version first** —
+  a PyPI version is permanent and cannot be re-uploaded.
+- ~~The golden mandate does not grant `chainlink`~~ — resolved; it now grants
+  `[messari, aave, chainlink, token_api]`.
 - **Uniswap V3's subgraph is intermittent** — the gateway returns `bad indexers` or times out at
   ~20s. Not our code; it recovers on its own. Lending data does not depend on it.
 - **Prices only cover configured assets.** Chainlink feeds live in `sources/feeds.py`, token

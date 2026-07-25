@@ -135,6 +135,47 @@ class TestSchemaConformance:
             _plan(quote_response, {"swap": {"to": addresses.UNIVERSAL_ROUTER}})
 
 
+class TestErrorClassification:
+    """An unroutable trade is an ordinary market condition. Escalating it to a
+    hard API error makes the agent look broken when it is merely unable to
+    trade right now."""
+
+    @staticmethod
+    def _classify(status: int, body: dict):
+        import httpx
+
+        from venues.uniswap.client import _api_error
+
+        return _api_error(
+            httpx.Response(status, json=body, request=httpx.Request("POST", "http://x"))
+        )
+
+    @pytest.mark.parametrize(
+        ("status", "body"),
+        [
+            # Observed live: an unroutable trade returns 404 ResourceNotFound,
+            # sharing neither the code nor the phrasing of the documented form.
+            (404, {"errorCode": "ResourceNotFound", "detail": "No quotes available"}),
+            (404, {"errorCode": "QUOTE_ERROR", "detail": "No route found"}),
+            (400, {"errorCode": "SOMETHING", "detail": "insufficient liquidity"}),
+        ],
+    )
+    def test_unroutable_trades_are_not_hard_errors(self, status, body):
+        from venues.errors import NoRouteError
+
+        assert isinstance(self._classify(status, body), NoRouteError)
+
+    def test_a_genuine_api_error_stays_a_hard_error(self):
+        from venues.errors import NoRouteError, VenueAPIError
+
+        error = self._classify(
+            400, {"errorCode": "RequestValidationError", "detail": "bad field"}
+        )
+        assert isinstance(error, VenueAPIError)
+        assert not isinstance(error, NoRouteError)
+        assert error.status == 400
+
+
 class TestDescription:
     def test_describes_the_trade_in_human_units(self, quote_response):
         text = describe(quote_response["quote"])

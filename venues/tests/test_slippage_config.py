@@ -126,18 +126,25 @@ class TestAgainstTheRealAPI:
 
     async def test_the_api_honours_the_requested_bound(self, requires_uniswap_key):
         from venues import addresses
+        from venues.errors import NoRouteError
         from venues.uniswap.client import UniswapClient
 
         async with UniswapClient.from_config() as client:
-            response = await client.quote(
-                QuoteRequest(
-                    token_in=addresses.USDC,
-                    token_out=addresses.WETH,
-                    amount=1_000_000_000,  # 1,000 USDC
-                    swapper="0x0000000000000000000000000000000000000001",
-                    slippage_bps=self.GOLDEN_MANDATE_CEILING,
+            try:
+                response = await client.quote(
+                    QuoteRequest(
+                        token_in=addresses.USDC,
+                        token_out=addresses.WETH,
+                        amount=1_000_000_000,  # 1,000 USDC
+                        swapper="0x0000000000000000000000000000000000000001",
+                        slippage_bps=self.GOLDEN_MANDATE_CEILING,
+                    )
                 )
-            )
+            except NoRouteError as exc:
+                # Routing availability is a market condition, not our code. This
+                # test is about the slippage bound; skipping keeps a transient
+                # "no quotes available" from reading as a regression.
+                pytest.skip(f"no route right now: {exc}")
 
         assert slippage_bps(response["quote"]) == self.GOLDEN_MANDATE_CEILING
 
@@ -169,11 +176,15 @@ class TestAgainstTheRealAPI:
             ],
         )
 
+        from venues.errors import NoRouteError
+
         venue = registry.get_venue("uniswap", cached=False)
         try:
             plan = await venue.plan(
                 SwapIntent(token_in="USDC", token_out="WETH", pct_of_holdings=0.10), vault
             )
+        except NoRouteError as exc:
+            pytest.skip(f"no route right now: {exc}")
         finally:
             await venue.aclose()
 

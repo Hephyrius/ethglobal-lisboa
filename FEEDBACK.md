@@ -108,7 +108,48 @@ detected would be even better. Smart-account and protocol integrations are only
 going to become more common, and right now that audience has to discover its own
 path.
 
-## 5. Small things that went right
+## 5. Unroutable and unavailable are reported in several shapes, none of them consistent
+
+Three different responses for what an integrator has to treat as one condition —
+*"I cannot price this right now"*:
+
+```
+404  {"errorCode":"ResourceNotFound","detail":"No quotes available"}
+504  <!DOCTYPE html> … Cloudflare error page (HTML, not JSON)
+400  {"errorCode":"QUOTE_ERROR", …}
+```
+
+The 504 is the awkward one: an integrator that parses the body as JSON — which
+every other response justifies — gets a parse error instead of a diagnosis, and
+the natural fallback is to surface it as an unknown failure.
+
+We initially classified only `QUOTE_ERROR` and bodies containing `"no route"`,
+because those are the documented forms. `ResourceNotFound` / `"No quotes
+available"` fell through to our generic API-error path, which for an autonomous
+agent means an ordinary market condition escalates into what looks like a broken
+integration. We now match on four phrasings and treat `ResourceNotFound` as
+no-route.
+
+**What made this hard to pin down:** it is *size-dependent*. On the same pair
+(USDC→WETH, Base), seconds apart:
+
+| Amount | Result |
+|---|---|
+| 1 USDC | `504` / `No quotes available` |
+| 100 USDC | `200`, routed fine |
+| 1,000 USDC | `200`, routed fine |
+
+Small trades appear not to be worth routing, which is reasonable — but it
+presents as intermittent breakage rather than as "below minimum". Our test suite
+was quoting 1 USDC precisely because it seemed the most harmless amount to ask
+for repeatedly, and the resulting flakes read as integration bugs for a while.
+
+**Suggestions:** a stable machine-readable code for "no route / cannot price",
+distinct from transport failures; return JSON on 5xx from the API host rather
+than an HTML error page; and if there is an effective minimum trade size, say so
+in the error rather than expressing it as a timeout.
+
+## 6. Small things that went right
 
 Worth recording, since feedback skewed negative by construction:
 
@@ -133,7 +174,10 @@ Worth recording, since feedback skewed negative by construction:
 | 2 | `swap.value` hex while siblings are decimal | silent wrongness risk |
 | 3 | No quote expiry field | every integrator invents a TTL |
 | 4 | Contract-caller Permit2 path undocumented | required experiment; the fix works but is unwritten |
+| 5 | "Cannot price this" arrives as 404/504/400, one of them HTML | ordinary market conditions escalate to hard errors |
 
 Items 3 and 4 matter most for autonomous/contract integrations. Item 4 in
 particular is a documentation gap rather than a missing capability — the
-capability is there and works well.
+capability is there and works well. Item 5 is the one most likely to cause a
+live incident, because it turns a normal "no route right now" into something an
+agent reports as a failure.

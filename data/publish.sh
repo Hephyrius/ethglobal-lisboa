@@ -26,11 +26,13 @@ REPO_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 DIST="$REPO_ROOT/dist"
 PUBLISH=0
 INDEX=""
+ASSUME_YES=0
 
 for arg in "$@"; do
   case "$arg" in
     --publish)   PUBLISH=1 ;;
     --test-pypi) INDEX="https://test.pypi.org/legacy/" ;;
+    --yes)       ASSUME_YES=1 ;;   # non-interactive; the caller has confirmed
     -h|--help)   sed -n '2,25p' "$0"; exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
@@ -100,12 +102,16 @@ fi
 # publishing another lane's package.
 echo "==> Uploading. curator-schema is Wave 0's package - publishing it too."
 echo "    A version number on PyPI is permanent and cannot be re-uploaded."
-printf "    Continue? [y/N] "
-read -r reply
-case "$reply" in
-  y|Y) ;;
-  *) echo "    Aborted."; exit 1 ;;
-esac
+if [ "$ASSUME_YES" -eq 1 ]; then
+  echo "    --yes given; proceeding."
+else
+  printf "    Continue? [y/N] "
+  read -r reply
+  case "$reply" in
+    y|Y) ;;
+    *) echo "    Aborted."; exit 1 ;;
+  esac
+fi
 
 for pkg in curator_schema curator_data curator_mcp; do
   echo "==> Publishing $pkg"

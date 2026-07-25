@@ -4,14 +4,17 @@ The MCP server is a submission deliverable for The Graph's Track 1, whose stated
 **Reusability & completeness (25%)** and whose defining requirement is *"reusable tooling or
 infrastructure … not a single end-user app."* A server only we can run does not meet that.
 
-**Everything below has been verified except the upload itself, which needs a PyPI token.**
+**Published 2026-07-25.** `curator-schema` 0.1.0, `curator-data` 0.2.0, `curator-mcp` 0.2.0 are live
+on PyPI and `uvx curator-mcp` was verified from a clean machine. What follows is the release
+process for the next version.
 
 ---
 
-## Current state: it installs, without PyPI
+## It also installs from a clone, without PyPI
 
-The blocker reported in the phase 2 plan §6 — `uv pip install ./data/curator_mcp` failing with
-*"Because curator-data was not found in the package registry … unsatisfiable"* — **is fixed.**
+Still true and still useful for anyone modifying it. The blocker reported in the phase 2 plan §6 —
+`uv pip install ./data/curator_mcp` failing with *"Because curator-data was not found in the package
+registry … unsatisfiable"* — was fixed before publishing, and remains fixed.
 
 `data/curator_mcp/pyproject.toml` now carries relative `[tool.uv.sources]` for its two siblings, so
 a clone resolves them locally. Verified in a clean Python 3.10 venv outside the repo:
@@ -93,10 +96,10 @@ Then confirm the thing we actually claim in `SKILL.md`:
 uvx curator-mcp        # from a machine that has never seen this repo
 ```
 
-### Names are free
+### Names
 
-Checked against PyPI: `curator-mcp`, `curator-data` and `curator-schema` all return 404. Nobody has
-claimed them.
+`curator-mcp`, `curator-data` and `curator-schema` are ours as of 2026-07-25. Remember a version
+number on PyPI is **permanent** — 0.2.0 can never be re-uploaded, only superseded.
 
 > **`curator-schema` belongs to Wave 0**, not to Lane C. It needs no edit to publish — its metadata
 > is already valid — but the decision to publish it is not Lane C's to take alone. It is the bottom
@@ -128,5 +131,5 @@ Bump the version whenever the package contents change.
 - [x] `requires-python = ">=3.10"` — the MCP SDK's floor, verified by installing on 3.10
 - [x] Wheels install from `--find-links` with no repo present
 - [x] `curator-mcp` exposes the `curator-mcp` console script
-- [ ] **PyPI token** — needs a human
+- [x] **PyPI token** — supplied; published 2026-07-25
 - [ ] Repo public (a stated requirement of every Graph track anyway)

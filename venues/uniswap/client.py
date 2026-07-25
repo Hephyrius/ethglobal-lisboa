@@ -181,8 +181,20 @@ def _api_error(response: httpx.Response) -> VenueAPIError | NoRouteError:
         detail = response.text[:300]
 
     # "no route" is a market condition, not a failure — the harness should
-    # record it and carry on rather than treat the tick as broken.
-    if code in {"QUOTE_ERROR", "NO_ROUTE"} or (detail and "no route" in detail.lower()):
+    # record a held/failed action and carry on rather than treat the tick as
+    # broken.
+    #
+    # The wording varies and the status code is not a reliable signal: observed
+    # live, an unroutable trade comes back as **HTTP 404 `ResourceNotFound` "No
+    # quotes available"**, which shares neither the code nor the phrasing of the
+    # documented `QUOTE_ERROR`. Matching only the obvious forms escalated an
+    # ordinary market condition into a hard API error — the kind of thing that
+    # reads as a broken integration in the middle of a demo.
+    lowered = (detail or "").lower()
+    if code in {"QUOTE_ERROR", "NO_ROUTE", "ResourceNotFound"} or any(
+        hint in lowered
+        for hint in ("no route", "no quotes", "no liquidity", "insufficient liquidity")
+    ):
         return NoRouteError(f"no Uniswap route: {detail or code}")
 
     return VenueAPIError(VENUE_KEY, response.status_code, code=code, detail=detail)

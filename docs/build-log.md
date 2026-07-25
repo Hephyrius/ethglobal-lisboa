@@ -940,6 +940,45 @@ path shapes and remembers the first that answers.
 
 ---
 
+## 2026-07-25 — Lane D: an ordinary market condition was escalating into a broken integration
+
+**What changed.** `_api_error` in `venues/uniswap/client.py` now classifies `ResourceNotFound` and
+three more phrasings as `NoRouteError`. Live tests quote a demo-realistic 1,000 USDC and skip cleanly
+on `NoRouteError`. `FEEDBACK.md` §5 added. 103 Lane D tests; all 10 live tests green.
+
+**Found by my own tests flaking, which is the useful part.** A live test failed with
+`HTTP 404 (ResourceNotFound) : No quotes available`. The temptation was to call it a transient
+network blip and move on. It was not: our classifier matched only `QUOTE_ERROR`, `NO_ROUTE` and
+bodies containing `"no route"` — the documented forms — so `ResourceNotFound` fell through to the
+generic `VenueAPIError` path. **For an autonomous agent that means "there is no route for this trade
+right now", an entirely normal market condition, surfaces as a hard API failure mid-tick.** The
+harness would record a failed action instead of a held one, and during a demo it reads as a broken
+Uniswap integration.
+
+**Then the more interesting bit: it is size-dependent.** Same pair, seconds apart —
+
+| Amount | Result |
+|---|---|
+| 1 USDC | `504` (a Cloudflare **HTML** page, not JSON) or `404 No quotes available` |
+| 100 USDC | `200`, routed |
+| 1,000 USDC | `200`, routed |
+
+Small trades are apparently not worth routing. Reasonable — but it presents as intermittent breakage
+rather than as "below minimum". Our live tests quoted **1 USDC** precisely because it seemed the most
+harmless amount to ask for repeatedly, and that choice manufactured flakes that looked like
+integration bugs. They now quote what the demo quotes.
+
+**Two smaller judgements.** Live tests `skip` rather than fail on `NoRouteError`: they exist to check
+*our integration*, not Uniswap's liquidity, and a suite that goes red on market conditions trains
+everyone to ignore red. And 5xx from that host returns HTML, so any body parsing needs a non-JSON
+fallback — ours had one, but only by luck of an earlier defensive `except ValueError`.
+
+**The general point.** A flaky test is evidence, not noise. This one was reporting a real defect in
+error classification *and* a real property of the API, and the instinct to re-run it until green
+would have shipped both to the demo.
+
+---
+
 ## 2026-07-25 — Lane D: my own R5 assertion would have passed on a dead position
 
 **What changed.** `venues/aqua/balances.py` gained `read_allowance`, `PositionHealth`, `read_health`
