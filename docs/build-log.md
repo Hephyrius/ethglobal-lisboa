@@ -632,6 +632,41 @@ so what is installed is what was audited here.
 
 ---
 
+## 2026-07-25 — Lane C: published to PyPI — Track 1's reusability gate is closed
+
+`curator-schema` 0.1.0 · `curator-data` 0.2.0 · `curator-mcp` 0.2.0 are live on PyPI, and
+**`uvx curator-mcp` works from a machine that has never seen this repo.**
+
+**Why this mattered more than its size suggests.** Graph Track 1 scores *Reusability & completeness*
+at **25%** and asks one question: reusable tooling, or part of our app? Our own `SKILL.md` told
+people to run `uvx curator-mcp`, and until now that command failed — the phase 2 plan called it a
+hard fail, correctly. A server only we can run is, functionally, part of our app.
+
+**The order is load-bearing and the mistake is permanent.** `curator-mcp` cannot resolve until
+`curator-data` exists, which cannot until `curator-schema` does, so the upload goes bottom-up. And a
+PyPI version number can **never** be re-uploaded — only superseded. That is why `publish.sh` dry-runs
+by default and installs the built wheels from `--find-links` into a clean 3.10 venv *before* it will
+upload anything: it proves the wheel metadata carries real dependency names rather than the local
+path hints, while a mistake is still free.
+
+**Verified the claim, not the upload.** "It uploaded" is not evidence. Three separate checks: all
+three names resolve on PyPI with the right versions; a clean Python 3.10 venv with no repo present
+installs `curator-mcp` *from PyPI alone* and lists all four tools; and `uvx curator-mcp` resolves the
+console script. `data/tests/test_published.py` — written earlier as a skipped acceptance criterion —
+**flipped green by itself**, which is exactly what it was for.
+
+**On publishing another lane's package.** `curator-schema` is Wave 0's, not Lane C's, and it sits at
+the bottom of the chain so it could not be skipped. `publish.sh` names this and prompts before
+uploading; a `--yes` flag was added for the non-interactive run rather than removing the prompt.
+
+**Rung 3 of the unblock-by-default ladder did its job.** When this was blocked on a token, writing
+the acceptance test cost ten minutes and meant the unblocking step needed no follow-up: whoever
+published got an immediate green signal instead of having to remember what to re-verify. Worth
+copying — the test also guards the partial-publish failure, where `curator-mcp` is up but its
+dependencies are not, so every name looks taken while the command is broken for everyone.
+
+---
+
 ## 2026-07-25 — Lane C phase 2: Chainlink, real prices, and x402 signature-verified
 
 Four items from the phase 2 brief. Three landed; the fourth is one funded wallet away.
