@@ -24,7 +24,20 @@ mile*, not *missing middle*.
 
 ## 2. Critical path — do these before any extension
 
-### 2.1 🔴 Nothing has ever been written on-chain by the agent
+### 2.1 ✅ CLOSED — the agent has written on-chain
+
+> **Resolved.** Five transactions sent, three of them fully autonomous ticks. The gate:
+> `0x789066d43ed0f54be903312dbc732a5c1b03ffb14dcdac0a5cd1e6f8ffa28a4b` — agent `0x7099…79C8` →
+> vault `0x0E2c…B5d1`, selector `0x34fcd5be` (`executeBatch`, 3 steps, atomic), 750 USDC →
+> 0.403383 WETH against a live Uniswap quote, 0.035% off. Full record in
+> [docs/handoff.md](../docs/handoff.md) § Lane B.
+>
+> **But the autonomous ticks exposed something the guards had not yet been proven against** —
+> `0x129da1a0` traded the wrong direction, `0x704f54a2` allocated 100% and breached two mandate
+> limits, `0xd10d560d` reverted. Validation layers 5 and 6 were written *after* those. Re-verifying
+> them is now item 3 of the local-first queue (§7), and it matters more than the original gate did.
+
+*Original analysis, kept because the reasoning still applies to anything else that looks green:*
 
 The single biggest risk, and it is easy to miss because every piece is independently green:
 
@@ -447,7 +460,63 @@ on a 10% "demo & clarity" criterion.
 
 ---
 
-## 7. What I would cut if time runs short
+## 7. Local-first work queue — finish everything offchain before touching mainnet
+
+**Almost nothing left actually requires a deployment.** 1inch accepts local forks in writing, and no
+other sponsor asks for mainnet at all. The fork is local, so "land a transaction" is a local task.
+Work this queue to the bottom; only then decide whether the mainnet run is worth the risk.
+
+### Group 1 — close the loop (Lane B, Lane D · fork only)
+
+The autonomous ticks so far produced three bad trades: `0x129da1a0` right diagnosis wrong direction,
+`0x704f54a2` allocated 100% and breached two mandate limits, `0xd10d560d` reverted on-chain.
+Validation layers 5 and 6 were built **after** those, so the guards exist and have never been shown
+catching the failures that motivated them. That gap is the most valuable thing on this list.
+
+1. **Lane B: commit the in-flight work.** `agent/model/prompts/curator.py` and `uv.lock` are
+   uncommitted; nothing else can be verified against a moving tree.
+2. **Lane D: request #32** — wire `UNISWAP_SLIPPAGE_BPS` into `get_venue`. One function. Until then
+   the golden mandate rejects every Uniswap plan and the workaround is a 300 bps demo mandate we
+   should not ship.
+3. **Lane B: re-run an autonomous tick and show layers 5/6 firing** on the wrong-direction and
+   full-allocation cases. This is the difference between "we built guards" and "the guards work",
+   and it is exactly what a judge probes when an agent holds a key.
+4. **Lane B: submit `createVault` on-chain once.** Never done — so the genesis → deploy step of the
+   demo narrative is unproven live.
+5. **Lane B + D: ship into Aqua from the real vault.** The 1inch centrepiece currently rests on Lane
+   D's relay, not the product. Their own note is careful: *"we cannot yet claim the strategy prices
+   correctly when executed."* Until an agent-driven ship lands, the 1inch story is a test harness.
+
+### Group 2 — no chain involved at all (Lane C)
+
+6. **Publish to PyPI, bottom-up:** `curator-schema` → `curator-data` → `curator-mcp`, then verify
+   `uvx curator-mcp` on a clean machine. 25% of the $5K track's score (§6), currently a hard fail,
+   and entirely independent of everything in Group 1 — run it in parallel.
+
+### Group 3 — submission artifacts (mostly human)
+
+7. **Uniswap Developer Feedback Form** — a stated requirement, needs a human.
+8. **Demo video, 2–4 minutes** — required by all three Graph tracks. Do it after Group 1, so the
+   run you record is the one with the guards working.
+9. **Flip the repo public** — required by Graph (all tracks) and Uniswap.
+
+### Deferred until the above is done
+
+Mainnet deploy · funded end-to-end cycle · Blockscout verification of mainnet contracts. Optional
+polish, not a gate.
+
+### Demo-environment gotcha, confirmed live
+
+Checking just now, `/api/ps` returned `{"models":[]}` — **the model had already been evicted.** A
+cold load is a ~2GB reload that reads as `ModelUnavailable`, i.e. "the server is down", and it fires
+precisely when the stack has been idle while someone explains the architecture. Warmed it with a
+per-request `keep_alive: 30m` and added `OLLAMA_KEEP_ALIVE=30m` to `.env` — but that variable is read
+by the **ollama server**, so it only takes effect on `ollama serve` restart. **Restart ollama with it
+exported before the demo**, and warm the model once immediately before presenting.
+
+---
+
+## 8. What I would cut if time runs short
 
 Revised after the compliance re-read (§6). **The mainnet run moved sharply down** — 1inch accepts
 local forks in writing, and no other sponsor asks for mainnet at all. It is credibility polish now,
