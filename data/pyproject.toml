@@ -4,7 +4,9 @@ name = "curator-data"
 # Bumping is not ceremony here — uv caches built wheels by name+version, so
 # reusing 0.1.0 serves a stale wheel missing the new modules and fails with a
 # confusing ModuleNotFoundError.
-version = "0.3.0"
+# 0.3.1: floors curator-schema at 0.2.0. 0.3.0 declared it unpinned and
+# resolved against a schema without SourceNote, so it cannot import.
+version = "0.3.1"
 description = "Pluggable market-data registry: mandate-named sources merged into a source-agnostic MarketSnapshot"
 readme = "README.md"
 license = { text = "MIT" }
@@ -19,7 +21,11 @@ classifiers = [
 # 3.10 floor matches curator-schema, and is also the MCP SDK's minimum.
 requires-python = ">=3.10"
 dependencies = [
-  "curator-schema",
+  # A FLOOR, not a bare name. An unpinned dependency lets the resolver pick any
+  # version, and it picked the stale `0.1.0` even after `0.2.0` was published -
+  # which is how `uvx curator-mcp` stayed broken after the schema was fixed.
+  # `SourceNote` and the `probability` FactKind both arrived in 0.2.0.
+  "curator-schema>=0.2.0",
   "httpx>=0.27",
   "pydantic>=2.7",
   "python-dotenv>=1.0",
