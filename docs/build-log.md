@@ -789,6 +789,66 @@ one file.
 
 ---
 
+## 2026-07-25 — Lane B: verified against the real fork, and what a real chain caught
+
+**What changed.** `Web3VaultClient` read Lane A's deployed vault on the anvil fork for the first
+time. It failed immediately, on a bug no stub could have surfaced. Fixed, tested, and the lane's
+second known gap is now closed. 166 tests green.
+
+**The bug: `bytes.hex()` has no `0x` prefix.** Reading `mandateHash()` returned raw bytes, and
+`.hex()` gave `d00e91f7…` where the frozen schema demands `^0x[a-fA-F0-9]{64}$`. `HexBytes.hex()`
+*has* included the prefix in some versions and not others, which is exactly why writing the
+conversion by eye and moving on is a mistake. There is now one `to_hex_string` helper that accepts
+bytes, bytearray, prefixed or unprefixed str, and always produces `0x`-prefixed lowercase — with a
+parametrized test over every representation. The stub client never caught it because the stub built
+its hex by string concatenation, so it was correct for the wrong reason.
+
+**Confirmed correct against the live contract:** ABI decoding of `holdings()`, ERC-20 symbol
+resolution (USDC/WETH), asset decimals, and share price. The deployed vault holds 2,500 USDC against
+2,500e18 shares and reports `share_price` exactly `1000000000000000000` — and a test now pins the
+formula against the golden fixture's own figure (50,000 USDC / 49,875 shares → `1002506265664160401`),
+so if any lane ever reads "share price" at a different scale, it fails here rather than in front of a
+depositor.
+
+**⚠️ Operational finding worth more than the bug: the vault's `AGENT_ROLE` is anvil account #1
+(`0x7099…79C8`), not account #0.** Reading state with the wrong key works perfectly; every
+`executeBatch` then reverts on an AccessControl check. That is a nasty failure shape — everything
+looks healthy until the first write. `AGENT_PRIVATE_KEY` must be
+`0x59c6995e…78690d` on the current fork, and `GET /vault/{addr}/state` reports the vault's expected
+`agent` so it can be compared against the address the harness logs at startup. Recorded in
+`agent/README.md`.
+
+**Two other fixes from having real infrastructure present.**
+
+- **`/health` reported green with no model pulled.** `ollama serve` answers happily with an empty
+  model list, so a server-is-up check passed right until a tick would die with `model not found`.
+  Health now probes whether the *configured* model is served, only in live mode. Name matching
+  tolerates tags in both directions (`qwen2.5:3b` ↔ `qwen2.5:3b-instruct-q4_K_M`) because a health
+  signal that cries wolf gets ignored on the night it is right.
+- **Action ids could be reused.** The cycle numbered actions from `journal.count()`, which counts
+  *parseable* records — so a truncated line, the exact case the journal tolerates by design, shrinks
+  the count and the next tick mints an id already in the feed. The dApp uses ids as list keys, so a
+  duplicate silently renders one decision over another. Ids now come from a line count, which cannot
+  go backwards and does not parse.
+
+**A self-inflicted one, recorded because the lesson generalizes.** The cross-lane integration tests
+called Lane C's registry, which reaches the live Graph gateway — ~12s of connection timeouts each
+without a credential. The suite went from 5s to 43s and silently acquired an internet dependency,
+contradicting the runs-anywhere property the whole lane is built for and which the macOS handoff
+depends on. Now gated behind `AGENT_TEST_NETWORK=1`; binding and port conformance stay unconditional
+because those are what catch a real integration break. **Rule of thumb for the other lanes: a test
+that touches another lane's *I/O* is a different kind of test from one that touches its *interface*,
+and only the second belongs in the default run.**
+
+**Coverage added while waiting on a 1.9 GB model download** — the journal's quiet failure modes (a
+process killed mid-write must cost one record, not a vault's whole history) and the mandate-hash
+properties a depositor's verification actually rests on (key order, unicode, and null-versus-absent
+must not move the hash; anything of substance must). The null case was a documented claim in
+`hashing.py` with nothing enforcing it — a client that serializes nulls would otherwise invalidate
+the on-chain commitment on a round trip.
+
+---
+
 ## 2026-07-25 — Lane B: bound to Lanes C and D for real, and stopped returning opaque 500s
 
 **What changed.** The late-binding seams are wired to what Lanes C and D actually published, proven

@@ -352,20 +352,29 @@ mandate store, hashing and amendment · the decision cycle with cooldown, slippa
 enforcement · the append-only journal · `VaultClient` on web3.py against Lane A's published ABIs ·
 live genesis. 78 tests green, ruff clean, no network needed to run them.
 
-**Not yet verified — read this before the demo:**
+**Verified against the real fork.** `Web3VaultClient.state()` reads Lane A's deployed vault
+`0x0E2c…B5d1` on the anvil fork correctly: 2,500 USDC, share price exactly `1e18`, ERC-20 symbols
+resolved, `mandate_hash` schema-valid. Reading a real contract is what caught the `bytes.hex()`
+prefix bug — `to_hex_string` now normalizes it, with tests.
 
-- **The live model path has never run against a real model.** There is no Ollama on the build
-  machine (`ollama` is not on PATH and nothing is listening on 11434). Every layer around the model
-  is tested via the scripted backend, and `ModelUnavailable` is handled correctly, but how often a
-  real `qwen2.5:14b-instruct` needs a retry is unmeasured. **First job for whoever has a GPU:**
-  `ollama serve && ollama pull qwen2.5:14b-instruct`, then `AGENT_MODE=live` and
-  `POST /vault/{addr}/tick`. Expect the retry counter to be non-zero; that is the honest cost and it
-  is displayed on purpose.
-- **`Web3VaultClient` has not been run against a live fork.** It is written against Lane A's
-  published ABI (`executeBatch`, `holdings`, `createVault`) but no anvil fork was up during this
-  lane's build. Live mode falls back to the stub client when `AGENT_PRIVATE_KEY` is unset or the RPC
-  is unreachable, and `GET /health` reports `degraded` when that happens — check it first.
-- **`VAULT_FACTORY_ADDRESS` must be set** for live genesis to deploy a real vault. Lane A's deploy
-  script writes the address into `deployments/base-fork.json`.
+> ⚠️ **`AGENT_PRIVATE_KEY` must be the account that actually holds `AGENT_ROLE`.** On the current
+> fork that is **anvil account #1** (`0x7099…79C8`, key
+> `0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d`) — *not* account #0. The
+> wrong key reads state fine and then reverts every `executeBatch` on an AccessControl check.
+> `GET /vault/{addr}/state` reports the vault's expected `agent`; compare it against the address the
+> harness logs at startup.
+
+**Still not verified — read before the demo:**
+
+- **The live model path has not run against a real model yet.** Ollama is now installed, but the
+  machine has no GPU (i5-8265U, DDR4-2400), so model choice is bandwidth-bound — see the build log
+  for the sizing. Every layer around the model is tested via the scripted backend and
+  `ModelUnavailable` is handled correctly, but the retry rate of a real small model is unmeasured.
+  Measure it rather than guessing: `uv run python -m agent.bench --model <tag> --runs 3`.
+- **No write path has been executed on-chain.** `state()` is verified; `executeBatch` and
+  `createVault` are not. They are written against Lane A's published ABI and go out as one atomic
+  batch, but the first real submission will be the first real submission.
+- **`VAULT_FACTORY_ADDRESS` must be set** for live genesis to deploy. Lane A's deploy script writes
+  it to `deployments/base-fork.json` — currently `0x0282…F302D`.
 
 Lane plan: [plans/2026-07-25-lane-b-agent.md](../plans/2026-07-25-lane-b-agent.md).

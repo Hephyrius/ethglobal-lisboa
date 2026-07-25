@@ -88,13 +88,13 @@ function Message({ message }: { message: ChatMessage }) {
     <div className={cn('flex gap-3', isUser && 'flex-row-reverse')}>
       <div
         className={cn(
-          'mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md border text-2xs font-medium',
+          'mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-sm text-2xs font-medium',
           isUser
-            ? 'border-line-bright bg-raised text-muted'
-            : 'border-agent/40 bg-agent/10 text-agent',
+            ? 'border border-line-bright bg-raised text-muted'
+            : 'bg-agent font-serif font-semibold text-white',
         )}
       >
-        {isUser ? 'You' : '◆'}
+        {isUser ? 'You' : 'C'}
       </div>
       <div
         className={cn(

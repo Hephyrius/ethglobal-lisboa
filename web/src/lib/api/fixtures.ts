@@ -98,7 +98,38 @@ const DERIVED_FEED: AgentActionT[] = buildFeed()
 
 export function fixtureDecisions(address: string): AgentActionT[] {
   const vault = normalizeAddress(address)
-  return DERIVED_FEED.map((action) => ({ ...action, vault }))
+
+  // Anchor the newest cycle a few minutes in the past. The golden fixtures are
+  // stamped 2026-07-25T14:05Z, and rendered raw at any earlier hour they read
+  // "in 11 hours" — which looks like a clock bug rather than sample data. The
+  // whole feed shifts by one constant so the intervals between cycles, which
+  // the reasoning refers to ("the last rebalance was 41 minutes ago"), stay
+  // exactly as authored.
+  //
+  // Safe to use the wall clock here: this runs inside a React Query queryFn,
+  // which is client-only, so it cannot desynchronise a server render.
+  const delta = Date.now() - Date.parse(DERIVED_FEED[0].timestamp) - 4 * 60_000
+
+  return DERIVED_FEED.map((action) => shiftAction(action, vault, delta))
+}
+
+function shiftAction(action: AgentActionT, vault: string, deltaMs: number): AgentActionT {
+  const shift = (iso: string) => new Date(Date.parse(iso) + deltaMs).toISOString()
+  return {
+    ...action,
+    vault,
+    timestamp: shift(action.timestamp),
+    snapshot: action.snapshot
+      ? {
+          ...action.snapshot,
+          taken_at: shift(action.snapshot.taken_at),
+          facts: action.snapshot.facts.map((fact) => ({
+            ...fact,
+            observed_at: shift(fact.observed_at),
+          })),
+        }
+      : undefined,
+  }
 }
 
 /**

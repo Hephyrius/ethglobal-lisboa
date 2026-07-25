@@ -8,15 +8,15 @@ type Size = 'sm' | 'md'
 
 const VARIANTS: Record<Variant, string> = {
   primary:
-    'bg-agent text-base font-semibold hover:bg-agent/90 disabled:bg-agent/40 disabled:text-base/60',
+    'bg-agent text-white font-medium hover:bg-agent/90 disabled:bg-agent/30 disabled:text-white/70',
   secondary:
-    'border border-line-bright bg-raised text-ink hover:border-muted/50 hover:bg-line disabled:text-faint',
+    'border border-line-bright bg-surface text-ink hover:border-muted/40 hover:bg-raised disabled:text-faint',
   ghost: 'text-muted hover:bg-raised hover:text-ink',
 }
 
 const SIZES: Record<Size, string> = {
   sm: 'h-8 px-3 text-xs',
-  md: 'h-10 px-4 text-sm',
+  md: 'h-9 px-4 text-sm',
 }
 
 export function Button({
@@ -37,8 +37,8 @@ export function Button({
       {...props}
       disabled={props.disabled || loading}
       className={cn(
-        'inline-flex items-center justify-center gap-2 rounded-lg transition-colors',
-        'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-agent/60',
+        'inline-flex items-center justify-center gap-2 rounded transition-colors',
+        'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-agent/50',
         'disabled:cursor-not-allowed',
         VARIANTS[variant],
         SIZES[size],

@@ -222,9 +222,9 @@ function TargetAllocations({
         {allocations.map((allocation) => (
           <div key={allocation.asset} className="flex items-center gap-2.5">
             <span className="w-14 shrink-0 font-mono text-2xs text-muted">{allocation.asset}</span>
-            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-line">
+            <div className="h-1.5 flex-1 overflow-hidden rounded-sm bg-raised">
               <div
-                className="h-full rounded-full bg-agent/70"
+                className="h-full rounded-sm bg-agent/75"
                 style={{ width: `${Math.round(allocation.weight * 100)}%` }}
               />
             </div>

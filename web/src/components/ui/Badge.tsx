@@ -3,13 +3,17 @@ import { cn } from '@/lib/cn'
 
 export type BadgeTone = 'neutral' | 'agent' | 'data' | 'ok' | 'warn' | 'bad'
 
+/**
+ * Squared chips rather than pills. Pill-shaped tags read as consumer crypto;
+ * a tight rectangle reads as a data label, which is what these are.
+ */
 const TONES: Record<BadgeTone, string> = {
   neutral: 'border-line-bright bg-raised text-muted',
-  agent: 'border-agent/30 bg-agent/10 text-agent',
-  data: 'border-data/30 bg-data/10 text-data',
-  ok: 'border-ok/30 bg-ok/10 text-ok',
-  warn: 'border-warn/30 bg-warn/10 text-warn',
-  bad: 'border-bad/30 bg-bad/10 text-bad',
+  agent: 'border-agent/25 bg-agent/[0.07] text-agent',
+  data: 'border-data/25 bg-data/[0.07] text-data',
+  ok: 'border-ok/25 bg-ok/[0.07] text-ok',
+  warn: 'border-warn/25 bg-warn/[0.07] text-warn',
+  bad: 'border-bad/25 bg-bad/[0.07] text-bad',
 }
 
 export function Badge({
@@ -27,7 +31,7 @@ export function Badge({
     <span
       title={title}
       className={cn(
-        'inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-2xs font-medium tracking-wide',
+        'inline-flex items-center gap-1.5 rounded border px-1.5 py-0.5 text-2xs font-medium tracking-wide',
         TONES[tone],
         className,
       )}

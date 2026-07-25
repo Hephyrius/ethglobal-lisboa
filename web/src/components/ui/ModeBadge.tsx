@@ -10,13 +10,17 @@ import { Badge, Dot } from './Badge'
  * The Graph disqualifies mocked data on the demo path, and the realistic way
  * that goes wrong is not deliberate — it is not noticing that the agent API
  * fell over and that the numbers on screen came from a fixture. This badge is
- * permanent, sits in the header on every page, and reads FIXTURES the moment
- * any query on the page falls back.
+ * permanent, sits in the header on every page, and reports the *worst* source
+ * feeding the page.
  *
- * If it is amber during the demo, stop and fix it.
+ * If it reads FIXTURES during the demo, stop and fix it.
  */
 export function ModeBadge() {
   const { mode, notes } = useDataMode()
+
+  // Nothing fetched yet (the landing page issues no API queries). Saying LIVE
+  // here would be a claim about data that was never loaded.
+  if (mode === 'unknown') return null
 
   if (mode === 'live') {
     return (
@@ -27,13 +31,25 @@ export function ModeBadge() {
     )
   }
 
+  if (mode === 'chain') {
+    return (
+      <Badge
+        tone="data"
+        title={`Read directly from the vault contract — the agent API at ${API_BASE} is unreachable. These numbers are real.`}
+      >
+        <Dot tone="data" pulse />
+        ON-CHAIN
+      </Badge>
+    )
+  }
+
   return (
     <Badge
       tone="warn"
       title={
         notes.length > 0
-          ? `Showing golden fixtures — ${notes.join(' · ')}`
-          : 'Showing golden fixtures from packages/schema/fixtures'
+          ? `Some data is from golden fixtures — ${notes.join(' · ')}`
+          : 'Some data on this page comes from packages/schema/fixtures'
       }
     >
       <Dot tone="warn" />
@@ -42,16 +58,32 @@ export function ModeBadge() {
   )
 }
 
+/** Notes are written as clause fragments so they read inside a tooltip list. */
+function sentence(note: string): string {
+  return note.charAt(0).toUpperCase() + note.slice(1)
+}
+
 /** Expanded explanation, for pages that have room to say why. */
 export function ModeNotice() {
   const { mode, notes } = useDataMode()
-  if (mode === 'live') return null
+  if (mode !== 'fixture' && mode !== 'chain') return null
+
+  if (mode === 'chain') {
+    return (
+      <div className="rounded border border-data/25 bg-data/[0.05] px-4 py-3 text-xs leading-relaxed text-data">
+        <span className="font-semibold">Read directly from the vault contract.</span> The agent API
+        at <span className="font-mono">{API_BASE}</span> is unreachable, so these figures come from
+        the ERC-4626 contract itself rather than from the agent. They are real.
+      </div>
+    )
+  }
 
   return (
-    <div className="rounded-lg border border-warn/25 bg-warn/[0.06] px-4 py-3 text-xs leading-relaxed text-warn/90">
-      <span className="font-semibold">Showing golden fixtures.</span>{' '}
-      {notes[0] ?? `The agent API at ${API_BASE} is unreachable.`} Every number on this page comes
-      from <span className="font-mono">packages/schema/fixtures</span>, not from a live source.
+    <div className="rounded border border-warn/25 bg-warn/[0.06] px-4 py-3 text-xs leading-relaxed text-warn">
+      <span className="font-semibold">Some data on this page is a golden fixture.</span>{' '}
+      {notes[0] ? `${sentence(notes[0])}.` : `The agent API at ${API_BASE} is unreachable.`} Anything not read
+      from the chain comes from <span className="font-mono">packages/schema/fixtures</span>, not
+      from a live source.
     </div>
   )
 }

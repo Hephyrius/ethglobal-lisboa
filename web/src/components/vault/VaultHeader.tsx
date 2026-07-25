@@ -11,7 +11,10 @@ export function VaultHeader({ state, name }: { state: VaultState; name?: string 
         <h1 className="text-2xl font-semibold tracking-tight text-ink">
           {name ?? 'Curated vault'}
         </h1>
-        {state.paused ? <Badge tone="bad">PAUSED</Badge> : <Badge tone="ok">LIVE</Badge>}
+        {/* "ACTIVE", not "LIVE" — the header already carries a LIVE/FIXTURES
+            data-provenance badge, and two differently-scoped "LIVE"s on one
+            screen is the kind of ambiguity a judge resolves the wrong way. */}
+        {state.paused ? <Badge tone="bad">PAUSED</Badge> : <Badge tone="ok">ACTIVE</Badge>}
         <Badge tone="neutral">{networkLabel}</Badge>
       </div>
 

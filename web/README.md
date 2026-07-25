@@ -86,11 +86,34 @@ which is why deposits work before `contracts/out/**` exists. Anything Lane A add
 
 ---
 
-## Fixture mode — read this before the demo
+## Data provenance — read this before the demo
 
-Every **read** falls back to `packages/schema/fixtures/` when the agent API is unreachable, errors,
-or returns something that does not match the frozen schema. The fallback is **loud, never silent**:
-each response carries the mode it came from and the header badge shows it on every page.
+Reads walk a three-rung ladder: **agent API → the chain → golden fixtures.**
+
+The middle rung matters. Lane B's `/vault/{addr}/state` is itself only reading the ERC-4626
+contract, so when that service is down there is no reason to drop all the way to invented numbers —
+total assets, share price and balances are one `eth_call` away and they are real. Only what the
+contract cannot know (decision history, the mandate behind `mandate_hash`) still needs a fixture.
+
+The header badge reports the **worst** source feeding the page:
+
+| Badge | Meaning |
+|---|---|
+| *(none)* | Nothing fetched yet — the landing page issues no API queries, and claiming LIVE there would assert something about data that was never loaded. |
+| `LIVE` | Agent API reachable and reporting itself live. |
+| `ON-CHAIN` | Agent API unreachable; these figures were read straight from the vault contract. Real. |
+| `FIXTURES` | Something on this page is a golden fixture. |
+
+**`GET /health` is folded into that aggregate, and this is the important part.** The agent API can be
+up, healthy and answering every route perfectly *while itself running in fixture mode* — every
+response schema-valid, every request a success, and the badge sitting on a confident green over
+numbers that came out of `packages/schema/fixtures` on the other side of the wire. That is the
+deepest version of exactly the trap the badge exists to prevent, so `mode: "fixture"` or
+`status: "degraded"` from `/health` turns the badge amber no matter how well the requests went.
+
+> **If the badge says `FIXTURES` during the demo, stop — something on screen is not live.**
+
+The fallback is **loud, never silent**: each response carries the mode it came from.
 
 > **If the badge says `FIXTURES` during the demo, stop — the numbers on screen are not live.**
 
@@ -163,13 +186,17 @@ Four details there carry the argument rather than decorate it:
    All conversion goes through [`lib/format/units.ts`](src/lib/format/units.ts), which stays in
    bigint until after the scaling divide. A silently wrong TVL is the worst bug this app could ship.
 2. **APY is a fraction** — `0.0432` renders as `4.32%`.
-3. **`share_price` is 1e18-scaled whole-assets-per-whole-share**, so `1002506265664160401` is
-   1.0025 USDC per share.
-4. **Shares and assets do not share a decimal scale.** OZ's ERC-4626 decimals offset gives the
-   fixture 6-decimal assets against 18-decimal shares, and `VaultState` carries only
-   `asset_decimals`. So the dashboard deliberately **does not** show "shares outstanding" — printing
-   it with an assumed scale would be wrong by 1e12. The depositor's own position is read from the
-   chain, where the scale is known.
+3. **`share_price` has no declared scale, so it is derived rather than trusted.** The Wave 0 fixture
+   reports it 1e18-scaled; the deployed vault's `convertToAssets(1 whole share)` returns a 6-decimal
+   asset amount. The two differ by 1e12, and guessing prints the headline number wrong by a factor
+   of a million. The dashboard computes it from `total_assets` and `total_supply` — whose scales
+   *are* specified — with share decimals read from the contract, and treats the reported field as
+   advisory. It therefore renders correctly under either convention. (Cross-lane request #18.)
+4. **Shares and assets do not share a decimal scale.** OZ's `_decimalsOffset() = 12` gives 6-decimal
+   assets against 18-decimal shares, and `VaultState` carries only `asset_decimals`. So the
+   dashboard deliberately **does not** show "shares outstanding" — printing it with an assumed scale
+   would be wrong by 1e12. The depositor's own position is read from the chain, where the scale is
+   known.
 5. **`committed_to_venue` flags encumbrance, not location.** The vault is sole custodian (Pattern 1);
    Aqua tracks virtual balances while the tokens stay put. The copy says so explicitly, because a
    judge who reads "committed" as "sent away" would conclude `totalAssets()` is broken when it is
@@ -182,13 +209,23 @@ Four details there carry the argument rather than decorate it:
    against *zod*. Parsing at import closes that half — and since the landing page is prerendered,
    any Python/TypeScript drift fails `pnpm build` rather than appearing in front of a judge.
 
-### Known limitation — the mandate viewer
+### The mandate viewer
 
-No frozen route returns a `Mandate` for an existing vault (`VaultState` has `mandate_hash` only), so
-the viewer reads what this browser saved at `POST /genesis/finalize` and otherwise shows the golden
-fixture **badged `SAMPLE MANDATE`**, with a note to verify against `mandate_hash`. Filed as
-cross-lane request #6; when it lands, `lib/mandate/store.ts` becomes a cache in front of the route
-instead of the only source.
+`GET /vault/{addr}/mandate` (cross-lane request #6, closed by Lane B) is the primary source. The
+local cache written at `POST /genesis/finalize` is kept as a second rung — it still covers a vault
+created in this browser while the API happens to be down — and the golden fixture is the last
+resort, shown **badged `SAMPLE MANDATE`** with a note to verify against `mandate_hash`. A 404 from
+that route is a normal answer, not a fault: it means no mandate is stored for a vault some other
+harness deployed.
+
+## Visual language
+
+Institutional finance, not crypto-native: warm paper ground, serif headings, hairline rules, tabular
+figures, tight corners, one sober accent, colour only where it carries meaning. The product's claim
+is that an agent can do a job real allocators do, so it should look like it belongs in that world
+rather than adopting the dark-with-neon convention of most DeFi front-ends. Colour tokens are
+semantic (`agent`, `data`, `ok`, `warn`, `bad`) rather than literal, so the palette can move without
+touching components. No webfont — the stacks resolve natively on macOS and Windows.
 
 ---
 

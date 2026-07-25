@@ -32,7 +32,17 @@ type SchemaOf<T> = ZodType<T, ZodTypeDef, unknown>
  * error rather than a white screen.
  */
 
-export type SourceMode = 'live' | 'fixture'
+/**
+ * Where the data on screen actually came from.
+ *
+ * `chain` is a genuine third state, not a shade of the other two: when the
+ * agent API is down we can still read the vault's own numbers straight from the
+ * ERC-4626 contract, and those are *more* authoritative than the API's, not
+ * less — the API is itself only reading the chain. Collapsing it into `fixture`
+ * would understate the truth; collapsing it into `live` would hide that the
+ * agent API is unreachable.
+ */
+export type SourceMode = 'live' | 'chain' | 'fixture'
 
 export type Sourced<T> = {
   data: T

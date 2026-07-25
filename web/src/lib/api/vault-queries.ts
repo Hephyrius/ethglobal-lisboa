@@ -2,10 +2,11 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { AgentAction, VaultState } from '@curator/schema'
-import { apiFetch, postJson, type Sourced } from './client'
+import { apiFetch, apiFetchStrict, postJson, FIXTURES_FORCED, type Sourced } from './client'
 import { fixtureDecisions, fixtureTick, fixtureVaultState } from './fixtures'
 import { routes, schemas } from './routes'
 import { useReportMode } from './mode-context'
+import { readChainVaultState } from '@/lib/chain/vault-state'
 
 /**
  * React Query bindings for the three vault routes. Each returns a `Sourced<T>`
@@ -16,15 +17,50 @@ import { useReportMode } from './mode-context'
 const VAULT_STATE_REFETCH_MS = 12_000
 const DECISIONS_REFETCH_MS = 15_000
 
+/**
+ * Vault state, down a three-rung ladder: **agent API → the chain → fixtures.**
+ *
+ * The middle rung matters. Lane B's `/vault/{addr}/state` is itself only
+ * reading the ERC-4626 contract, so when that service is down there is no
+ * reason to drop all the way to invented numbers — total assets, share price
+ * and balances are one `eth_call` away and they are real. Only what the
+ * contract cannot know (decision history, the mandate behind `mandate_hash`)
+ * still needs a fixture.
+ */
 export function useVaultState(address: string) {
   const query = useQuery({
     queryKey: ['vault-state', address],
-    queryFn: (): Promise<Sourced<VaultState>> =>
-      apiFetch({
-        path: routes.vaultState(address),
-        schema: schemas.vaultState.response,
-        fallback: () => fixtureVaultState(address),
-      }),
+    queryFn: async (): Promise<Sourced<VaultState>> => {
+      if (FIXTURES_FORCED) {
+        return { data: fixtureVaultState(address), mode: 'fixture', note: 'NEXT_PUBLIC_FIXTURES=1' }
+      }
+
+      let apiFailure: string
+      try {
+        const data = await apiFetchStrict({
+          path: routes.vaultState(address),
+          schema: schemas.vaultState.response,
+        })
+        return { data, mode: 'live' }
+      } catch (error) {
+        apiFailure = error instanceof Error ? error.message : 'agent API unavailable'
+      }
+
+      try {
+        // Re-validated through the frozen schema rather than trusted: the same
+        // bar every other source has to clear.
+        const onChain = schemas.vaultState.response.parse(
+          await readChainVaultState(address as `0x${string}`),
+        )
+        return {
+          data: onChain,
+          mode: 'chain',
+          note: `${apiFailure} — vault state read directly from the contract instead`,
+        }
+      } catch {
+        return { data: fixtureVaultState(address), mode: 'fixture', note: apiFailure }
+      }
+    },
     refetchInterval: VAULT_STATE_REFETCH_MS,
     enabled: Boolean(address),
   })

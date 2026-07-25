@@ -11,10 +11,14 @@ import { VaultHeader } from './VaultHeader'
 import { VaultStats } from './VaultStats'
 import { useVaultState } from '@/lib/api/vault-queries'
 import { useVaultMandate } from '@/lib/mandate/use-mandate'
+import { useShareDecimals } from '@/lib/chain/vault-contract'
 
 export function VaultDashboard({ address }: { address: `0x${string}` }) {
   const { data, isPending } = useVaultState(address)
   const { mandate, provenance } = useVaultMandate(address)
+  // Read rather than assumed — the share scale is what makes share price
+  // correct or wrong by 1e12. See VaultStats.
+  const shareDecimals = useShareDecimals(address)
 
   if (isPending || !data) {
     return <DashboardSkeleton />
@@ -30,7 +34,7 @@ export function VaultDashboard({ address }: { address: `0x${string}` }) {
 
       <Card>
         <CardBody className="py-5">
-          <VaultStats state={state} />
+          <VaultStats state={state} shareDecimals={shareDecimals.data} />
         </CardBody>
       </Card>
 
@@ -50,11 +54,10 @@ export function VaultDashboard({ address }: { address: `0x${string}` }) {
                 <Badge tone="warn">SAMPLE MANDATE</Badge>
               </div>
               <p className="mt-1.5 text-2xs leading-relaxed text-warn/90">
-                This browser did not create this vault, and no API route returns the mandate for an
-                existing one yet. Showing the golden fixture so the viewer is not blank — it is{' '}
+                The agent API has no mandate stored for this vault, and this browser did not create
+                it. Showing the golden fixture so the viewer is not blank — it is{' '}
                 <span className="font-medium">not</span> necessarily the mandate this vault was
-                deployed with. Verify against{' '}
-                <span className="font-mono">mandate_hash</span> above.
+                deployed with. Verify against <span className="font-mono">mandate_hash</span> above.
               </p>
             </div>
           ) : null

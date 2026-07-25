@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { readContract, waitForTransactionReceipt, writeContract } from '@wagmi/core'
 import { maxUint256 } from 'viem'
 import { erc20Abi, erc4626Abi } from './abis'
+import { readShareDecimals } from './vault-state'
 import { wagmiConfig } from './wagmi'
 
 /**
@@ -18,6 +19,23 @@ import { wagmiConfig } from './wagmi'
  * is a normal state during the build, not an error to hide: the panel reports it
  * plainly instead of rendering zeroes that look like a funded, empty vault.
  */
+
+/**
+ * Share decimals, read from the vault.
+ *
+ * Never assumed: OZ's `_decimalsOffset()` makes shares 18-decimal over a
+ * 6-decimal asset in this deployment, so the two scales differ by 1e12 and
+ * guessing wrong misprints every derived figure by that factor.
+ */
+export function useShareDecimals(vault: `0x${string}`) {
+  return useQuery({
+    queryKey: ['share-decimals', vault],
+    queryFn: () => readShareDecimals(vault),
+    retry: false,
+    staleTime: Number.POSITIVE_INFINITY,
+    enabled: Boolean(vault),
+  })
+}
 
 export type VaultPosition = {
   assetAddress: `0x${string}`

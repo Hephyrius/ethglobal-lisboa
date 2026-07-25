@@ -47,6 +47,21 @@ _SHARE_PRICE_SCALE = 10**18
 _GAS_LIMIT = 3_000_000
 
 
+def to_hex_string(value: bytes | str | None) -> str | None:
+    """Normalize a chain value to `0x`-prefixed lowercase hex.
+
+    Needed because `bytes.hex()` returns hex **without** the prefix, while
+    `HexBytes.hex()` has included it in some versions and not others. The frozen
+    schema requires `^0x[a-fA-F0-9]{64}$`, so an unprefixed digest fails
+    validation at the API boundary — which is exactly how this was found, by
+    reading a real deployed vault rather than a stub.
+    """
+    if value is None:
+        return None
+    raw = value.hex() if isinstance(value, bytes | bytearray) else str(value)
+    return "0x" + raw.removeprefix("0x").lower()
+
+
 class Web3VaultClient:
     """Reads vault state and submits plans, signing with the agent key."""
 
@@ -127,7 +142,7 @@ class Web3VaultClient:
             share_price=_share_price(total_assets, total_supply, asset_decimals, share_decimals),
             holdings=holdings,
             agent=agent,
-            mandate_hash=mandate_hash.hex() if isinstance(mandate_hash, bytes) else mandate_hash,
+            mandate_hash=to_hex_string(mandate_hash),
             block_number=block_number,
         )
 

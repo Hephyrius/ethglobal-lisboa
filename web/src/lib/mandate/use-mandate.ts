@@ -1,11 +1,14 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import type { Mandate } from '@curator/schema'
+import { apiFetchStrict, FIXTURES_FORCED } from '@/lib/api/client'
+import { routes, schemas } from '@/lib/api/routes'
 import { FIXTURE_MANDATE } from '@/lib/api/fixtures'
 import { getStoredMandate } from './store'
 
-export type MandateProvenance = 'local' | 'fixture'
+export type MandateProvenance = 'api' | 'local' | 'fixture'
 
 export type ResolvedMandate = {
   mandate: Mandate
@@ -13,31 +16,41 @@ export type ResolvedMandate = {
 }
 
 /**
- * Resolve the mandate to show for a vault.
+ * Resolve the mandate to show for a vault: **agent API → this browser's cache →
+ * fixture.**
  *
- * No frozen route returns a `Mandate` for an existing vault — `VaultState`
- * carries only `mandate_hash` (cross-lane request #6). So we read what this
- * browser saved at `POST /genesis/finalize`, and fall back to the golden
- * fixture, labelled as a fixture, so the mandate viewer is never simply blank.
+ * `GET /vault/{addr}/mandate` now exists (cross-lane request #6, closed by Lane
+ * B), so the authoritative copy comes from the harness that actually holds it.
+ * The local cache written at `POST /genesis/finalize` is kept as the second
+ * rung rather than deleted: it still covers a vault created in this browser
+ * while the API happens to be down, which is exactly the demo-time failure the
+ * whole app is built to survive. The fixture remains the last resort, and is
+ * labelled as one in the UI.
  *
- * Reading happens after mount because `localStorage` does not exist during the
- * server render; returning the stored value on first paint would be a hydration
- * mismatch.
+ * A 404 here is a normal answer, not a fault — it means no mandate is stored
+ * for that vault, which is true of any vault another harness deployed.
  */
 export function useVaultMandate(address: string): ResolvedMandate {
-  const [resolved, setResolved] = useState<ResolvedMandate>({
-    mandate: FIXTURE_MANDATE,
-    provenance: 'fixture',
+  const query = useQuery({
+    queryKey: ['vault-mandate', address],
+    enabled: Boolean(address) && !FIXTURES_FORCED,
+    retry: false,
+    staleTime: 60_000,
+    queryFn: () =>
+      apiFetchStrict({
+        path: routes.vaultMandate(address),
+        schema: schemas.vaultMandate.response,
+      }),
   })
 
+  // localStorage does not exist during the server render, so the cached copy is
+  // read after mount; returning it on first paint would be a hydration mismatch.
+  const [cached, setCached] = useState<Mandate | null>(null)
   useEffect(() => {
-    const stored = getStoredMandate(address)
-    setResolved(
-      stored
-        ? { mandate: stored, provenance: 'local' }
-        : { mandate: FIXTURE_MANDATE, provenance: 'fixture' },
-    )
+    setCached(getStoredMandate(address))
   }, [address])
 
-  return resolved
+  if (query.data) return { mandate: query.data, provenance: 'api' }
+  if (cached) return { mandate: cached, provenance: 'local' }
+  return { mandate: FIXTURE_MANDATE, provenance: 'fixture' }
 }

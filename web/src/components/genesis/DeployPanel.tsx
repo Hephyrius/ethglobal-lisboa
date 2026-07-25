@@ -107,7 +107,9 @@ function missingFields(issues: { path: (string | number)[] }[]): string[] {
     constraints: 'risk limits',
     permitted_data_sources: 'data sources',
     permitted_venues: 'execution venues',
-    version: 'a version',
+    // `version` is deliberately absent: it is a schema field the harness sets,
+    // not something the user can answer, so listing it as "still needed" would
+    // ask them for something they cannot provide.
   }
   const seen = new Set<string>()
   for (const issue of issues) {

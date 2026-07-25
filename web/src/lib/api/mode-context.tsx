@@ -17,8 +17,11 @@ import type { SourceMode, Sourced } from './client'
 
 type Report = { mode: SourceMode; note?: string }
 
+/** `unknown` = nothing has loaded yet, so we cannot characterise anything. */
+export type AggregateMode = SourceMode | 'unknown'
+
 type DataModeValue = {
-  mode: SourceMode
+  mode: AggregateMode
   notes: string[]
   report: (key: string, report: Report) => void
 }
@@ -39,11 +42,30 @@ export function DataModeProvider({ children }: { children: ReactNode }) {
   const value = useMemo<DataModeValue>(() => {
     const entries = Object.values(reports)
     const degraded = entries.filter((entry) => entry.mode === 'fixture')
+    const fromChain = entries.filter((entry) => entry.mode === 'chain')
+
+    // Severity order: fixture ≻ chain ≻ live. The page is only as trustworthy
+    // as its least-trustworthy panel, and erring toward the worse label is the
+    // safe direction to be wrong in.
+    const mode: AggregateMode =
+      entries.length === 0
+        ? // Nothing has loaded — the landing page issues no API queries at all.
+          // Claiming LIVE there would assert something about data that was
+          // never fetched, so the badge renders nothing instead.
+          'unknown'
+        : degraded.length > 0
+          ? 'fixture'
+          : fromChain.length > 0
+            ? 'chain'
+            : 'live'
+
     return {
-      // No reports yet means nothing has resolved — treat as live so the badge
-      // does not flash a false warning on first paint.
-      mode: degraded.length > 0 ? 'fixture' : 'live',
-      notes: [...new Set(degraded.map((entry) => entry.note).filter((n): n is string => !!n))],
+      mode,
+      notes: [
+        ...new Set(
+          [...degraded, ...fromChain].map((entry) => entry.note).filter((n): n is string => !!n),
+        ),
+      ],
       report,
     }
   }, [reports, report])
