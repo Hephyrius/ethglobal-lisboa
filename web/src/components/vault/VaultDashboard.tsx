@@ -10,7 +10,8 @@ import { decisionAnchor } from '@/components/decision/DecisionCard'
 import { PerformancePanel } from '@/components/performance/PerformancePanel'
 import { MandateView } from '@/components/mandate/MandateView'
 import { DepositWithdraw } from './DepositWithdraw'
-import { Holdings } from './Holdings'
+import { HoldingsDonut } from './HoldingsDonut'
+import { AquaPositions } from './AquaPositions'
 import { VaultHeader } from './VaultHeader'
 import { VaultStats } from './VaultStats'
 import { useVaultDecisions, useVaultState } from '@/lib/api/vault-queries'
@@ -68,7 +69,8 @@ export function VaultDashboard({ address }: { address: `0x${string}` }) {
       <div className="grid gap-4 lg:grid-cols-3">
         <DepositWithdraw vault={address} />
         <div className="lg:col-span-2">
-          <Holdings state={state} />
+          <HoldingsDonut state={state} />
+          <AquaPositions state={state} />
         </div>
       </div>
 
