@@ -19,8 +19,7 @@ from dataclasses import dataclass, field
 
 from .config import Settings
 from .facts import utcnow
-from .graph.gateway import GatewayClient
-from .sources.messari import DEX_QUERY, LENDING_QUERY
+from .sources.messari import MessariSource
 from .sources.protocols import ALL, Protocol
 from .sources.token_api import TokenApiSource
 
@@ -72,48 +71,49 @@ def check_credentials(settings: Settings) -> list[CheckResult]:
 async def check_protocol(protocol: Protocol, settings: Settings) -> CheckResult:
     """Query one subgraph for real and report what came back.
 
-    Distinguishes the three failure modes that need different fixes: a bad
-    credential (operator), a rejected query (our schema-family assumption is
-    wrong for this subgraph), and an unreachable gateway (network).
+    Drives `MessariSource` rather than issuing its own GraphQL, so this
+    verifies the code path the demo actually runs — including the DEX
+    schema-family fallback. A check that passes while the source would fail
+    (or vice versa) is worse than no check.
+
+    No asset filter: the question here is "did this subgraph answer", not
+    "does it list USDC".
     """
-    gateway = GatewayClient(settings)
-    entity = "markets" if protocol.family == "lending" else "liquidityPools"
-    document = LENDING_QUERY if protocol.family == "lending" else DEX_QUERY
+    name = f"{protocol.key} ({protocol.family})"
+    source = MessariSource(settings, protocols=[protocol])
     try:
-        data = await gateway.query(protocol.subgraph_id, document, {"first": 5})
-        rows = data.get(entity) or []
-        if not rows:
-            return CheckResult(
-                name=f"{protocol.key} ({protocol.family})",
-                ok=False,
-                detail=f"connected, but returned 0 {entity} - subgraph may be undeployed",
-            )
+        facts = await source.fetch([])
+        notes = source.drain_notes()
+        if not facts:
+            detail = notes[0] if notes else "connected, but produced no facts"
+            return CheckResult(name=name, ok=False, detail=detail)
+
+        kinds = sorted({f.kind for f in facts})
         sample = []
-        for row in rows[:3]:
-            if protocol.family == "lending":
-                token = (row.get("inputToken") or {}).get("symbol", "?")
-                tvl = row.get("totalValueLockedUSD", "?")
-                sample.append(f"{token}: ${float(tvl):,.0f} TVL" if tvl != "?" else str(token))
-            else:
-                symbols = "/".join(
-                    (t or {}).get("symbol", "?") for t in (row.get("inputTokens") or [])
-                )
-                tvl = row.get("totalValueLockedUSD", "0")
-                sample.append(f"{symbols}: ${float(tvl):,.0f}")
+        for fact in facts[:3]:
+            subject = fact.subject.market or fact.subject.token or "/".join(
+                fact.subject.pair or []
+            )
+            value = (
+                f"{fact.value * 100:.2f}%"
+                if fact.unit == "apy_fraction"
+                else f"${fact.value:,.0f}"
+                if fact.unit == "usd"
+                else f"{fact.value:.2f}"
+            )
+            sample.append(f"{subject} {fact.kind}: {value}")
+
         return CheckResult(
-            name=f"{protocol.key} ({protocol.family})",
+            name=name,
             ok=True,
-            detail=f"{len(rows)} {entity} returned",
+            detail=f"{len(facts)} facts ({', '.join(kinds)})"
+            + (f" - note: {notes[0]}" if notes else ""),
             sample=sample,
         )
     except Exception as exc:  # noqa: BLE001 - report every failure mode
-        return CheckResult(
-            name=f"{protocol.key} ({protocol.family})",
-            ok=False,
-            detail=f"{type(exc).__name__}: {exc}",
-        )
+        return CheckResult(name=name, ok=False, detail=f"{type(exc).__name__}: {exc}")
     finally:
-        await gateway.aclose()
+        await source.close()
 
 
 async def check_token_api(settings: Settings, symbol: str = "WETH") -> CheckResult:
