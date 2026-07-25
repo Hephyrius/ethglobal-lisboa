@@ -41,7 +41,7 @@ export function Header() {
         </nav>
 
         <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
-          <span className="hidden text-2xs text-faint lg:inline">{networkLabel}</span>
+          <span className="hidden text-xs text-faint lg:inline">{networkLabel}</span>
           <ModeBadge />
           <WalletButton />
         </div>
@@ -63,7 +63,7 @@ function NavLink({
     <Link
       href={href}
       className={cn(
-        'rounded px-2.5 py-1.5 text-xs transition-colors',
+        'rounded px-2.5 py-1.5 text-sm transition-colors',
         active ? 'bg-raised text-ink' : 'text-muted hover:bg-raised hover:text-ink',
       )}
     >

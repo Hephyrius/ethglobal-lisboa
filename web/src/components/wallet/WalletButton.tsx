@@ -44,9 +44,12 @@ export function WalletButton() {
   }
 
   return (
+    // Primary, not secondary: connecting is the one action the header is asking
+    // for. The connected state above stays secondary on purpose — it reports a
+    // status and offers disconnect, so it should not read as a call to action.
     <Button
-      size="sm"
-      variant="secondary"
+      size="md"
+      variant="primary"
       loading={pending}
       disabled={!hasConnector}
       onClick={() => void run(connectWallet)}
