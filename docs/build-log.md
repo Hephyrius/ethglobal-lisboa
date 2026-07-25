@@ -896,6 +896,53 @@ path shapes and remembers the first that answers.
 
 ---
 
+## 2026-07-25 — Lane D: my own R5 assertion would have passed on a dead position
+
+**What changed.** `venues/aqua/balances.py` gained `read_allowance`, `PositionHealth`, `read_health`
+and `assert_position_fillable`. `assert_position_live` is kept as a deprecated alias that now
+performs the *full* check. 24 tests on this module; 99 Lane D tests green.
+
+**The defect, and it was mine.** An hour earlier I shipped `assert_position_live()` built on
+`Aqua.safeBalances()` and told Lane B and Wave 0 (request 35) that it was "the R5 assertion".
+Lane B came back with request 39: **`safeBalances()` being non-zero does not prove a position is
+fillable**, so that assertion would pass on a dead position.
+
+They were right, and the evidence was my own earlier finding. Request 17 — which I wrote — says a
+ship with no approvals produces *"a position that looks healthy in every observable way (**non-zero
+`safeBalances`**, valid hash, no error, a successful tx) and is silently never fillable"*. I
+documented that failure mode accurately in the module docstring and then named the function after
+the weaker check anyway. The docstring even said a missing approval "produces none of these" — the
+correct statement sitting directly above an API that ignored it.
+
+**Why this was worse than having no check.** An assertion that passes on a broken position does not
+merely fail to help; it manufactures confidence in the 1inch centrepiece, and it does so in the one
+place where the failure is otherwise invisible. Lane B would have gated R5 on it and gotten a green
+rung over a position no taker could ever fill.
+
+**The fix.** Fillability is gated on the **ERC-20 allowance from the vault to Aqua**, because that is
+what Aqua pulls against on fill — zero in the broken case, at least the shipped amount in the good
+one. `PositionHealth` now separates four states that look alike from outside: never shipped
+(`None`), shipped-but-empty, **shipped-but-unapproved** (`dead` — perfect balances, nothing
+fillable), and correct. Each raises a distinct message, because they are three different bugs with
+three different fixes and a shared message sends people to the wrong one.
+
+Partial allowance is called out separately rather than lumped in with either: a position approved for
+half its shipped amount is not dead, it is *smaller than it appears*, and silently treating it as
+healthy would overstate the vault's market-making by the difference.
+
+**Why the old name was strengthened rather than removed.** `assert_position_live` had already been
+published to two lanes. Deleting it would break them; leaving it weaker than its name implies is
+precisely the failure being corrected. So it delegates to the full check — an existing caller gets
+strictly more safety without touching their code.
+
+**The lesson, which is about naming rather than Aqua.** The docstring described the failure mode
+correctly while the function name asserted something stronger than the code checked. Names are
+load-bearing: another lane imported this on the strength of `assert_position_live` and a one-line
+summary, not by reading the implementation. When a check cannot support its name, the name is the
+bug.
+
+---
+
 ## 2026-07-25 — Lane D: the agent refused every trade over one unset environment variable
 
 **What changed.** `UNISWAP_SLIPPAGE_BPS` wired from the environment through `VenueConfig` and

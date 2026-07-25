@@ -14,7 +14,9 @@ from venues import addresses
 from venues.abi import selector
 from venues.aqua.balances import (
     AQUA_SAFE_BALANCES,
+    ERC20_ALLOWANCE,
     PositionBalances,
+    assert_position_fillable,
     assert_position_live,
     read_position,
 )
@@ -115,20 +117,103 @@ class TestReadPosition:
         )
 
 
-class TestAssertPositionLive:
-    async def test_it_returns_the_balances_when_the_position_is_real(self):
-        rpc = _StubRpc(_encoded(3 * 10**18, 10_000 * 10**6))
-        balances = await assert_position_live(
+class _ScriptedRpc:
+    """Answers `safeBalances` then two `allowance` calls, in that order."""
+
+    def __init__(self, balances: str | Exception, allowances: tuple[int, int]) -> None:
+        self.balances = balances
+        self.allowances = allowances
+        self.calls: list[tuple[str, str]] = []
+
+    async def eth_call(self, to: str, data: str, **_: object) -> str:
+        self.calls.append((to, data))
+        if data.startswith("0x" + selector(AQUA_SAFE_BALANCES).hex()):
+            if isinstance(self.balances, Exception):
+                raise self.balances
+            return self.balances
+        # ERC-20 allowance, one per token in ship order.
+        index = sum(
+            1
+            for _, d in self.calls[:-1]
+            if d.startswith("0x" + selector(ERC20_ALLOWANCE).hex())
+        )
+        return "0x" + self.allowances[index].to_bytes(32, "big").hex()
+
+
+SHIPPED = (3 * 10**18, 10_000 * 10**6)
+
+
+class TestFillability:
+    """Cross-lane request 39: balances alone would pass on a dead position."""
+
+    async def test_the_exact_case_that_used_to_pass_now_fails(self):
+        """**The regression this whole change exists for.** Perfect balances,
+        valid hash, successful ship — and zero allowance, so every fill would
+        revert. The old balances-only assertion called this healthy."""
+        rpc = _ScriptedRpc(_encoded(*SHIPPED), allowances=(0, 0))
+        with pytest.raises(AssertionError, match="NOT fillable"):
+            await assert_position_fillable(
+                rpc,
+                maker=VAULT,
+                strategy_hash=STRATEGY_HASH,
+                token_a="WETH",
+                token_b="USDC",
+            )
+
+    async def test_one_missing_approval_is_enough_to_kill_it(self):
+        rpc = _ScriptedRpc(_encoded(*SHIPPED), allowances=(SHIPPED[0], 0))
+        with pytest.raises(AssertionError, match="NOT fillable"):
+            await assert_position_fillable(
+                rpc,
+                maker=VAULT,
+                strategy_hash=STRATEGY_HASH,
+                token_a="WETH",
+                token_b="USDC",
+            )
+
+    async def test_a_fully_approved_position_passes(self):
+        rpc = _ScriptedRpc(_encoded(*SHIPPED), allowances=SHIPPED)
+        health = await assert_position_fillable(
             rpc, maker=VAULT, strategy_hash=STRATEGY_HASH, token_a="WETH", token_b="USDC"
         )
-        assert balances.live
+        assert health.fillable
+        assert not health.dead
+
+    async def test_an_allowance_below_the_shipped_amount_is_flagged(self):
+        """Not dead, but smaller than it looks — a taker can be served up to the
+        allowance and no further."""
+        rpc = _ScriptedRpc(_encoded(*SHIPPED), allowances=(SHIPPED[0] // 2, SHIPPED[1]))
+        with pytest.raises(AssertionError, match="partially fillable"):
+            await assert_position_fillable(
+                rpc,
+                maker=VAULT,
+                strategy_hash=STRATEGY_HASH,
+                token_a="WETH",
+                token_b="USDC",
+            )
+
+    async def test_it_reads_the_allowance_from_the_token_not_from_aqua(self):
+        rpc = _ScriptedRpc(_encoded(*SHIPPED), allowances=SHIPPED)
+        await assert_position_fillable(
+            rpc, maker=VAULT, strategy_hash=STRATEGY_HASH, token_a="WETH", token_b="USDC"
+        )
+        allowance_calls = [
+            (to, d)
+            for to, d in rpc.calls
+            if d.startswith("0x" + selector(ERC20_ALLOWANCE).hex())
+        ]
+        assert len(allowance_calls) == 2
+        targets = {to.lower() for to, _ in allowance_calls}
+        assert targets == {addresses.WETH.lower(), addresses.USDC.lower()}
+        # spender must be Aqua — it is Aqua that pulls on fill, not SwapVM
+        assert all(addresses.AQUA[2:].lower() in d.lower() for _, d in allowance_calls)
 
     async def test_no_active_strategy_names_the_likely_cause(self):
         from venues.rpc import RpcError
 
-        rpc = _StubRpc(RpcError("eth_call", "execution reverted"))
+        rpc = _ScriptedRpc(RpcError("eth_call", "execution reverted"), allowances=(0, 0))
         with pytest.raises(AssertionError, match="no active strategy"):
-            await assert_position_live(
+            await assert_position_fillable(
                 rpc,
                 maker=VAULT,
                 strategy_hash=STRATEGY_HASH,
@@ -137,10 +222,23 @@ class TestAssertPositionLive:
             )
 
     async def test_an_empty_position_is_reported_differently_from_a_missing_one(self):
-        """Shipped-but-empty and never-shipped are different bugs with
-        different fixes, so they must not share a message."""
-        rpc = _StubRpc(_encoded(0, 0))
-        with pytest.raises(AssertionError, match="nothing can fill it"):
+        """Shipped-but-empty, never-shipped and shipped-but-unapproved are three
+        different bugs with three different fixes; they must not share a message."""
+        rpc = _ScriptedRpc(_encoded(0, 0), allowances=(0, 0))
+        with pytest.raises(AssertionError, match="nothing to trade against"):
+            await assert_position_fillable(
+                rpc,
+                maker=VAULT,
+                strategy_hash=STRATEGY_HASH,
+                token_a="WETH",
+                token_b="USDC",
+            )
+
+    async def test_the_old_name_now_performs_the_full_check(self):
+        """`assert_position_live` was published to other lanes before request 39.
+        Strengthening it beats leaving a weaker check behind a confident name."""
+        rpc = _ScriptedRpc(_encoded(*SHIPPED), allowances=(0, 0))
+        with pytest.raises(AssertionError, match="NOT fillable"):
             await assert_position_live(
                 rpc,
                 maker=VAULT,

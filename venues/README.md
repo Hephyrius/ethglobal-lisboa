@@ -38,35 +38,49 @@ plan  = await venue.plan(intent, vault_state)   # -> ExecutionPlan
 | `Venue.key` | `str` | Registry key. |
 | `Venue.aclose` | `async () -> None` | Closes the HTTP/RPC client. Call at shutdown. |
 
-### Verifying an Aqua position — `read_position` / `assert_position_live`
+### Verifying an Aqua position — `assert_position_fillable`
 
-**A successful `ship()` transaction is not evidence that the position exists.**
-`ship()` accepts almost anything and returns a valid strategy hash; the only
-observable that distinguishes a fillable position from an accounting entry is
-`Aqua.safeBalances()`.
+**Neither a successful `ship()` nor a non-zero `safeBalances()` proves a
+position can be filled.** A ship with no approvals produces perfect balances, a
+valid hash, no error and a successful transaction — and every fill against it
+reverts. Checking balances alone therefore *passes on a dead position*, which is
+worse than no check (cross-lane requests 17 and 39).
+
+The observable that decides it is the **ERC-20 allowance from the vault to
+Aqua**, because Aqua pulls against that allowance when a taker fills.
 
 ```python
-from venues.aqua import assert_position_live
+from venues.aqua import assert_position_fillable
 from venues.rpc import RpcClient
 
 async with RpcClient(rpc_url) as rpc:
-    balances = await assert_position_live(          # raises with a diagnosis
+    health = await assert_position_fillable(       # raises with a diagnosis
         rpc, maker=vault_address, strategy_hash=hash_from_ship_receipt,
         token_a="WETH", token_b="USDC",
     )
-    print(balances.describe())   # "3000000000000000000 0x42000000… / … (fillable)"
+    print(health.describe())
+    # "3000000000000000000/10000000000 shipped, … approved (fillable)"
 ```
 
 | | |
 |---|---|
-| `read_position(...) -> PositionBalances \| None` | `None` means docked, never shipped, or not covering those tokens — Aqua *reverts* rather than returning zeros, and that revert is an answer, not an error. |
-| `assert_position_live(...) -> PositionBalances` | Raises `AssertionError` naming the likely cause. For tests and the e2e suite. |
-| `PositionBalances.live` | Both sides non-zero. A one-sided curve cannot be traded against. |
+| `assert_position_fillable(...) -> PositionHealth` | **The R5 gate.** Raises unless a taker could actually be served. |
+| `read_health(...) -> PositionHealth \| None` | Non-raising form: balances **and** allowances. |
+| `read_position(...) -> PositionBalances \| None` | Balances only — *liveness*, not fillability. `None` means docked or never shipped; Aqua **reverts** rather than returning zeros, and that revert is an answer, not an error. |
+| `read_allowance(...) -> int` | The vault→Aqua allowance for one token. |
+| `assert_position_live(...)` | Deprecated alias — now performs the full check, so old callers are strengthened rather than broken. |
 
-Three states that look alike and are not: **not active** (`None`), **active but
-empty** (`live is False`), and **active and fillable**. A missing ERC-20
-approval produces *none* of these — it leaves balances intact and fails only at
-fill time, which is why the approval steps must never be dropped.
+Four states that look alike from outside and are not:
+
+| State | `read_position` | `fillable` | `dead` | Cause |
+|---|---|---|---|---|
+| never shipped / docked | `None` | — | — | wrong hash, or `dock()` already called |
+| shipped, empty | `live is False` | ✗ | ✗ | shipped with zero amounts |
+| **shipped, unapproved** | **looks perfect** | ✗ | **✓** | **approval steps dropped or reordered** |
+| shipped, approved | ✓ | ✓ | ✗ | correct |
+
+The third row is the dangerous one: it is indistinguishable from success on
+every observable except the allowance.
 
 Adapters are constructed lazily, so a mandate that never names Uniswap does not
 require `UNISWAP_API_KEY` to be present.
