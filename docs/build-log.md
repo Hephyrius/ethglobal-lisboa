@@ -257,6 +257,50 @@ localhost. Point `forge test` and `forge script` at the anvil endpoint, not at t
 
 ---
 
+## 2026-07-25 — Lane E: unblock-by-default in practice, and one gap it exposed
+
+Not a code change so much as an application of
+[unblock-by-default](../plans/2026-07-25-unblock-by-default.md). Worth logging because the plan's
+own thesis — that latency, not difficulty, is what has cost this build most — held up.
+
+**Took the shared agent API live rather than filing a request about it.** §5 lists "restart the
+agent API in live mode" as an *Anyone* item blocking R4 verification for everyone, and §2 makes it a
+standing authorization. It had been in fixture mode for hours. Restarted; `:8000` now reports live
+on all three seams. Also stopped the duplicate live instance I had been running on `:8001` — two
+live agents is its own confusion — and updated both my docs, which still told people to run a second
+agent and point the dApp at it. **The default config is now the live config**, which is what a
+teammate following the README actually gets.
+
+**Corrected a claim attributed to this lane.** §5's R8 row says "Lane E reports the vault redeploys
+to the same address" and leans on it to call the replay less disruptive than feared. I never
+reported that, and git has recorded exactly one deploy of `deployments/base-fork.json`, so there is
+no evidence either way. `Clones.clone()` uses CREATE, so the address holds only if the deployer's
+nonce and the deploy sequence are identical on the replayed fork; any extra deployer transaction
+shifts it. What I *did* say and stand behind is narrower: the dApp reads the deployments file, so a
+changed address is harmless here. Grepping the literal address across the tree bears that out —
+`web/` is clean, while two Lane B test files and the root README carry it. Reported without opening
+them.
+
+**The gap this exposed: a transaction can be real and still not be demonstrable.** Lane B closed R5
+with an agent-driven Aqua ship, and it is genuinely on-chain — `0x16eae7a2…`, status 1, block
+49077798, 8 logs, agent → vault, confirmed by receipt. But the decision journal holds 12 actions and
+**not one carries an `aqua` intent**; every intent is `uniswap:swap`. The ship was driven directly
+rather than through a tick, so it produced no `AgentAction` and the feed cannot show it. e2e R7 asks
+the feed to render R4's *and R5's* transactions: R4 is there, R5 is not.
+
+That distinction is the whole reason this lane exists. The 1inch centrepiece being *true* and being
+*visible to a judge* are different properties, and only the second one is what the decision feed
+delivers. Filed as #51 with the fix (one ship through `POST /vault/{addr}/tick`) and — per the
+plan's ladder — with what is already done meanwhile, so nobody is waiting on me: the renderer is
+proven against a fixture, verified down to the DOM.
+
+**R6 confirmed from the UI side.** The genesis-created vault renders with badge `LIVE`, no
+missing-contract notice, and **no `SAMPLE MANDATE` warning** — `GET /vault/{addr}/mandate` returns
+its own mandate. That is cross-lane request #6 paying off end to end: a vault this browser never
+created still shows the mandate it was actually deployed with, rather than a fixture standing in.
+
+---
+
 ## 2026-07-25 — Lane E: a mislabelled number, and surviving a cold restart
 
 Two fixes found by reading other lanes' findings and by thinking about what the e2e plan's R8 rung
@@ -1295,6 +1339,70 @@ speaks our schema and never touches the network. That is what lets the plan buil
 against recorded responses — the offline suite covers step ordering, unit conversion and allowlist
 enforcement with no quota and no market dependency — and it confines a future Uniswap API change to
 one file.
+
+---
+
+## 2026-07-25 — Lane B: unblock-by-default in practice — restarted a shared service, wrote two rungs
+
+**What changed.** Took two of the unblock plan's standing authorizations rather than filing requests:
+restarted the shared agent API, and wrote the R5/R6 e2e tests. Also corrected one of my own claims.
+240 agent tests, 25 e2e tests.
+
+### The shared API had been serving fixtures for hours
+
+`GET :8000/health` reported `mode: fixture` on all three seams, against
+`ollama:qwen2.5:14b-instruct` — **a model that is not even pulled.** Lane E's default
+`NEXT_PUBLIC_API_URL` points at 8000, so every browser read was fixture data and R4 could not be
+verified by anyone. §2 makes restarting a shared service a standing authorization precisely for this,
+so it was restarted live and announced rather than requested. Lane E's separate instance on 8001 was
+left alone.
+
+This is the failure the plan calls out as "presents as success": a fixture-mode API answers every
+request and validates every response, so nothing looks wrong until you check `/health`.
+
+### A correction to my own report
+
+I briefly reported `UNISWAP_SLIPPAGE_BPS` as unset and R4 therefore still blocked. **That was wrong,
+and the cause was my own test harness** — it passed the variable as an empty string, which overrode
+the value `.env` already had. Verified properly: a clean run produces a Uniswap plan at **50 bps**,
+which the golden mandate's 50 bps ceiling accepts. #32 works and R4 is unblocked by default.
+
+Recorded because the plan's §4 asks for exactly this — say so plainly and move. It also cost nothing
+except the minute it took to re-check, which is the argument for re-checking.
+
+`.env.example` had no entry for it, so one was added: unset, the API applies its own 250 bps default
+and every plan is rejected on slippage, which reads as *"the agent will not trade"* rather than as a
+missing variable.
+
+### R5 and R6 have tests now, and R5 is gated on the right thing
+
+Both rungs were proven on-chain earlier but had no test. Wave 0's `tests/e2e` tree was clean —
+nothing in flight — and ladder rung 3 says write the test rather than wait, so they were written
+following Wave 0's own conventions: public surfaces only, skip rather than fail when the stack is
+down, a fresh vault per run so the shared demo vault is never touched.
+
+**R6** asserts `vault.mandateHash() == the hash shown at genesis`, and **recomputes the hash
+independently from the mandate** — an API echoing a value it had invented would satisfy the equality
+and prove nothing. It also asserts the vault has bytecode, which is what distinguishes a real
+deployment from the stub client's plausible-looking address.
+
+**R5 is deliberately not gated on `safeBalances()`**, which is what the e2e plan asks for. Per #39:
+request #17 established that a ship with no approvals yields non-zero `safeBalances`, a valid hash
+and a successful transaction while being silently unfillable — so that check passes on precisely the
+failure it was written to catch. The test instead asserts the **vault→Aqua allowance** moved from 0
+to the shipped amounts and is bounded rather than infinite, plus the Pattern 1 property:
+`totalAssets()` and both token balances unchanged, because shipping moves no tokens. It builds the
+whole chain itself — fresh vault, deposit, Uniswap rotation, Aqua ship — so it proves the narrative
+rather than asserting historical state.
+
+**Verified the plan's own tooling check:** with the stack down the e2e suite reports **25 skipped, 0
+failed**, so a fresh clone running everything stays green.
+
+### Small thing worth not fixing yet
+
+`Web3VaultClient` never closes its `AsyncWeb3` provider, so a long e2e run prints `Unclosed client
+session` at exit. Harmless, but noise in a demo log. Filed as #46b rather than fixed mid-rung —
+finishing the rung was worth more than the warning.
 
 ---
 
