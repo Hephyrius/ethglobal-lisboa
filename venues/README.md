@@ -1,0 +1,286 @@
+# `venues/` — execution adapters (Lane D)
+
+Turns a `VenueIntent` into an `ExecutionPlan`: concrete calldata the vault
+executes. Two venues, deliberately non-overlapping.
+
+| Venue | Role | What it does |
+|---|---|---|
+| **`uniswap`** | taker | **Rotates what the vault holds.** "Volatility spiked → move to stables." |
+| **`aqua`** | maker | **Holds a position.** Posts the vault's existing tokens as passive liquidity and earns fees. |
+
+An Aqua maker is passive by construction — it cannot decide to change its
+composition. That is why both venues exist and why neither is decorative.
+
+> **This lane never touches `contracts/`.** It builds arbitrary calldata
+> off-chain; the vault exposes one generic allowlisted
+> `execute(target, value, data)` and never learns what a venue is.
+
+---
+
+## Public interface
+
+Everything crosses the boundary through the frozen `Venue` protocol in
+`packages/schema/python/curator_schema/ports.py`. **You do not need to import an
+adapter class.** Resolve by the key named in `Mandate.permitted_venues`:
+
+```python
+from venues import get_venue
+
+venue = get_venue("uniswap")          # or "aqua"
+plan  = await venue.plan(intent, vault_state)   # -> ExecutionPlan
+```
+
+| Function | Signature | Notes |
+|---|---|---|
+| `get_venue` | `(key: str, *, cached: bool = True) -> Venue` | Raises `UnknownVenueError` for an unregistered key. Cached by default so one connection pool is reused across ticks. |
+| `VENUES` | `tuple[str, ...]` | `("uniswap", "aqua")`. Offer these in the genesis UI; validate mandates against them. |
+| `Venue.plan` | `async (intent: VenueIntent, vault: VaultState) -> ExecutionPlan` | The only method the harness calls. |
+| `Venue.key` | `str` | Registry key. |
+| `Venue.aclose` | `async () -> None` | Closes the HTTP/RPC client. Call at shutdown. |
+
+Adapters are constructed lazily, so a mandate that never names Uniswap does not
+require `UNISWAP_API_KEY` to be present.
+
+### Intent → venue routing
+
+| Intent | Venue | Result |
+|---|---|---|
+| `SwapIntent` | `uniswap` | 3 steps: ERC-20 approve → Permit2 approve → router execute |
+| `AquaShipIntent` | `aqua` | 3 steps: approve token A → approve token B → `Aqua.ship()` |
+| `AquaDockIntent` | `aqua` | 1 step: `Aqua.dock()` |
+
+Routing an intent to the wrong adapter raises `UnsupportedIntentError` rather
+than returning an empty plan — a wiring bug should be loud.
+
+---
+
+## Data shapes
+
+**Input.** `VenueIntent` and `VaultState` exactly as defined in
+`packages/schema`. Two things this lane relies on you for:
+
+- **`SwapIntent.pct_of_holdings` is resolved against `vault.holdings`**, never
+  against a model-supplied balance. Populate `holdings` or percentage-based
+  swaps raise `VenueError`. (`amount_in` is used verbatim when set and wins over
+  the percentage.)
+- **`AquaDockIntent` needs `vault.aqua_strategies[].tokens`.** `dock()` takes a
+  token list that the intent does not carry, so the harness must record the
+  tokens at `ship()` time. Without it, docking raises rather than guessing.
+
+Tokens may be given as **symbols** (`"USDC"`, `"WETH"`, `"ETH"`) or as
+`0x` addresses. Symbols are what a model reliably produces; an unresolvable one
+raises `UnknownTokenError` rather than silently routing to the wrong token.
+
+**Output.** `ExecutionPlan`, schema-valid against
+`packages/schema/execution-plan.schema.json` (asserted in the test suite, not
+just against the pydantic mirror):
+
+```python
+ExecutionPlan(
+  venue="uniswap",
+  steps=[ExecutionStep(target="0x…", value="0", calldata="0x…", why="…"), …],
+  expected_effect="swap 1,000 USDC for ~0.31 WETH",
+  expected_slippage_bps=250,
+  quote_expires_at=datetime(...),   # Uniswap only
+)
+```
+
+Guarantees you can rely on:
+
+1. **Steps are ordered.** Approvals always precede the call that needs them.
+   Execute in order; a partially-applied plan is a real outcome to record.
+2. **Every `target` is checked against the agreed allowlist** before the plan is
+   returned (`PlanValidationError` otherwise), so an unknown target fails here
+   with a message naming the seam rather than as an opaque on-chain revert.
+3. **`value` is always a decimal string** (`"0"`), never hex — the Uniswap API
+   returns `"0x00"` and it is normalised at this boundary.
+4. **`expected_slippage_bps` is in basis points.** The Uniswap API speaks
+   percent (`2.5` = 2.5%); converted here. `None` means "unknown" — never `0`,
+   because zero would wrongly pass a strict mandate ceiling. Aqua reports `0`
+   legitimately: a maker posts liquidity, it does not cross a spread.
+5. **`quote_expires_at` is set whenever the plan embeds a router quote.** Do not
+   submit past it. Uniswap returns no expiry, so a conservative 45s TTL is
+   imposed locally (Base has 2s blocks; a minute-old route is ~30 blocks stale).
+
+---
+
+## Errors
+
+All inherit `VenueError`. Catch that to record a failed `AgentAction` and keep
+the decision loop alive.
+
+| Exception | Meaning |
+|---|---|
+| `NoRouteError` | No route for this trade. **An ordinary market condition, not a bug** — record and move on. |
+| `VenueAPIError` | Upstream HTTP failure. Carries `.status`, `.code`, `.detail`. |
+| `UnsupportedIntentError` | Wrong adapter for this intent kind. A wiring bug. |
+| `PlanValidationError` | The plan would revert (target off-allowlist, missing swap data). |
+| `ProgramBuilderUnavailableError` | SwapVM builder unreachable and no deployed address configured. |
+| `UnknownTokenError` | A symbol no adapter can resolve. |
+| `RpcError` | JSON-RPC failure. |
+
+---
+
+## Dependencies
+
+| | |
+|---|---|
+| **`UNISWAP_API_KEY`** | Required for the `uniswap` venue only. `uniswap_key` also accepted (the pre-Wave-0 name). |
+| **`ANVIL_RPC_URL` / `BASE_RPC_URL`** | Required for the `aqua` venue. Needs `eth_call` **state-override** support (anvil and Alchemy have it). Falls back to public Base. |
+| `AQUA_PROGRAM_BUILDER_ADDRESS` | Optional. Set it to use a deployed builder instead of the state-override path — needed only on endpoints without override support. |
+| Python | `eth-abi`, `eth-utils`, `httpx`, `pydantic` (root `venues` extra: `uv sync --all-extras`) |
+| Foundry | **Not required to use this lane.** Only to regenerate `aqua/program_builder.json`. |
+
+This lane depends on **no other lane's code** — only on `packages/schema`.
+
+---
+
+## Usage example
+
+```python
+import asyncio
+from curator_schema.models import SwapIntent, AquaShipIntent, VaultState, Holding
+from venues import get_venue
+
+vault = VaultState(
+    address="0xYourVault…", asset=USDC, asset_decimals=6,
+    total_assets="10000000000", total_supply="10000000000",
+    holdings=[Holding(token=USDC, symbol="USDC", balance="10000000000", decimals=6)],
+)
+
+async def main():
+    # Taker: rotate 30% of USDC holdings into WETH.
+    uniswap = get_venue("uniswap")
+    swap_plan = await uniswap.plan(
+        SwapIntent(token_in="USDC", token_out="WETH", pct_of_holdings=0.30), vault
+    )
+
+    # Maker: post what the vault holds as a 0.30% constant-product position.
+    aqua = get_venue("aqua")
+    ship_plan = await aqua.plan(
+        AquaShipIntent(tokens=["USDC", "WETH"],
+                       amounts=["1000000000", "300000000000000000"]), vault
+    )
+
+    for step in swap_plan.steps:      # execute in order via the vault
+        print(step.why, step.target, step.calldata[:12])
+
+asyncio.run(main())
+```
+
+---
+
+## Assumptions & invariants
+
+**The vault is sole custodian, and it cannot sign anything.** These two facts
+shaped every design decision here.
+
+- **The vault is a contract with no private key.** It therefore cannot produce
+  the EIP-712 signatures both venues nominally expect. Uniswap plans use
+  Permit2's signature-free `approve(token, spender, amount, expiration)`; Aqua
+  strategies set `useAquaInsteadOfSignature = true`, which makes the vault's
+  Aqua balances stand in for a signature. In Aqua's case that is also the mode
+  1inch scores higher — the constraint and the incentive point the same way.
+- **Capital never leaves the vault.** Aqua is a *registry*: it tracks
+  `balances[maker][app][strategyHash][token]` while tokens stay in the maker's
+  wallet. The vault is the maker, so shipping and docking move no capital,
+  `totalAssets()` keeps working off plain `balanceOf`, and Pattern 1 holds. A
+  conventional AMM LP position could not do this — which is exactly why Aqua is
+  load-bearing rather than cosmetic.
+- **Approvals are re-emitted on every plan** rather than checked first. A
+  redundant approve costs gas and always succeeds; a missing one reverts the
+  whole plan.
+- **Aqua approvals are for the exact shipped amount**, not `type(uint256).max`
+  (which 1inch's own tests use). A vault holds other people's money.
+- **The Aqua strategy salt is deterministic**, derived from vault state. A
+  random salt would make a retried tick open a *second* position instead of
+  rebuilding the same one.
+- **The strategy sorts its own tokens** (`MakerTraitsLib` requires
+  `tokenA < tokenB`; on Base **WETH `0x4200…` sorts below USDC `0x8335…`**,
+  which reads backwards). The adapter re-pairs amounts to the strategy's order,
+  so callers never need to know the rule.
+
+---
+
+## Vault allowlist — what Lane A must permit
+
+`execute()` reverts unless the target is allowlisted. Verified live, not
+assumed:
+
+| Address | What | Why |
+|---|---|---|
+| `0x6fF5693b99212Da76ad316178A184AB56D299b43` | **Uniswap router (Base)** | What `POST /swap` actually returns as `to`. **Not** the `0x2626664c…e481` in the golden fixture — allowlisting only that address reverts every swap. |
+| `0x000000000022D473030F116dDEE9F6B43aC78BA3` | Permit2 | Step 2 of every swap. |
+| `0x499943e74Fb0ce105688bEEe8ef2ABEc5d936d31` | Aqua | `ship()` / `dock()`. |
+| `0x8fdD04dbF6111437b44BbCa99c28882434E0958f` | SwapVM | Named as the Aqua `app`; not called directly. |
+| `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` | USDC | **Token approvals target the token contract.** |
+| `0x4200000000000000000000000000000000000006` | WETH | Same. |
+
+The last two matter: the golden fixture's step 1 is `USDC.approve(Permit2, …)`,
+targeting a *token*, not a venue. Filed as cross-lane requests 7 and 8. If Lane
+A prefers approvals through `approveVenue(token, spender, amount)` instead, say
+so — it is a one-line change in `uniswap/plan.py` and `aqua/calldata.py`.
+
+---
+
+## Layout
+
+```
+venues/
+  registry.py        get_venue() — resolve a mandate's venue key
+  addresses.py       verified Base addresses + the expected allowlist
+  config.py          env loading
+  abi.py             calldata encoding (selector + args)
+  rpc.py             eth_call, incl. state overrides
+  errors.py          the exception surface above
+  uniswap/
+    client.py        HTTP only — knows nothing about our schema
+    plan.py          responses -> ExecutionPlan — no network, fully testable offline
+    venue.py         UniswapVenue
+  aqua/
+    program.py       eth_call into the Solidity builder
+    calldata.py      ship() / dock() encoding
+    venue.py         AquaVenue
+    program_builder.json   committed artifact — no Foundry needed to consume
+    solidity/        standalone Foundry project (NOT contracts/)
+      src/SwapVMProgramBuilder.sol
+      build.sh       recompile + republish the artifact
+  tests/             37 tests; fixtures/ holds recorded API responses
+```
+
+**Why the SwapVM program is built in Solidity.** Programs are packed bytecode
+(`opcode ‖ argLength ‖ args`). Reimplementing that in Python would mean a second,
+unverified copy of 1inch's instruction format, and any drift yields a program
+that encodes cleanly and behaves wrongly with real money behind it. The builder
+imports 1inch's own `ProgramBuilder`, `MakerTraitsLib`, `Opcode` and
+`FeeArgsBuilder` unmodified, and Python treats the output as opaque bytes.
+
+---
+
+## Running the tests
+
+```sh
+uv sync --all-extras
+uv run pytest venues/tests            # offline; green with no creds
+uv run pytest venues/tests -m live    # real Uniswap API + a local node
+```
+
+Live tests skip themselves when the credential or node is absent, so a fresh
+clone is always green. For the Aqua live tests, any bare anvil works — the
+builder is pure, so no fork and no archive node is needed:
+
+```sh
+wsl -d Ubuntu-24.04 -- anvil --host 0.0.0.0 --port 8547
+```
+
+Solidity tests (needs Foundry, in `wsl -d Ubuntu-24.04`):
+
+```sh
+cd venues/aqua/solidity && forge test      # 13 tests
+sh build.sh                                # recompile + republish the artifact
+```
+
+> `pnpm install` here **must** use `--ignore-workspace`. Without it pnpm walks
+> up, finds the repo-root workspace, and installs the web app's dependencies
+> into this directory while ignoring its `package.json`. There is no `.npmrc`
+> key for this. `build.sh` already passes the flag.

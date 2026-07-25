@@ -100,6 +100,81 @@ path shapes and remembers the first that answers.
 
 ---
 
+## 2026-07-25 — Lane D: Aqua maker path, and why the program builder needs no deployment
+
+**What changed.** `venues/aqua/solidity/` (Foundry, 13 tests incl. a 256-run fuzz) and
+`venues/aqua/{program,calldata,venue}.py` plus `venues/rpc.py`. Both venues complete; 37 Python
+tests green, 7 against a live node/API. `venues/README.md` and `FEEDBACK.md` written.
+
+**Why the SwapVM program is compiled in Solidity and not encoded in Python.** Programs are packed
+bytecode — `opcode ‖ argLength ‖ args`, repeated. Encoding that in Python means maintaining a
+second, unverified copy of 1inch's instruction format; any drift produces a program that encodes
+cleanly, passes our own tests, and behaves wrongly with real money behind it. The builder imports
+1inch's `ProgramBuilder`, `MakerTraitsLib`, `Opcode` and `FeeArgsBuilder` unmodified from their
+published packages, and Python treats the result as opaque bytes. A Foundry test pins the exact
+byte encoding, so if 1inch renumber an opcode we fail in CI rather than at a live `ship()`.
+
+**The decision that removed a whole step from the critical path: no deployment.** The obvious design
+is "deploy the builder, record the address, `eth_call` it" — which needs a funded key, a deploy
+script, an address registry, and a redeploy whenever the contract changes. But the builder is
+`pure`. So instead we inject its runtime bytecode at a throwaway address via an `eth_call` **state
+override** and run it there. Nothing to deploy, nothing to fund, nothing to keep in sync.
+
+Two consequences worth stating. First, because the builder needs no Base state, it runs against a
+**bare anvil** — which is why this lane's live tests pass while `BASE_RPC_URL` (a blocking Wave 0
+credential) is still unset. Second, not every endpoint supports overrides, so
+`AQUA_PROGRAM_BUILDER_ADDRESS` still selects a deployed instance; the error message says exactly
+that rather than failing obscurely.
+
+*Alternative rejected:* committing a deploy script and address. More moving parts, and it puts a
+funded key on the path to building a pure function.
+
+**The artifact is committed (`venues/aqua/program_builder.json`, 3.3 KB).** `out/` is gitignored, so
+without this the Python side would require a Foundry toolchain just to *use* the lane. Lane B and
+the macOS teammate now consume `venues/aqua/` with no forge installed at all. `solidity/build.sh`
+regenerates it — reusable, documented tooling rather than a one-off (Rule 6).
+
+**Deviation from the master plan, deliberate.** §10 Lane D specifies composing `_dynamicBalancesXD`.
+`DynamicBalances` (opcode `0x91`) is **not wired into `AquaOpcodes` at all** — under Aqua the
+virtual balances come from the `ship()` amounts themselves, so the instruction would be dead weight
+or a revert. The program follows 1inch's own `AquaStrategyBuilders.buildProgram`: fee → `XYCSwap` →
+`Salt`, with the fee first because `Fee.sol` reverts if applied after swap amounts are computed.
+
+**Two bugs found while wiring this, the second more interesting than the first.** The sentinel
+override address contained a `U`, which is not a hex character, so the node rejected the call. But
+the *error classifier* then reported that malformed address as "this endpoint does not support state
+overrides" — because it matched on JSON-RPC code `-32602` alone, and both malformed-params and
+no-override-support share that code. Matching on a generic error code silently reclassified a real
+bug as a graceful-degradation path. Now the message must actually mention overrides. Worth
+remembering wherever we degrade on a broad exception: a fallback that swallows genuine errors is
+worse than no fallback.
+
+**Correctness detail with a test named after it.** `MakerTraitsLib` requires `tokenA < tokenB`, and
+on Base **WETH `0x4200…` sorts below USDC `0x8335…`** — the reverse of how "the quote asset comes
+first" reads. The strategy sorts its own tokens, so the adapter re-pairs amounts to *that* order
+rather than the caller's. Keeping the caller's order would pair 1,000 USDC with WETH: a position
+wrong by twelve orders of magnitude that would still ship successfully. My first draft of the
+Foundry test asserted the sort backwards and caught it.
+
+**Salt is derived from vault state, not random.** A random salt means a retried tick opens a
+*second* position rather than rebuilding the same one. Deterministic salting makes `plan()`
+idempotent, which matters because the harness may retry after a transport failure without knowing
+whether the first attempt landed.
+
+**Aqua approvals are for the exact shipped amount**, not `type(uint256).max` as 1inch's own tests
+use. A vault holds other people's money; an unbounded standing allowance is a worse default than
+re-approving on the next ship.
+
+**Dependency plumbing.** Solidity deps come from npm rather than forge submodules: it is how 1inch
+ship these (their `remappings.txt` points at `node_modules/`), and it avoids writing to the
+repo-root `.gitmodules` that Lane A's Foundry project would be touching concurrently. **`pnpm
+install` here needs `--ignore-workspace`** — without it pnpm walks up, finds the root workspace, and
+installs Lane E's web dependencies into this directory while ignoring the local `package.json`.
+There is no `.npmrc` key for it; learned by doing it wrong once. Documented in `build.sh`, the
+README and `.npmrc`.
+
+---
+
 ## 2026-07-25 — Lane D: Uniswap taker path live, and three findings that contradict our fixtures
 
 **What changed.** `/venues` scaffolded and the Uniswap adapter finished end to end: `config.py`,
