@@ -1252,6 +1252,53 @@ resolves.
 
 ---
 
+## 2026-07-25 — Wave 0 (phase 2): submission README, golden mandate, line endings
+
+**What changed.** Three items the lanes could not action themselves, plus an audit written up as
+[plans/2026-07-25-phase-2-hardening-and-extensions.md](../plans/2026-07-25-phase-2-hardening-and-extensions.md).
+
+**Golden mandate now grants `aave`** (request #19). `permitted_data_sources` is
+`["messari", "aave", "token_api"]`. Lane C could not make this change because
+`packages/schema/fixtures/` is frozen to lanes, and it is a one-word edit with real consequences:
+the decision feed goes from a single protocol to a genuine comparison — moonwell 12.74% APY on
+$14.5M against aave-v3 3.41% on $174.9M. "Highest yield is not the deepest market" is the reasoning
+a curator should visibly do, and the golden mandate's objective already says exactly that. Checked
+first that nothing pins the list: the only test reading it asserts `granted <= registry.available()`,
+which holds because Lane C registers `aave`. 414 tests green after.
+
+That this is a *config* change and not a code change is also the argument the Graph composability
+track asks us to make, so it is worth stating plainly rather than leaving implicit.
+
+**Root README rewritten as a submission document.** It was still the two-line placeholder. Uniswap's
+rules require the README to *"clearly point to the relevant contracts and lines of code"*, so every
+sponsor integration now links to specific files and line numbers, verified — all 29 link targets
+resolve. Also documents the Aqua zero-allowance finding, because a silently-unfillable position is
+the kind of thing a judge reading the code would otherwise have to discover themselves.
+
+**Line endings.** `.env` had CRLF, which made `scripts/anvil-fork.sh` emit `$'\r': command not
+found` when sourcing it. Harmless while values happened to parse, baffling the moment one carried a
+trailing `\r`. Converted to LF and verified clean under WSL bash.
+
+Worth recording that `git add --renormalize .` found **zero** tracked files to fix — `.gitattributes`
+landed early enough in Wave 0 that the committed tree never accumulated CRLF. The problem was
+confined to the gitignored `.env`, which renormalize cannot reach by definition. Checking was still
+the right move; the answer just happened to be "already clean".
+
+**Audit findings** (detail in the phase 2 plan). Ran the suites rather than trusting the status
+table: 76 Foundry tests including 7 against real Base state, 414 Python tests, 65 commits all
+pushed. The finding that matters is that **every piece of the write path is independently green and
+the chain has never been run end to end** — Lane A proved an agent approval in a Foundry test, Lane
+D proved Aqua ship from a test relay, Lane B verified reads only, Lane E never signed a deposit, and
+the one live tick returned `held`. 1inch asks to see on-chain token transfers in the demo, so that
+gate is currently unmet.
+
+Two environment gotchas that would have read as code failures under pressure: a stale `next dev`
+holds `.next/trace` and makes `next build` die with `EPERM`, and `BASE_RPC_URL` is currently the
+public `https://mainnet.base.org` rather than an archive endpoint — it works today and Lane D
+verified state overrides against it, but it is rate-limited under five lanes' load.
+
+---
+
 ## 2026-07-25 — Wave 0: interface freeze and scaffolding
 
 **What changed.** Repository foundation for five parallel instances: `CLAUDE.md`, the master build
