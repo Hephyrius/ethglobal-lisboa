@@ -3,7 +3,8 @@
 **Everything the agent can see.** A pluggable source registry that merges partial contributions from
 any number of providers into one source-agnostic `MarketSnapshot`.
 
-Two Graph adapters ship today. The registry is the product; they are its first two consumers.
+Four sources ship today — three over HTTP, one reading a contract on-chain. The registry is the
+product; they are its consumers.
 
 ---
 
@@ -168,22 +169,22 @@ on a real provider rather than a test double.
 The extension point. **One new file, one new line.**
 
 ```python
-# curator_data/sources/chainlink.py
+# curator_data/sources/pyth.py
 from curator_data.ports import BaseSource
 from curator_data.facts import FactBuilder
 
-class ChainlinkSource(BaseSource):
-    key = "chainlink"
+class PythSource(BaseSource):
+    key = "pyth"
     provides = ("price",)
-    description = "Chainlink price feeds on Base"
+    description = "Pyth price feeds on Base"
 
     async def fetch(self, assets):
         builder = FactBuilder(self.key)
         return [builder.usd("price", builder.subject(token=a), await self._read(a))
                 for a in assets]
 
-def make_chainlink_source(settings):
-    return ChainlinkSource(settings)
+def make_pyth_source(settings):
+    return PythSource(settings)
 ```
 
 ```python
@@ -191,14 +192,20 @@ def make_chainlink_source(settings):
 SOURCE_FACTORIES = {
     "messari": make_messari_source,
     "token_api": make_token_api_source,
-    "chainlink": make_chainlink_source,      # ← this line
+    "aave": make_aave_source,
+    "chainlink": make_chainlink_source,
+    "pyth": make_pyth_source,                # ← this line
 }
 ```
 
-Then name `"chainlink"` in a mandate's `permitted_data_sources`. Nothing else changes — not the
-registry, not the schema, not the agent, not the dApp. Because sources are selected by *capability*
+Then name `"pyth"` in a mandate's `permitted_data_sources`. Nothing else changes — not the registry,
+not the schema, not the agent, not the dApp. Because sources are selected by *capability*
 (`provides`), the new source immediately participates in price queries and in the MCP server's
-`get_token_price`.
+`get_token_price` — and it is cross-checked against the existing price sources for free.
+
+**This is not a hypothetical.** `aave` and `chainlink` were both added this way *after* the registry
+shipped, and `chainlink` is not even an HTTP API — it reads a contract over JSON-RPC. Neither
+required a change outside its own file plus one line here.
 
 **Adding a protocol to an existing source is even smaller** — one `Protocol(...)` line in
 `protocols.py`. That is the point of Messari standardized subgraphs: every lending market answers

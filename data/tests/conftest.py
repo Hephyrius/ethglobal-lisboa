@@ -21,17 +21,30 @@ import pytest
 from curator_data import config
 
 #: Anything that would let a test reach a real service.
+#:
+#: This list must cover **every** variable `Settings.from_env` reads, including
+#: fallbacks. Missing one is not a theoretical risk: `BASE_RPC_URL` was absent
+#: here, and because another lane's conftest loads `.env` into `os.environ` at
+#: import time, the Chainlink source reached the real Base RPC during a
+#: full-repo run. The result was a test that passed alone and failed in the
+#: suite — the worst kind, since it looks like flakiness rather than a gap.
 CREDENTIAL_VARS = (
     "GRAPH_API_KEY",
+    "GRAPH_MARKET_API_KEY",
     "TOKEN_API_KEY",
     "GRAPH_GATEWAY_URL",
     "TOKEN_API_URL",
     "X402_ENABLED",
     "X402_PRIVATE_KEY",
     "X402_GATEWAY_URL",
+    "X402_CHAIN",
     "DATA_CHAIN",
     "DATA_REQUEST_TIMEOUT_S",
     "DATA_SOURCE_TIMEOUT_S",
+    # RPC endpoints, all three of them — `rpc_url` falls back through the lot.
+    "DATA_RPC_URL",
+    "ANVIL_RPC_URL",
+    "BASE_RPC_URL",
 )
 
 
