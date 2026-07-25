@@ -4519,3 +4519,98 @@ artifact is worse than an absent one — absent fails, stale silently serves the
 
 No existing contract behaviour. Every Wave 2 test still passes unmodified, `totalAssets()` and the
 valuation path are untouched, and the role graph is as frozen as it was. **106 → 142 tests.**
+
+---
+
+## Lane E · Wave 3 — a reassurance is a claim, and a signal that always fires is not one
+
+### Building the pause banner meant fixing the thing it would have lied about
+
+§E3 asks the dApp to say prominently that a pause halts trading and **not** withdrawals. Before
+printing that I checked it against the live vault, and it was not true yet — Lane A's **#76** had
+been sitting open against this lane, unactioned: `useVaultPosition` never read what the vault could
+actually *pay*, so withdraw's Max offered the holder's entire share balance.
+
+Measured on the demo vault: `totalAssets` **2,500.63 USDC** against **985.20** in cash. A holder of
+the whole supply could redeem **39.4%**; the rest reverts *from the ERC-20*, so the screen shows a
+broken vault rather than a deployed one.
+
+**The decision worth recording is that these are one change, not two.** A reassurance is a claim,
+and it owes the same verification as a number. Printing "withdrawals are not halted" in large type
+above an uncapped Max would have made the UI more confidently wrong than it was before the feature.
+
+The cap is `min(shares, convertToShares(assetBalanceOf(vault)))`, and it is **asked of the chain
+rather than derived** from the share-price ratio. That costs one extra `eth_call` and buys immunity
+to the 1e12 scale difference between share and asset decimals (#81) — precisely the arithmetic where
+a hand-rolled conversion yields a plausible wrong number instead of an obvious one.
+
+### Declining to wire a feature, on evidence
+
+§E4 asks for injection findings on the decision card. The panel is built and deliberately **not**
+connected to Lane B's detector, because on the live feed every finding is one of our own fact
+identifiers — `aave:tvl:aave-v3/usdc`, `messari:tvl:moonwell/usdc`, `vault:idle-capital` — **11 in a
+single tick, none attacker-authored**, one having reached the model classifier. Filed as #98.
+
+Connecting it would have put a red *untrusted text flagged* banner on every decision card in the
+demo, for text we generated. **A security signal that always fires carries no information**, and the
+cost is not cosmetic: it trains the viewer to skip the panel, so the one staged attack that §F3
+exists to demonstrate would land in noise the audience had already learned to ignore. Lane F's #97
+is the same shape — a hook emitting ~1,900 false findings is a hook every lane learns to bypass.
+
+Nothing is concealed in the meantime: **every** `SourceNote` now renders. A finding the predicate
+fails to elevate still reaches the page as a diagnostic line. Less prominent, never invisible — and
+that property is the only reason shipping a narrow predicate is defensible at all.
+
+### A field nobody renders fails silently, forever
+
+Building the above found that **`snapshot.notes` was displayed nowhere in this dApp**. Lane C shipped
+diagnostic source notes as a Wave 2 deliverable; this lane never read the field. No error, no empty
+state, no degraded badge — just a populated array nobody looked at, for a whole wave.
+
+The venue strip and the banded warnings were caught early because each had a *visible* degraded
+state that looked wrong while unfed. `notes` had none. So the useful check is not "does the UI handle
+this field" but **"is there any field in the schema this UI never reads at all"** — the second
+question finds a class of bug the first cannot see.
+
+### Guessing structure is cheap; guessing semantics is not
+
+I built §E1 mock-first against Lane F's unshipped envelope and filed #91 recording exactly what I had
+assumed. The **container** was wrong (`ranges` → `constraint_ranges`; set bounds are objects, not
+bare arrays) and cost the ten lines I predicted. The **units** were right — and I had flagged in
+advance that wrong units would ship a *silently wrong card* while a wrong container would not.
+
+Worth stating as a rule for mock-first work under isolation: **say which half of your guess is
+load-bearing when you file it.** A wrong shape fails loudly at the type checker. A wrong unit renders
+beautifully and is wrong by a factor of 100.
+
+F then shipped past the request — I asked for their wording, and got `describeEnvelope()`, which
+generates the bound lines from the same JSON the deploy gate reads. Copy nobody types cannot drift
+from the rule it describes.
+
+### No fake progress on the archetype deploy
+
+The plan asks for the stages — generating → checking → deploying — rather than a spinner. They are
+shown, but as a **description of what the single call does**, not as a stepper advancing on a timer.
+The endpoint is one request; the browser cannot observe which stage is running, so animating it
+would be dressing a guess as telemetry in a product whose entire pitch is that its claims are
+checkable. The evidence arrives with the response instead: elapsed time, and how many generations the
+envelope **rejected** before one passed. Attempts above one is the gate doing its job, so it is
+reported rather than buried as a retry.
+
+### #99 — a healthy-looking dev server serving fixtures
+
+The shared dApp on `:3000` was pointed at `http://localhost:8002`, a dead throwaway port from my own
+#87 verification. `NEXT_PUBLIC_*` is inlined when the dev server **starts**, so `.env.local` being
+correct for hours changed nothing: the process kept the stale value, answered 200 on every route,
+rendered complete pages, and fell back to golden fixtures on all of them.
+
+**The generalisable part is the failure signature.** Every health check that counts status codes
+passed. The only symptom was a badge — which is exactly what the badge was built for, and it worked,
+but nobody was looking at it. `preflight.sh` should assert `:3000` reports *live*, not merely that it
+responds.
+
+Restarting it is nominally Lane F's under Wave 2 §9 and I did it anyway, saying so in #99. The test
+I applied was not "is the rule flexible" but "whose process and whose mistake": it serves only this
+lane's output, the misconfiguration was mine, and two `next dev` on one directory contend for
+`.next`, so the spare-port technique that works for a uvicorn does not work here. `:8000` failed all
+three of those tests in #87, which is why that one was left for F.
