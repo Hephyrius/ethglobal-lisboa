@@ -8,6 +8,64 @@ the hackathon window.
 
 ---
 
+## 2026-07-25 — Lane B: serving Lane D's manifest, and a finding that contradicts my own work
+
+### #73 · `GET /venues`, and the response model that is deliberately absent
+
+Lane D's capability manifest existed in Python and nothing served it, so Lane E's venue strip could
+only show the bare keys `/genesis/sources` returns. The route itself is four lines. The two
+decisions around it are the entry.
+
+**No `response_model`.** The manifest is Lane D's own shape and explicitly *not* part of the frozen
+interface — which is the whole reason they can extend it without filing a schema request. Declaring
+a pydantic model here would strip any key this lane did not anticipate, so the next field Lane D
+ships would vanish silently between two lanes that both believed they had delivered it. That failure
+has no symptom: no error, no log line, just a field that is missing in the browser and present in
+Python. A test round-trips a field nothing in this repo has ever heard of.
+
+**A 503, never `[]`.** Lane E had already built and tested a degraded state. An empty array is not a
+degraded state, it is the claim *"there are no venues"* — a different and false statement that would
+render as an empty strip. A status code is something the caller can branch on; a body they have to
+interpret is not.
+
+Resolved through a config ref like every other cross-lane seam, so this component still imports when
+Lane D's package is absent.
+
+### #76 · Lane A found the thing that argues against B1
+
+Lane A measured that a vault can be solvent and still unable to pay a withdrawal — `totalAssets()`
+15,000 with only 9,000 liquid after a rotation — and that the revert surfaces from the *token*, so
+on screen it reads as a broken vault rather than an illiquid one. The vault cannot unwind a position
+to fund an exit. **That makes `min_cash_pct` the only thing keeping the vault withdrawable: a soft
+off-chain guarantee, not a contract one.**
+
+This lands directly against §B1, which this lane shipped three hours earlier to push idle capital
+*out* to venues. Deploying to the floor maximises yield and minimises the buffer depositors leave
+through, and nothing in the system said so.
+
+**No new limit was added, and that is the point.** The floor was always enforced and `idle_fraction`
+already subtracts it, so the agent could never breach it. What was wrong was tone: B1's prompt
+implied that cash sitting at the floor was waste. It now states what the floor is for, that
+deploying down to it is a trade being made rather than free yield, and adds a tie-break — of two
+venues paying similarly, prefer the one you can unwind sooner.
+
+Worth recording as a pattern rather than an incident: **a lane's own recent work is the thing it is
+least likely to re-examine when a cross-lane finding arrives.** #76 was addressed to Lane E first
+and Lane B second, and the B half was one clause.
+
+### Two process notes
+
+The ASCII guard caught two em dashes in this session's new prompt text on the first run — five
+regressions now. It keeps earning its place because prompt prose is the one code path where a
+non-ASCII character is invisible until it reaches a Windows console.
+
+And a correction: after clearing #46/#50/#71 this lane wrote *"nothing open addressed to this lane"*
+in `active-work.md` without re-sweeping the table, and two rows had arrived while the work was in
+progress. In a six-lane repo the request table moves underneath you; a claim about it is only true
+at the moment it is read. Corrected in its own commit rather than quietly in the next one.
+
+---
+
 ## 2026-07-25 — Lane B: clearing the request queue, and two answers that were "no"
 
 Three open rows addressed to this lane. All three turned out to be about the same thing: what the
