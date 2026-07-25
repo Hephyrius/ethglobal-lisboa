@@ -430,8 +430,14 @@ For a real network, set `DEPLOY_NETWORK`, `DEPLOYER_PRIVATE_KEY`, `AGENT_ADDRESS
 
 ## Lane C — `data/` · the market data layer
 
-**Status: MVP + phase 2 extensions complete.** Four sources live, 180 tests, no chain contention —
-this lane never writes to the chain, so nothing here can disturb the fork.
+**Status: MVP + phase 2 extensions complete.** Four sources live, 182 tests, no chain contention —
+this lane never writes to the chain, so nothing here can disturb the fork, and it is independent of
+all nine e2e rungs.
+
+**A snapshot takes ~7.4s** (was 17s). The remainder is the Token API, which takes 8–10s per call on
+its own infrastructure regardless of page size; every other source answers in under a second. If a
+tick ever needs to be faster, dropping `token_api` from the mandate costs only the price
+cross-check — `chainlink` prices the same assets in ~0.5s.
 
 ### Run it
 
@@ -483,7 +489,12 @@ Full interface in [data/README.md](../data/README.md).
   failure, so it cannot break a demo.
 - **`uvx curator-mcp` does not work yet** — the packages are not on PyPI. `uv pip install
   ./data/curator_mcp` works today from a clone (verified in a clean 3.10 venv outside the repo).
-  Publishing needs a token: [data/PUBLISHING.md](../data/PUBLISHING.md) has the verified commands.
+  Publishing needs only a token: run **`./data/publish.sh`** for a dry run that builds all three and
+  proves they install from wheels alone, then `--publish` with `UV_PUBLISH_TOKEN` set. Note it also
+  publishes `curator-schema`, which is Wave 0's package.
+- **The golden mandate does not grant `chainlink`** (request #43), so a live tick prices WETH from a
+  single source and gets **no USDC price at all**. One word in `permitted_data_sources` fixes it at
+  no latency cost.
 - **Uniswap V3's subgraph is intermittent** — the gateway returns `bad indexers` or times out at
   ~20s. Not our code; it recovers on its own. Lending data does not depend on it.
 - **Prices only cover configured assets.** Chainlink feeds live in `sources/feeds.py`, token
