@@ -25,7 +25,13 @@ pnpm --filter @curator/web dev          # http://localhost:3000
 | `pnpm --filter @curator/web audit:deps` | supply-chain check — see [Dependencies](#dependencies) |
 
 **It runs with nothing else running.** No agent API, no anvil, no deployed contracts. Every screen
-falls back to the golden fixtures and says so. See [Fixture mode](#fixture-mode-read-this-before-the-demo).
+falls back to the golden fixtures and says so. See
+[Data provenance](#data-provenance--read-this-before-the-demo).
+
+**And the default config is the live config.** With the shared agent on `:8000` in live mode, those
+same two commands give a green `LIVE` badge and real data — no overrides. If the badge is amber,
+the agent came up in fixture mode; restarting it is a standing authorization, and the command is in
+[docs/handoff.md](../docs/handoff.md).
 
 ### Environment
 

@@ -50,7 +50,16 @@ time.
 
 ### Verified against the fully live stack
 
-Run with Lane B in live mode and the badge goes green `LIVE`. Confirmed end to end at 07:38:
+**The default config is the live config now.** The shared agent on `:8000` runs in live mode
+(cross-lane note #48), so `cp web/.env.example web/.env.local && pnpm --filter @curator/web dev`
+gives a green `LIVE` badge with no overrides. Re-verified at 10:05Z against 11 real cycles — 2
+executed, 3 held, 4 rejected, 2 failed — with zero fixture notices on the page.
+
+> Always check the badge rather than assuming. If the agent is restarted without `AGENT_MODE=live`
+> it will answer every request perfectly over invented data, and the badge going amber is the only
+> thing that tells you.
+
+Earlier end-to-end confirmation at 07:38, which still holds:
 
 - **Share price renders `1.00`** — derived from `total_assets`/`total_supply` with share decimals
   read from the contract, matching the chain exactly (`convertToAssets(1 share)` = `1000000`).
@@ -60,11 +69,13 @@ Run with Lane B in live mode and the badge goes green `LIVE`. Confirmed end to e
   is the composability argument made visible, from two different Graph sources (`messari`, `aave`).
 - Reasoning is real `qwen2.5:3b-instruct-q4_K_M` output, 132.3s for the cycle.
 
+If the agent ever comes back up in fixture mode, this is the command that fixes it — restarting a
+shared service is a standing authorization, not an intrusion
+([unblock-by-default](../plans/2026-07-25-unblock-by-default.md) §2):
+
 ```sh
-# live agent on its own port, so a fixture-mode instance is left undisturbed
 AGENT_MODE=live AGENT_DATA_REGISTRY=curator_data:build_registry \
-AGENT_VENUE_REGISTRY=venues:get_venue uv run uvicorn agent.api.app:app --port 8001
-NEXT_PUBLIC_API_URL=http://localhost:8001 pnpm --filter @curator/web dev
+AGENT_VENUE_REGISTRY=venues:get_venue uv run uvicorn agent.api.app:app --port 8000
 ```
 
 ### What is stubbed
