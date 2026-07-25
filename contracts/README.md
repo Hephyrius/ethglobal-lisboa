@@ -45,7 +45,14 @@ The deploy writes [`deployments/base-fork.json`](../deployments/base-fork.json).
 from that file. Never hardcode them.**
 
 > ⚠️ **Redeploying overwrites that file, and Lanes B, D and E read the vault address from it.** Only
-> redeploy if anvil has been restarted, and tell the other lanes when you do.
+> redeploy if anvil has been restarted, and tell the other lanes when you do. Reassuringly, a cold
+> deploy signed by anvil #0 at nonce 0 is deterministic and reproduces the same vault address, so a
+> clean replay is far less disruptive than it sounds.
+
+**A fork deploy deliberately ignores `DEPLOYER_PRIVATE_KEY`.** That variable is the funded *mainnet*
+wallet, so it has no balance on a fresh fork — reading it here meant merely sourcing `.env` turned a
+working deploy into a failing one. Fork deploys sign with anvil account #0; set
+`FORK_DEPLOYER_PRIVATE_KEY` if you need a different one.
 
 > **No `BASE_RPC_URL`?** `forge test` is unaffected — the unit suite is entirely mock-based and needs
 > no network. Only `test/fork/` and the fork deploy need one, and the fork tests skip themselves

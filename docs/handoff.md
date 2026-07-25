@@ -415,6 +415,18 @@ it is far kinder to a rate-limited endpoint.
   `StalenessCheckDisabledOnRealNetwork` if `priceMaxAge` is 0. An unrecognised `DEPLOY_NETWORK` is
   treated as real, so a typo fails safe. If it stops you, it is doing its job; set the env vars.
 
+### Two traps in the deploy path, both now closed (worth knowing they existed)
+
+- **A fork deploy ignores `DEPLOYER_PRIVATE_KEY` on purpose.** It is the funded *mainnet* wallet, so
+  it has zero balance on a fresh fork — reading it meant the deploy worked in a bare shell and failed
+  the moment `.env` was sourced, which every `scripts/*.sh` does. Fork deploys sign with anvil #0;
+  `FORK_DEPLOYER_PRIVATE_KEY` overrides.
+- **A failed deploy used to corrupt `deployments/base-fork.json`.** `forge script` simulates the whole
+  script before broadcasting, so an unfunded deployer reached the publish step, wrote the file, and
+  *then* failed — leaving four lanes reading a factory address with no bytecode. There is now a
+  balance precheck that reverts with `DeployerCannotPayGas` before anything is written. If you ever
+  add a side effect to that script, put it after the validation for the same reason.
+
 ### If you need to redeploy
 
 ```sh
@@ -426,6 +438,10 @@ DEPLOY_NETWORK=base-fork forge script script/Deploy.s.sol \
 from it.** The currently-deployed vault `0x0E2c0e50E67B96C9C401C94e111a3DBD00DEB5d1` holds real
 positions those lanes assert against. Only redeploy if anvil has been restarted, and tell the other
 lanes when you do.
+
+Good news for a cold replay (the e2e plan's R8): a deploy signed by anvil #0 at nonce 0 is
+deterministic, so on a fresh fork it recreates the vault **at the same address** — verified on a
+scratch fork. The addresses in `deployments/base-fork.json` should not change at all.
 
 For a real network, set `DEPLOY_NETWORK`, `DEPLOYER_PRIVATE_KEY`, `AGENT_ADDRESS` and
 `GUARDIAN_ADDRESS` to funded, non-anvil values; `priceMaxAge` defaults to 3600 automatically. Then
