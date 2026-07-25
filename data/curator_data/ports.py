@@ -47,6 +47,19 @@ class BaseSource(ABC):
     #: One line, human-facing. Shown wherever a user picks data sources.
     description: str = ""
 
+    #: Which `Fact.kind`s this source can contribute.
+    #:
+    #: Declared so callers can ask for a *capability* rather than naming a
+    #: provider: "who has prices?" resolves through the registry instead of
+    #: through a hardcoded list somewhere else in the codebase. That is what
+    #: keeps "adding a source is one line" true — a new price source starts
+    #: serving price queries the moment it is registered, with no second edit.
+    #:
+    #: An empty tuple means "unknown", and such a source is consulted for every
+    #: capability. Erring toward including it costs one call that returns
+    #: nothing; erring the other way silently drops a source the user granted.
+    provides: tuple[str, ...] = ()
+
     def __init__(self) -> None:
         self._notes: list[str] = []
 
@@ -83,7 +96,11 @@ class BaseSource(ABC):
         return None
 
     def describe(self) -> dict[str, str]:
-        return {"key": self.key, "description": self.description}
+        return {
+            "key": self.key,
+            "description": self.description,
+            "provides": ", ".join(self.provides),
+        }
 
     def __repr__(self) -> str:  # pragma: no cover - debugging affordance
         return f"<{type(self).__name__} key={self.key!r}>"

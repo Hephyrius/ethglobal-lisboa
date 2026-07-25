@@ -87,6 +87,7 @@ class TokenApiSource(BaseSource):
     """USD spot prices for permitted assets."""
 
     key = "token_api"
+    provides = ("price",)
     description = (
         "USD spot prices and token metadata from The Graph's Token API. Prices the "
         "assets a mandate permits so the agent can value non-base holdings."

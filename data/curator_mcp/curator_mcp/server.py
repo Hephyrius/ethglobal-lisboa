@@ -23,10 +23,12 @@ from __future__ import annotations
 import logging
 import os
 
+from mcp.server.fastmcp import FastMCP
+
 from curator_data.config import Settings
 from curator_data.queries import (
-    MARKET_SOURCES,
-    PRICE_SOURCES,
+    MARKET_KINDS,
+    PRICE_KINDS,
     errors_as_dicts,
     pivot_markets,
     pivot_pools,
@@ -35,7 +37,6 @@ from curator_data.queries import (
 )
 from curator_data.sources.protocols import ALL as ALL_PROTOCOLS
 from curator_data.sources.tokens import known_symbols
-from mcp.server.fastmcp import FastMCP
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +78,7 @@ def build_server(settings: Settings | None = None) -> FastMCP:
         utilization, and the fact ids backing it.
         """
         symbols = [a.upper() for a in (assets or DEFAULT_ASSETS)]
-        snapshot = await snapshot_for(symbols, sources=MARKET_SOURCES, settings=resolved)
+        snapshot = await snapshot_for(symbols, kinds=MARKET_KINDS, settings=resolved)
         return {
             "markets": [row.to_dict() for row in pivot_markets(snapshot)],
             "pools": [row.to_dict() for row in pivot_pools(snapshot)],
@@ -97,7 +98,7 @@ def build_server(settings: Settings | None = None) -> FastMCP:
         where. Rates are current supply-side (lender) APYs.
         """
         symbol = asset.strip().upper()
-        snapshot = await snapshot_for([symbol], sources=MARKET_SOURCES, settings=resolved)
+        snapshot = await snapshot_for([symbol], kinds=MARKET_KINDS, settings=resolved)
         rows = [r for r in pivot_markets(snapshot) if r.market.upper() == symbol]
         return {
             "asset": symbol,
@@ -131,7 +132,7 @@ def build_server(settings: Settings | None = None) -> FastMCP:
         may be constrained.
         """
         symbol = asset.strip().upper()
-        snapshot = await snapshot_for([symbol], sources=MARKET_SOURCES, settings=resolved)
+        snapshot = await snapshot_for([symbol], kinds=MARKET_KINDS, settings=resolved)
         rows = [r for r in pivot_markets(snapshot) if r.market.upper() == symbol]
 
         with_apy = [r for r in rows if r.supply_apy is not None]
@@ -164,7 +165,7 @@ def build_server(settings: Settings | None = None) -> FastMCP:
         be priced; `known_symbols` in the response lists them.
         """
         token = symbol.strip().upper()
-        snapshot = await snapshot_for([token], sources=PRICE_SOURCES, settings=resolved)
+        snapshot = await snapshot_for([token], kinds=PRICE_KINDS, settings=resolved)
         found = prices(snapshot).get(token)
         return {
             "symbol": token,

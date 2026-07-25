@@ -77,6 +77,33 @@ class Registry:
                 out.append({"key": key, "description": f"unavailable: {exc}"})
         return out
 
+    def sources_providing(self, *kinds: str) -> list[str]:
+        """Keys of sources that can contribute any of `kinds`.
+
+        Capability lookup, so a caller asks "who has prices?" rather than
+        hard-coding a provider name. A newly registered price source joins
+        price queries with no edit anywhere else — which is the property that
+        makes the one-line extension claim true rather than aspirational.
+
+        A source that declares no capability is included: consulting it costs
+        one call that may return nothing, while excluding it would silently
+        drop a source the mandate granted.
+        """
+        if not kinds:
+            return self.available()
+        wanted = set(kinds)
+        out: list[str] = []
+        for key in self.available():
+            try:
+                source = self._resolve(key)
+            except Exception as exc:  # noqa: BLE001 - unavailable, not fatal
+                logger.debug("cannot inspect source %s: %s", key, exc)
+                continue
+            provides = tuple(getattr(source, "provides", ()) or ())
+            if not provides or wanted & set(provides):
+                out.append(key)
+        return out
+
     def register(self, key: str, factory: SourceFactory) -> None:
         """Add a source at runtime.
 
@@ -122,7 +149,7 @@ class Registry:
         )
 
         facts: list[Fact] = []
-        for key, (source_facts, source_error, notes) in zip(known, results):
+        for key, (source_facts, source_error, notes) in zip(known, results, strict=True):
             if source_error is not None:
                 errors.append(source_error)
             errors.extend(SourceError(source=key, message=note) for note in notes)

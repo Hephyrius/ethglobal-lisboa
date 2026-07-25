@@ -22,10 +22,13 @@ from curator_schema.models import Fact, MarketSnapshot
 from .config import Settings
 from .registry import Registry, build_registry
 
-#: Sources that contribute lending/DEX market facts, and price facts. Named
-#: here so callers ask for a capability rather than hard-coding a provider.
-MARKET_SOURCES = ("messari",)
-PRICE_SOURCES = ("token_api",)
+#: Capabilities, expressed as `Fact.kind`s from the frozen schema — never as
+#: provider names. `snapshot_for` resolves these through the registry, so a
+#: newly registered source that declares `provides = ("price",)` starts serving
+#: price queries with no edit to this file. Naming providers here instead would
+#: quietly make "adding a source is one line" false.
+MARKET_KINDS: tuple[str, ...] = ("yield", "tvl", "utilization", "liquidity")
+PRICE_KINDS: tuple[str, ...] = ("price",)
 
 
 @dataclass
@@ -181,15 +184,25 @@ def errors_as_dicts(snapshot: MarketSnapshot) -> list[dict]:
 async def snapshot_for(
     assets: list[str],
     *,
-    sources: tuple[str, ...] | list[str] = MARKET_SOURCES,
+    kinds: tuple[str, ...] | list[str] = MARKET_KINDS,
+    permitted: list[str] | None = None,
     settings: Settings | None = None,
     registry: Registry | None = None,
 ) -> MarketSnapshot:
-    """Snapshot from the named sources, closing the registry if we made it."""
+    """Snapshot from whichever sources can supply `kinds`.
+
+    `permitted` is the mandate's `permitted_data_sources`. When given it is
+    intersected with the capability lookup, so access control still wins: a
+    source that could answer but was not granted is never consulted. When
+    omitted — the MCP server's case, where there is no mandate — every capable
+    registered source is used.
+    """
     own = registry is None
     reg = registry or build_registry(settings)
     try:
-        return await reg.snapshot(list(sources), list(assets))
+        capable = reg.sources_providing(*kinds)
+        selected = [k for k in capable if k in set(permitted)] if permitted else capable
+        return await reg.snapshot(selected, list(assets))
     finally:
         if own:
             await reg.aclose()
@@ -203,6 +216,6 @@ __all__ = [
     "prices",
     "errors_as_dicts",
     "snapshot_for",
-    "MARKET_SOURCES",
-    "PRICE_SOURCES",
+    "MARKET_KINDS",
+    "PRICE_KINDS",
 ]

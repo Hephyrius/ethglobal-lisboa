@@ -26,3 +26,17 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["curator_data"]
+
+# Ruff resolves the nearest pyproject.toml per file, so this scopes to /data
+# only and leaves the root config (py312) alone for every other lane.
+#
+# Why 3.10 rather than the repo's 3.12: the MCP server is a separately
+# installable product and its SDK's floor is 3.10, so this package must not use
+# 3.11+ APIs. That rules out `datetime.UTC` (UP017) and the `TimeoutError`
+# alias (UP041), which the py312 target would otherwise demand.
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

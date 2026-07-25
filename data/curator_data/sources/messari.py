@@ -109,6 +109,7 @@ class MessariSource(BaseSource):
     """Lending yields, TVL, utilization and DEX liquidity from Messari subgraphs."""
 
     key = "messari"
+    provides = ("yield", "tvl", "utilization", "liquidity")
     description = (
         "Lending market yields, TVL and utilization plus DEX pool liquidity, via "
         "Messari standardized subgraphs on The Graph. One query shape spans every "
@@ -162,7 +163,7 @@ class MessariSource(BaseSource):
         )
 
         facts: list[Fact] = []
-        for protocol, result in zip(self._protocols, results):
+        for protocol, result in zip(self._protocols, results, strict=True):
             if isinstance(result, BaseException):
                 self.note(f"{protocol.key}: {type(result).__name__}: {result}")
                 continue

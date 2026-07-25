@@ -11,12 +11,13 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from curator_schema.models import Fact, MarketSnapshot
+from curator_schema.ports import DataSource, DataSourceRegistry
+
 from curator_data.config import Settings
 from curator_data.facts import FactBuilder
 from curator_data.ports import BaseSource
 from curator_data.registry import Registry
-from curator_schema.models import Fact, MarketSnapshot
-from curator_schema.ports import DataSource, DataSourceRegistry
 
 SETTINGS = Settings(source_timeout_s=1.0)
 
@@ -111,6 +112,63 @@ async def test_only_sources_named_in_the_mandate_are_consulted():
 async def test_available_lists_registered_keys():
     registry = Registry({"b": lambda _s: StubSource("b"), "a": lambda _s: StubSource("a")})
     assert registry.available() == ["a", "b"]
+
+
+# ── capability lookup ─────────────────────────────────────────────────────
+
+
+class Capable(BaseSource):
+    def __init__(self, key: str, provides: tuple[str, ...]):
+        super().__init__()
+        self.key = key
+        self.provides = provides
+
+    async def fetch(self, assets: list[str]) -> list[Fact]:
+        return []
+
+
+async def test_sources_are_selected_by_capability_not_by_name():
+    """A new price source must join price queries with no edit elsewhere."""
+    registry = Registry(
+        {
+            "market_feed": lambda _s: Capable("market_feed", ("yield", "tvl")),
+            "price_feed": lambda _s: Capable("price_feed", ("price",)),
+            "newcomer": lambda _s: Capable("newcomer", ("price",)),
+        },
+        SETTINGS,
+    )
+
+    assert registry.sources_providing("price") == ["newcomer", "price_feed"]
+    assert registry.sources_providing("yield") == ["market_feed"]
+
+
+async def test_a_source_declaring_no_capability_is_consulted_anyway():
+    """Unknown capability must not silently drop a granted source."""
+    registry = Registry({"mystery": lambda _s: StubSource("mystery")}, SETTINGS)
+    assert registry.sources_providing("price") == ["mystery"]
+
+
+async def test_capability_lookup_with_no_kinds_returns_everything():
+    registry = Registry({"a": lambda _s: Capable("a", ("price",))}, SETTINGS)
+    assert registry.sources_providing() == ["a"]
+
+
+async def test_mandate_permissions_still_win_over_capability():
+    """Capable but not granted means not consulted."""
+    from curator_data.queries import snapshot_for
+
+    granted = StubSource("granted", [_fact("granted", "aave-v3", 0.04)])
+    ungranted = StubSource("ungranted", [_fact("ungranted", "other", 0.09)])
+    registry = Registry(
+        {"granted": lambda _s: granted, "ungranted": lambda _s: ungranted}, SETTINGS
+    )
+
+    snapshot = await snapshot_for(
+        ["USDC"], kinds=("yield",), permitted=["granted"], registry=registry
+    )
+
+    assert ungranted.calls == []
+    assert {f.source for f in snapshot.facts} == {"granted"}
 
 
 # ── degradation: a source must never crash the decision loop ──────────────
