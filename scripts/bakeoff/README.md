@@ -55,8 +55,12 @@ uv run python -m scripts.bakeoff --models qwen2.5:3b-instruct-q4_K_M --trials 3
 
 | Model | Valid 1st attempt | Mandate-compliant | Right shape | **Authored a ship** | Invented facts | Median latency |
 |---|---|---|---|---|---|---|
-| `qwen2.5:3b-instruct-q4_K_M` | 67% | 100% | 42% | ❌ | 0 | 56s |
-| `grok-4.20-0309-non-reasoning` | 58% | 100% | 58% | ❌ | 0 | **2s** |
+| `qwen2.5:3b-instruct-q4_K_M` | 67% | 100% | 42% | ❌ *(see below)* | 0 | 56s |
+| `grok-4.20-0309-non-reasoning` | 58% | 100% | 58% | ❌ *(see below)* | 0 | **2s** |
+
+**The ship column is a fact about this scenario, not about the model.** Both models have the
+capability; the live journal has three 3B-authored ships that executed on chain. Read the next
+section before quoting that ❌ anywhere.
 
 > ⚠️ **The two rows are not a fair A/B and must not be quoted as one.** Lane B rewrote the decision
 > prompt between them (Wave 3 added the `enter` action and the untrusted-text fencing), so the 3B's
@@ -64,22 +68,39 @@ uv run python -m scripts.bakeoff --models qwen2.5:3b-instruct-q4_K_M --trials 3
 > the validity rate is not.** Re-run the 3B if a like-for-like number is ever needed — the harness
 > is one command, which is why it is a harness.
 
-### The finding that changes what we may claim
+### What this scenario measures, and what it does not
 
-**Neither model authored an Aqua ship. Nought for six, on a scenario built to invite one, with the
-intent shape in the prompt.**
+Neither model authored an Aqua ship here — nought for six, on a scenario built to invite one. Grok
+returned `supply` on the idle leg 3/3, which is a defensible answer and is exactly why
+`balanced-ship` accepts it, and is not a ship.
 
-Wave 2 recorded this as a small-model limitation and the honest sentence was *"the 3B authors
-lending and rebalancing decisions but cannot author a market-making one."* That sentence was
-measuring the wrong thing. **A frontier hosted model, given the same scenario, does not author one
-either** — Grok returned `supply` on the idle leg three times out of three. It is a *defensible*
-answer, which is exactly why `balanced-ship` accepts it; it is not a ship.
+**Do not read that as "the model cannot author a ship." It is false, and the live journal disproves
+it.** Checked against the running vault rather than inferred:
 
-So the gap is not about model size. It is about the ship intent being harder to author than the
-alternatives from the prompt as written — and the submission should say that, rather than implying a
-bigger model would close it. **The claim that stands is unchanged and was always the true one: the
-vault ships and docks real Aqua positions in SwapVM/Aqua mode, verified on-chain. The vault does not
-market-make on the model's initiative.**
+| Action | Backend | Retries | On-chain |
+|---|---|---|---|
+| `act_000036` | `qwen2.5:3b` | **0** | executed |
+| `act_000046` | `qwen2.5:3b` | 2 | executed |
+| `act_000049` | `qwen2.5:3b` | 1 | executed |
+| `act_000020` | `scripted` | 0 | executed — **not model-authored**, and the one the audit rightly caveated |
+
+**The 3B has authored three Aqua ships that executed on chain, one of them first try.** So the
+Wave 2 sentence — *"the 3B cannot author a market-making decision"* — was wrong, and this harness
+came within one commit of hardening it into a submission claim.
+
+The difference is the harness, not the model. This bake-off measures **single-shot authoring at
+temperature 0 on one synthetic book**; the live loop **retries**, and two of the three ships above
+needed a retry. A scenario that disagrees with production is evidence about the scenario.
+
+So the defensible statements are narrow ones:
+
+- **`balanced-ship` does not reproduce whatever the live book supplies**, and should be treated as a
+  scenario bug rather than as a capability finding until it does. Filed as such.
+- The ship intent is **harder to author single-shot** than `swap` or `supply`, across two very
+  different models. That is a real signal about the prompt, and it is the reason the retry budget
+  exists.
+- What the submission may say is what Lane D's on-chain work and this journal both support: **the
+  vault ships and docks real Aqua positions in SwapVM/Aqua mode, and a model authored those ships.**
 
 ### ⚠️ This column was wrong until Wave 3, and the way it was wrong is worth knowing
 
