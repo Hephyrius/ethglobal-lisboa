@@ -126,10 +126,29 @@ avoid, and it holds a key.
 |---|---|---|---|
 | `messari` | `yield`, `tvl`, `utilization`, `liquidity` | Messari standardized subgraphs — lending markets and DEX pools on Base | ✅ Moonwell verified live (~15% USDC APY on $14.5M). Uniswap V3 works but its indexers are slow/intermittent |
 | `aave` | `yield`, `tvl`, `utilization` | Aave V3 on Base, via **Aave's own** subgraph schema | ✅ verified live (3.41% USDC APY on $174.9M, 0.84 utilization) |
-| `token_api` | `price` | The Graph Token API — USD spot prices | ⚠️ needs a **separate** Graph Market JWT; `GRAPH_API_KEY` is rejected with 401 |
+| `chainlink` | `price` | Chainlink feeds, read **on-chain** over JSON-RPC | ✅ verified live (WETH $1,858.98, USDC $0.9999). **Needs no credential** |
+| `token_api` | `price` | The Graph Token API — prices derived from executed DEX swaps | ✅ verified live (WETH $1,857.95). Needs its own Graph Market JWT, *not* `GRAPH_API_KEY` |
 
 All subgraph IDs live in [`curator_data/sources/protocols.py`](curator_data/sources/protocols.py),
 including a list of candidates **rejected after live testing**, so nobody re-adds them.
+
+### Two independent price sources, on purpose
+
+`chainlink` reads an oracle; `token_api` derives price from executed DEX swaps. The mechanisms share
+nothing, so agreement corroborates and **disagreement is a signal** — a stale oracle, a manipulated
+pool, or a genuinely dislocated market. Live they sat 0.19% apart.
+
+`prices(snapshot)` therefore returns every observation rather than one winner:
+
+```python
+{"WETH": {"price_usd": 1857.18,          # median consensus
+          "sources": ["chainlink", "token_api"],
+          "observations": [{"source": "chainlink", "price_usd": 1858.98, ...}, ...],
+          "spread_pct": 0.19, "disagreement": False}}
+```
+
+`chainlink` also reads the **same feeds `totalAssets()` uses**, so the agent and the vault contract
+can never disagree about what the portfolio is worth.
 
 ### Why Aave is a separate source rather than a branch in `messari`
 
@@ -286,7 +305,7 @@ Callers may rely on all of these:
 ## Tests
 
 ```bash
-uv run pytest data/tests -q          # 141 tests, no network, no credentials
+uv run pytest data/tests -q          # 180 tests, no network, no credentials
 uv run curator-data verify-live      # the live path — needs GRAPH_API_KEY
 ```
 

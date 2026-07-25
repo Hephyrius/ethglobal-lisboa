@@ -481,6 +481,98 @@ so what is installed is what was audited here.
 
 ---
 
+## 2026-07-25 — Lane C phase 2: Chainlink, real prices, and x402 signature-verified
+
+Four items from the phase 2 brief. Three landed; the fourth is one funded wallet away.
+
+**A Chainlink source — and why an on-chain source was the right fourth one.** Every previous source
+speaks HTTP to somebody's API. This one reads a contract over JSON-RPC, which is the strongest
+available evidence that the `DataSource` port abstracts *kinds of provider* rather than just
+endpoints: a contract read and a GraphQL query merge into the same `MarketSnapshot` with neither
+aware of the other. It also removes a dependency — price facts now survive a missing API key
+entirely. Chosen over CoinGecko because **the vault already values holdings through
+`ChainlinkPriceLib`**, so any other oracle would let the agent compute a rebalance the contract then
+values differently, and because the golden mandate already restricts new assets to *"assets with a
+Chainlink Base feed"*. The design agreed with itself before we got here.
+
+*Rails, because a wrong price is the expensive kind of wrong.* Every feed address was confirmed
+on-chain via its own `description()` rather than copied from a list, and the source **re-verifies at
+runtime**. That check is not ceremony: a wrong feed address does not error, it returns a confident,
+well-formed, completely wrong number. Demonstrated live — pointing WETH at the USDC/USD aggregator
+would have priced WETH at **$1.00**, and the guard refused. Also: `observed_at` is the oracle's
+`updatedAt`, not our clock (the frozen schema is explicit that staleness is the agent's problem, and
+that only works if we report when the *oracle* spoke); non-positive answers are dropped
+(`latestRoundData` returns a **signed** int); incomplete rounds dropped; >24h flagged but returned.
+
+No web3.py — three argument-free selectors and one `eth_call` is a POST and some slicing on the
+`httpx` client already present. Lane D reached the same conclusion independently.
+
+**The Token API works, but request #22's advice would have shipped a 3.4-million-times error.** That
+request did the hard work of finding the right route and I would have wasted twenty minutes without
+it. But its recommendation — read the `price` field off `limit=1` — is unsafe, because **that field
+flips with the direction of the swap**:
+
+```
+WETH -> USDC   price = 1858.0228     (USDC per WETH)
+USDC -> WETH   price =    0.0005     (WETH per USDC)
+```
+
+Consecutive trades in the same pool. Nothing in the response says which you got, and this number is
+what the agent values holdings with. Price is now computed from both legs **matched by contract
+address**, so orientation is irrelevant, and taken as a **median over 10 swaps** so one fat-fingered
+trade cannot set it. Two further live findings: the free plan caps `limit` at **10** (`limit=20`
+403s), and that 403 is a *parameter* complaint rather than a rejected credential — the first cut
+killed the whole source over it, which is the same misclassification as the gateway's
+auth-error-as-HTTP-200. Quota 403s now degrade to a note.
+
+**A flaw the second price source exposed.** `queries.prices()` was last-source-wins, so registering
+Chainlink *alongside* the Token API silently discarded one of them — throwing away the only
+cross-check the agent has. It now keeps every observation, reports the median as consensus, and
+flags disagreement beyond 1%. Live: **WETH $1,857.18 via chainlink + token_api, 0.19% apart** — an
+oracle and executed dex swaps agreeing by unrelated means. A wide gap there is a real signal (stale
+oracle, manipulated pool, dislocated market), which is precisely what a curator should act on rather
+than average away.
+
+**The MCP server installs outside the workspace now.** Phase 2 §6 called this a hard fail on 25% of
+Track 1's score, and it was: `uv pip install ./data/curator_mcp` died with *"curator-data was not
+found in the package registry"*. Fixed without PyPI — relative `[tool.uv.sources]` for the two
+siblings, verified in a clean Python 3.10 venv outside the repo. Two non-obvious details: the
+sources must be `editable = true` or `uv sync` fails with *"conflicting URLs for package
+curator-data"* against the root workspace, and the versions had to move to 0.2.0 because **uv caches
+built wheels by name+version** and was serving a stale 0.1.0 wheel missing the new modules.
+Publishing is prepared and verified up to the credential wall: all three distributions build, and
+installing from `--find-links` with no repo present resolves the whole chain — which proves the
+wheel metadata carries real dependency names rather than the local path hints.
+[data/PUBLISHING.md](../data/PUBLISHING.md) has the commands and the bottom-up upload order.
+`curator-schema` is Wave 0's to publish, not Lane C's.
+
+**x402: the signature verifies. Only the money is missing.** The brief expected a failure on an
+unfunded wallet. It failed somewhere more interesting first — **The Graph's gateway does not speak
+the x402 v1 spec this was written against, and the mismatch was silent**: every request fell back to
+the API key while appearing to have tried. Five differences, all found by probing:
+
+| | v1 (what we had) | The Graph's gateway |
+|---|---|---|
+| terms location | JSON body | base64 `payment-required` **header** — the 402 body is *empty* |
+| version | 1 | 2 |
+| price field | `maxAmountRequired` | `amount` |
+| network | `"base"` | `"eip155:8453"` (CAIP-2) |
+| payment header | `X-PAYMENT` | `Payment-Signature` |
+
+v2 also restructures the payload, echoing the accepted offer and resource back rather than restating
+scheme/network. The error messages tracked progress precisely: *"Payment-Signature header is
+required"* → *"Invalid or malformed payment header"* → **`invalid_exact_evm_insufficient_balance`**.
+That last one is the end of the road without funds: the gateway parsed the payload, **validated the
+EIP-712 signature against chain 8453**, matched scheme, asset and recipient, and refused only on
+balance. Send a few dollars of USDC to `X402_PRIVATE_KEY` on real Base and it should settle at
+$0.01/query. Both protocol versions remain supported — the spec is visibly in motion, and reading
+terms from header-or-body while sending both header names costs a few bytes.
+
+Throughout, the fallback did its job against the real gateway: **every query returned live data**.
+That is the property the decorator design exists for, now demonstrated rather than argued.
+
+---
+
 ## 2026-07-25 — Lane C: live data is flowing, and what the key revealed
 
 `GRAPH_API_KEY` arrived. `verify-live` immediately drove out things no fixture could have.
