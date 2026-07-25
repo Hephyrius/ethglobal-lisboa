@@ -56,7 +56,7 @@ from ..diagnostics import (
 )
 from ..facts import FactBuilder
 from ..ports import BaseSource
-from .feeds import PriceFeed, feeds_for, known_symbols
+from .feeds import ETH_QUOTE_SYMBOL, PriceFeed, feeds_for, known_symbols
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +98,8 @@ class ChainlinkSource(BaseSource):
         #: already confirmed. Neither changes within a run.
         self._decimals: dict[str, int] = {}
         self._verified: set[str] = set()
+        #: ETH/USD for this pass, used to convert ETH-quoted feeds.
+        self._eth_usd: float | None = None
 
     @property
     def rpc(self) -> RpcClient:
@@ -116,10 +118,17 @@ class ChainlinkSource(BaseSource):
         wanted = {a.strip().upper() for a in assets if a and a.strip()}
         builder = FactBuilder(self.key, chain=self.settings.chain)
 
+        # USD-quoted feeds first: an ETH-quoted feed is an exchange RATE and
+        # needs ETH/USD to become a price, so the order is load-bearing rather
+        # than cosmetic.
+        selected = [f for f in self._feeds if not wanted or f.symbol.upper() in wanted]
+        needs_eth = any(f.quote == "ETH" for f in selected)
+        if needs_eth and not any(f.symbol == ETH_QUOTE_SYMBOL for f in selected):
+            selected = [f for f in self._feeds if f.symbol == ETH_QUOTE_SYMBOL] + selected
+        selected.sort(key=lambda f: f.quote != "USD")
+
         facts: list[Fact] = []
-        for feed in self._feeds:
-            if wanted and feed.symbol.upper() not in wanted:
-                continue
+        for feed in selected:
             try:
                 fact = await self._read_feed(feed, builder)
             except RpcError as exc:
@@ -176,8 +185,37 @@ class ChainlinkSource(BaseSource):
             )
             return None
 
-        price = answer / (10**decimals)
+        raw = answer / (10**decimals)
         observed = datetime.fromtimestamp(updated_at, tz=timezone.utc) if updated_at else None
+
+        if feed.quote == "USD":
+            price = raw
+            if feed.symbol == ETH_QUOTE_SYMBOL:
+                # Cached so ETH-quoted feeds later in this pass can compose.
+                self._eth_usd = raw
+        else:
+            # An exchange rate, not a price. 1 wstETH = 1.24 ETH.
+            eth_usd = self._eth_usd
+            if eth_usd is None:
+                self.diagnose(
+                    feed.symbol,
+                    f"quotes {raw:.6f} {feed.quote}, and no {feed.quote}/USD price is "
+                    f"available to convert it",
+                    "left unpriced rather than reported in the wrong unit - a rate read as "
+                    "a price would be wrong by ten orders of magnitude",
+                )
+                return None
+            price = raw * eth_usd
+            # The rate is worth reporting in its own right: it drifting upward
+            # over time IS the staking yield accruing, which a point-in-time
+            # USD price hides completely.
+            self.diagnose(
+                feed.symbol,
+                f"1 {feed.symbol} = {raw:.6f} ETH (an exchange rate, not a USD price)",
+                f"converted at ${eth_usd:,.2f}/ETH; the rate rising over time is the "
+                f"staking yield accruing",
+                failure=False,
+            )
 
         if updated_at:
             age = datetime.now(timezone.utc).timestamp() - updated_at

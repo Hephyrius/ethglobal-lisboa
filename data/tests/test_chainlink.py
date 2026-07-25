@@ -244,3 +244,92 @@ def test_selectors_match_their_signatures():
     assert SELECTOR_LATEST_ROUND_DATA == "0x" + keccak(text="latestRoundData()")[:4].hex()
     assert SELECTOR_DECIMALS == "0x" + keccak(text="decimals()")[:4].hex()
     assert SELECTOR_DESCRIPTION == "0x" + keccak(text="description()")[:4].hex()
+
+
+# ── ETH-quoted feeds: the 10^10 trap ──────────────────────────────────────
+#
+# Not every Chainlink feed quotes USD, and assuming otherwise is not a
+# wrong-looking number — it is silently wrong by ten orders of magnitude.
+# Read live on the Base fork 2026-07-25, every LST feed is ETH-quoted at 18
+# decimals rather than USD at 8:
+#
+#     WSTETH / ETH   18dp   1.2399811
+#     CBETH / ETH    18dp   1.1353907
+#     RETH / ETH     18dp   1.1680353
+#
+# wstETH read as an 8-decimal USD price is $12,399,811,032.
+
+WSTETH_FEED = PriceFeed(
+    "wstETH", "0x43a5C292A453A3bF3606fa856197f09D7B74251a", "WSTETH / ETH", quote="ETH"
+)
+#: 1.2399811032239962e18, the live reading.
+WSTETH_RATE = 1_239_981_103_223_996_200
+
+
+class TwoFeedRpc:
+    """Answers ETH/USD and wstETH/ETH from one fake node."""
+
+    def __init__(self, *, eth_answer: int = LIVE_ANSWER, rate: int = WSTETH_RATE):
+        self._eth, self._rate = eth_answer, rate
+
+    async def call(self, to: str, selector: str) -> bytes:
+        is_lst = to.lower() == WSTETH_FEED.address.lower()
+        if selector == SELECTOR_DESCRIPTION:
+            return _string("WSTETH / ETH" if is_lst else "ETH / USD")
+        if selector == SELECTOR_DECIMALS:
+            return _word(18 if is_lst else 8)
+        if selector == SELECTOR_LATEST_ROUND_DATA:
+            return _round_data(self._rate if is_lst else self._eth)
+        raise RpcError(f"unexpected selector {selector}")
+
+    async def aclose(self) -> None:
+        return None
+
+
+async def test_an_eth_quoted_feed_is_converted_to_usd():
+    """1.2399811 ETH x $1,858.98 = $2,305.10 — the live figure."""
+    source = ChainlinkSource(SETTINGS, rpc=TwoFeedRpc(), feeds=(WETH_FEED, WSTETH_FEED))
+    prices = {f.subject.token: f.value for f in await source.fetch(["WETH", "wstETH"])}
+
+    assert round(prices["WETH"], 2) == 1858.98
+    assert round(prices["wstETH"], 2) == 2305.10
+    # The failure this guards: 1.24e18 / 1e8 read as USD.
+    assert prices["wstETH"] < 10_000, "an exchange rate was reported as a price"
+
+
+async def test_the_exchange_rate_itself_is_reported():
+    """The rate drifting upward over time IS the staking yield accruing, which
+    a point-in-time USD price hides completely."""
+    source = ChainlinkSource(SETTINGS, rpc=TwoFeedRpc(), feeds=(WETH_FEED, WSTETH_FEED))
+    await source.fetch(["WETH", "wstETH"])
+
+    note = [r for r in source.drain_remarks() if "wstETH" in r and "exchange rate" in r][0]
+    assert "1.239981 ETH" in note
+    assert "staking yield" in note
+
+
+async def test_eth_usd_is_fetched_even_when_only_the_lst_was_asked_for():
+    """Asking for wstETH alone must still produce a USD price, not nothing."""
+    source = ChainlinkSource(SETTINGS, rpc=TwoFeedRpc(), feeds=(WETH_FEED, WSTETH_FEED))
+    facts = await source.fetch(["wstETH"])
+
+    priced = {f.subject.token: f.value for f in facts}
+    assert round(priced["wstETH"], 2) == 2305.10
+
+
+async def test_without_eth_usd_the_rate_is_left_unpriced_rather_than_guessed():
+    """Reporting the raw rate as a USD price is the 10^10 error itself."""
+    source = ChainlinkSource(SETTINGS, rpc=TwoFeedRpc(), feeds=(WSTETH_FEED,))
+    facts = await source.fetch(["wstETH"])
+
+    assert facts == []
+    note = source.drain_notes()[0]
+    assert "no ETH/USD price is available" in note
+    assert "ten orders of magnitude" in note
+
+
+async def test_a_usd_feed_is_not_converted():
+    """The composition must apply only to ETH-quoted feeds."""
+    source = _source(FakeRpc())
+    facts = await source.fetch(["WETH"])
+    assert round(facts[0].value, 2) == 1858.98
