@@ -59,6 +59,18 @@ Plus three additions that are **not** part of the freeze:
 | `GET /genesis/sources` | `{sources[], venues[]}` | The genesis flow asks the user to grant data sources. That list must come from what Lane C actually registered, not a copy hardcoded in the dApp. |
 | `GET /health` | see below | Reports **which provider each seam actually resolved to**. |
 
+### Status codes
+
+Ordinary conditions get status codes that say what they are, so Lane E never has to guess from a
+500. **A bad *outcome* is not an error** — see the tick table below.
+
+| Code | When |
+|---|---|
+| `200` | including a tick that held, was rejected, or reverted on-chain |
+| `404` | no mandate stored for that vault — it was deployed by another harness, or genesis has not run |
+| `422` | malformed address, an incomplete `Mandate` at `finalize`, or `limit` out of range |
+| `503` | live mode missing a setting it needs (`AGENT_PRIVATE_KEY`, `VAULT_FACTORY_ADDRESS`); the detail names it |
+
 ### Data shapes
 
 Every shape is imported from `packages/schema` — none are redefined here. `Mandate`,

@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from ..config import Settings, settings
 from .deps import data_resolution, get_settings, venue_resolution
+from .errors import register_exception_handlers
 from .routes import genesis, vault
 from .schemas import HealthResponse
 
@@ -55,6 +56,8 @@ def create_app(config: Settings | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    register_exception_handlers(app)
 
     app.include_router(genesis.router)
     app.include_router(vault.router)

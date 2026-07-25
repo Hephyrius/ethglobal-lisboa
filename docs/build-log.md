@@ -230,6 +230,58 @@ one file.
 
 ---
 
+## 2026-07-25 — Lane B: bound to Lanes C and D for real, and stopped returning opaque 500s
+
+**What changed.** The late-binding seams are wired to what Lanes C and D actually published, proven
+by `agent/tests/test_integration_lanes.py`; domain failures now map to real HTTP status codes; live
+mode has its own API test suite. 104 tests green.
+
+**The refs, and why they differ from the master plan's sketch.** `AGENT_DATA_REGISTRY=curator_data:build_registry`
+and `AGENT_VENUE_REGISTRY=venues:get_venue`. §8 sketched `data.registry`, but Lane C shipped
+`curator_data` (correctly — `data` is far too generic an import name for a shared venv). **Neither
+lane had to change anything and neither did this one**: that was the entire point of resolving
+providers from a config string, and it is now a tested claim rather than a design intention.
+
+**Lane D publishes a lookup *function*, not a mapping.** `get_venue(key)` rather than
+`{"uniswap": venue}`. Both are reasonable ways to publish a registry and neither is worth a
+cross-lane request, so `_lookup_venue` accepts three shapes — a mapping, an object with `.get(key)`,
+and a bare callable. A lookup that *raises* for an unknown key (their `UnknownVenueError`) is treated
+as "not found", so the harness reports a missing adapter instead of leaking another lane's exception
+type into a decision cycle.
+
+**Lane D's three-step plans validate the `executeBatch` choice.** Their Uniswap path emits ERC-20
+approve → Permit2 approve → router execute, and re-emits approvals every time. Submitting those as
+three separate transactions is exactly the half-applied-plan failure `executeBatch` was chosen to
+make impossible: an approval landing without its swap leaves the vault holding a live allowance no
+decision authored. One atomic batch, one hash for the feed.
+
+**Integration tests skip rather than fail when a lane is absent.** This suite has to stay runnable
+from a fresh clone with only `/agent` installed, and a neighbouring lane mid-edit is a normal state
+during a five-instance build — which is the whole reason the harness binds late. A test that failed
+in that situation would punish the design for working.
+
+**Why `GET /health` now names the ref that failed.** It previously reported
+`fixture (fallback: ModuleNotFoundError…)` — true, and useless, because it omitted *which* ref was
+tried. Now: `fixture (tried curator_data:build_registry: ModuleNotFoundError…)`. "It fell back" is
+not actionable at 3am; the ref plus the reason is a fix. Found by writing the test for it.
+
+**Domain failures now map to status codes.** A vault this harness never deployed was surfacing to
+the dApp as `500 Internal Server Error` — indistinguishable from a crash, for a condition as ordinary
+as opening a bookmarked link. `MandateNotFound` → 404, `AmendmentRejected` → 422, and a live mode
+missing `AGENT_PRIVATE_KEY` or `VAULT_FACTORY_ADDRESS` → 503 with the setting *named*, because a 500
+during a demo sends someone to read tracebacks instead of `.env`. The mapping is deliberately narrow:
+anything unrecognised stays a 500, since converting real bugs into tidy 4xx responses hides them.
+**None of this touches `POST /tick`** — a cycle that held, was rejected or reverted is still a 200
+carrying an `AgentAction` that says so.
+
+**Why live mode gets its own API tests.** Fixture-mode coverage cannot catch a field that only exists
+on the live path, and the two zod wire-format traps (no nulls, UTC-with-`Z`) are exactly the kind of
+thing that would first appear in Lane E's browser. The live suite scripts the model backend and uses
+the stub chain client, so it needs no GPU, no credential and no network — it runs on the build machine
+and it will run on the macOS box at 10:00.
+
+---
+
 ## 2026-07-25 — Lane B phases 3–6: the decision cycle, the journal, and the signing chain client
 
 **What changed.** The loop is real. `agent/loop/` (engine, planning, cycle, journal), `agent/mandate/`
