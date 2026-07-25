@@ -1,48 +1,54 @@
 import Link from 'next/link'
 import { SiegeMotif } from '@/components/hero/SiegeMotif'
+import { BuiltWith } from '@/components/layout/BuiltWith'
 import { PortfolioStrip } from '@/components/portfolio/PortfolioStrip'
 import { VaultList } from '@/components/vault/VaultList'
 
 export default function HomePage() {
   return (
     <div className="space-y-14">
-      <section className="relative overflow-hidden border-b border-line pb-12 pt-4">
-        <SiegeMotif />
-        {/* Above the motif, and opaque to it: the figure sits behind the column
-            but the copy must never be read through a line. */}
-        <div className="relative">
-          <p className="label">ETHGlobal Lisbon 2026</p>
-          <h1 className="mt-4 max-w-3xl text-4xl leading-[1.15] tracking-tight text-ink sm:text-5xl">
-            {/* nowrap so the compound never splits across lines at its hyphen,
-                which at this size reads as "Agent-" hanging on the first line. */}
-            Curator: Design and Deploy <span className="whitespace-nowrap">Agent-Curated</span>{' '}
-            Vaults
-          </h1>
-          <p className="mt-5 max-w-2xl text-[0.95rem] leading-relaxed text-muted">
-            You write the mandate. Your Curator Agent does the rest, reading live markets, forming a
-            thesis, and signing its own transactions out of an ERC-4626 vault. After genesis, no one
-            intervenes, including you. What replaces control is visibility: the data it consulted,
-            the reasoning it produced, and the transaction it sent, all in the open.
-          </p>
+      {/* The motif is a flex sibling of the copy, not an absolutely-positioned
+          background. Anchoring it to the right edge meant the gap to the text
+          shrank as the window narrowed — 166px at 1440, but 10px at 1180, where
+          it crowded the paragraph. As a flex item the gap is set once and holds
+          at every width. */}
+      <section className="border-b border-line pb-12 pt-4">
+        <div className="lg:flex lg:items-center lg:gap-8 xl:gap-14">
+          <div className="max-w-3xl">
+            <p className="label">ETHGlobal Lisbon 2026</p>
+            <h1 className="mt-4 text-4xl leading-[1.15] tracking-tight text-ink sm:text-5xl">
+              {/* nowrap so the compound never splits across lines at its hyphen,
+                  which at this size reads as "Agent-" hanging on the first line. */}
+              Scipio: <span className="whitespace-nowrap">Agent-Curated</span> Vaults
+            </h1>
+            <p className="mt-5 max-w-2xl text-[0.95rem] leading-relaxed text-muted">
+              Scipio reads live markets, forms a thesis, and signs its own transactions out of an
+              ERC-4626 vault. After genesis, no one intervenes, including you. What replaces control
+              is visibility: the data it consulted, the reasoning it produced, and the transaction it
+              sent, all in the open.
+            </p>
 
-          <div className="mt-8 flex flex-wrap items-center gap-4">
-            <Link
-              href="/create"
-              className="inline-flex h-9 items-center rounded bg-agent px-5 text-sm font-medium text-white transition-colors hover:bg-agent/90"
-            >
-              Create a vault
-            </Link>
+            <div className="mt-8 flex flex-wrap items-center gap-4">
+              <Link
+                href="/create"
+                className="inline-flex h-9 items-center rounded bg-agent px-5 text-sm font-medium text-white transition-colors hover:bg-agent/90"
+              >
+                Create a vault
+              </Link>
+            </div>
           </div>
+
+          <SiegeMotif />
         </div>
       </section>
 
-      <section>
-        <div className="flex items-baseline justify-between border-b border-line pb-2">
-          <h2 className="text-xl font-semibold tracking-tight text-ink">Explore Deployed Vaults</h2>
-          <Link href="/create" className="text-xs text-muted transition-colors hover:text-ink">
-            Create a vault →
-          </Link>
-        </div>
+      <BuiltWith />
+
+      {/* The rule sits above the heading rather than under it: it closes the
+          "Built with" strip off and the title then opens the section beneath
+          it, instead of the title carrying an underline of its own. */}
+      <section className="border-t border-line pt-6">
+        <h2 className="text-xl font-semibold tracking-tight text-ink">Featured Vaults</h2>
         <div className="mt-6">
           <VaultList />
         </div>

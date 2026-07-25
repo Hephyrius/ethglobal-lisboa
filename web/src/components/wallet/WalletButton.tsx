@@ -48,8 +48,11 @@ export function WalletButton() {
     // for. The connected state above stays secondary on purpose — it reports a
     // status and offers disconnect, so it should not read as a call to action.
     <Button
-      size="md"
+      size="sm"
       variant="primary"
+      // Compact on phones, full size from `sm` up. Fixed at md it crowded the
+      // nav off the row below 414px.
+      className="sm:h-9 sm:px-4 sm:text-sm"
       loading={pending}
       disabled={!hasConnector}
       onClick={() => void run(connectWallet)}

@@ -12,28 +12,23 @@
  *
  * Why it is allowed to be here at all: this is decoration on a page whose whole
  * argument is that nothing is decoration — every number on the site is read from
- * a chain. So it is drawn at very low opacity, plays once and stops, sits behind
- * the copy, is `aria-hidden`, and is dropped entirely below `lg` where the hero
- * column already fills the width. It must never compete with the type.
+ * a chain. So it is drawn at very low opacity, plays once and stops, and must
+ * never compete with the type.
  *
  * `pathLength="100"` normalises every perimeter to 100 units, so one dash pair
  * animates squares of three different sizes without computing 4×side each time.
  */
 export function SiegeMotif() {
   return (
-    // Sized off the section rather than a fixed px value: the wrapper spans the
-    // hero's height (inset-y) and the square scales to fit inside it. A fixed
-    // 460px figure overflowed a 380px hero and `overflow-hidden` sliced the top
-    // and bottom off the outer ring — which is the one thing this drawing cannot
-    // afford, since it is entirely about closed concentric rings. Now the hero
-    // can change height with the copy and the figure still fits.
-    <div
-      aria-hidden="true"
-      className="pointer-events-none absolute inset-y-6 right-0 hidden lg:block"
-    >
+    // A flex sibling of the copy. Shown from `lg` (1024px) — it was briefly
+    // gated at `xl`, which meant it silently vanished on any window between
+    // 1024 and 1280, which is most laptops. It shrinks instead of disappearing:
+    // the copy column is a max-width rather than a fixed width, so flex narrows
+    // the text a little at 1024 rather than overflowing the page.
+    <div aria-hidden="true" className="pointer-events-none hidden shrink-0 lg:block">
       <svg
         viewBox="0 0 400 400"
-        className="siege h-full w-auto"
+        className="siege h-[200px] w-[200px] xl:h-[300px] xl:w-[300px] 2xl:h-[340px] 2xl:w-[340px]"
         fill="none"
         stroke="currentColor"
       >

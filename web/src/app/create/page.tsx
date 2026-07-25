@@ -79,15 +79,26 @@ export default function CreatePage() {
   return (
     <div className="space-y-6">
       <header>
-        <p className="label">Genesis</p>
-        <h1 className="mt-2 text-xl font-semibold tracking-tight text-ink sm:text-2xl">
-          Design the strategy, then hand it over
+        <h1 className="text-xl font-semibold tracking-tight text-ink sm:text-2xl">
+          Design a strategy, or deploy a template mandate.
         </h1>
-        <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted">
-          Describe what the vault should do. The curator turns it into a mandate — constraints, the
-          data sources it may consult, the venues it may use. Deploying crystallises that mandate at
-          genesis; from then on the agent runs it alone.
-        </p>
+
+        {/* The two paths, in the order they appear below: the preset cards, then
+            the conversation. Numbered because they are alternatives a reader
+            chooses between, not steps taken in sequence. */}
+        <ol className="mt-5 grid gap-4 sm:grid-cols-2">
+          <Path index={1} title="Deploy a standard mandate">
+            Three preset risk profiles with parameters already configured. Conservative for tight
+            exposure limits, Aggressive for wide ones, Randomised for allocations drawn at
+            deployment. Every vault is a distinct instance, owned by the address that deploys it.
+          </Path>
+          <Path index={2} title="Deploy a Scipio Agent">
+            Describe the vault&apos;s objective in plain language. Alesia translates it into an
+            operating mandate: hard constraints, permitted data sources, permitted venues.
+            Deployment locks the mandate on chain, and the agent executes against it with no further
+            instruction.
+          </Path>
+        </ol>
       </header>
 
       <ModeNotice />
@@ -112,5 +123,25 @@ export default function CreatePage() {
         </div>
       </div>
     </div>
+  )
+}
+
+function Path({
+  index,
+  title,
+  children,
+}: {
+  index: number
+  title: string
+  children: React.ReactNode
+}) {
+  return (
+    <li className="rounded border border-line bg-raised/40 px-4 py-3">
+      <div className="flex items-baseline gap-2">
+        <span className="font-mono text-2xs font-semibold text-agent">{index}</span>
+        <h2 className="text-sm font-semibold text-ink">{title}</h2>
+      </div>
+      <p className="mt-1.5 text-xs leading-relaxed text-muted">{children}</p>
+    </li>
   )
 }

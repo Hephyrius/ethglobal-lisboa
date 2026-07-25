@@ -29,9 +29,8 @@ export function PresetCards({
 
   return (
     <section>
-      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-line pb-2">
-        <h2 className="text-sm font-semibold text-ink">Start from an archetype</h2>
-        <p className="text-2xs text-faint">Loads a whole mandate — then amend it by talking</p>
+      <div className="border-b border-line pb-2">
+        <h2 className="text-sm font-semibold text-ink">Deploy a standard mandate</h2>
       </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-3">
