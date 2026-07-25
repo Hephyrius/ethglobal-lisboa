@@ -94,3 +94,101 @@ def test_the_result_is_an_integer_string_not_a_float():
     """uint256 crosses the boundary as a decimal string — never a JSON number."""
     price = _share_price(2_500_000000, 2_500 * 10**18, 6, 18)
     assert isinstance(price, str) and price.isdigit()
+
+
+# ── plan -> executeBatch encoding ─────────────────────────────────────────
+#
+# ABI encoding and decoding are local operations, so this needs no chain: the
+# client is pointed at an unreachable RPC on purpose. What it pins is the seam
+# between Lane D's calldata and Lane A's contract — a plan must arrive on-chain
+# byte-identical to the one the agent approved and the feed displayed.
+
+
+@pytest.fixture(scope="module")
+def client():
+    from agent.chain.vault_client import Web3VaultClient
+    from agent.config import Settings
+
+    return Web3VaultClient(
+        Settings(
+            rpc_url="http://127.0.0.1:1",  # never contacted
+            agent_private_key="0x" + "11" * 32,
+        )
+    )
+
+
+VAULT = "0x0E2c0e50E67B96C9C401C94e111a3DBD00DEB5d1"
+
+
+def _encode(client, plan):
+    calls = [
+        (
+            client._w3.to_checksum_address(step.target),
+            int(step.value),
+            bytes.fromhex(step.calldata.removeprefix("0x")),
+        )
+        for step in plan.steps
+    ]
+    return client._vault(VAULT).functions.executeBatch(calls)._encode_transaction_data()
+
+
+def _decode(client, data):
+    """web3 v7 decodes tuple components as dicts; older versions gave tuples."""
+    calls = client._vault(VAULT).decode_function_input(data)[1]["calls"]
+    out = []
+    for entry in calls:
+        target, value, payload = (
+            (entry["target"], entry["value"], entry["data"])
+            if isinstance(entry, dict)
+            else (entry[0], entry[1], entry[2])
+        )
+        raw = payload.hex() if isinstance(payload, bytes | bytearray) else str(payload)
+        out.append((target.lower(), int(value), raw.removeprefix("0x").lower()))
+    return out
+
+
+def test_a_plan_survives_encoding_to_executebatch_unchanged(client):
+    """Every step's target, value and calldata must round-trip exactly.
+
+    A silent corruption here would send the vault calldata nobody authored,
+    against a plan the decision feed is simultaneously showing as correct.
+    """
+    from agent import fixtures
+
+    plan = fixtures.execution_plan()
+    decoded = _decode(client, _encode(client, plan))
+
+    expected = [
+        (step.target.lower(), int(step.value), step.calldata.removeprefix("0x").lower())
+        for step in plan.steps
+    ]
+    assert decoded == expected
+
+
+def test_the_whole_plan_goes_out_as_one_call(client):
+    """Atomicity is the reason executeBatch was chosen over N executes: a plan
+    lands complete or not at all, never half-applied."""
+    from agent import fixtures
+
+    data = _encode(client, fixtures.execution_plan())
+    assert data.startswith("0x34fcd5be"), "expected the executeBatch selector"
+    assert len(_decode(client, data)) == len(fixtures.execution_plan().steps)
+
+
+def test_step_order_is_preserved(client):
+    """Approvals must precede the calls that need them."""
+    from agent import fixtures
+
+    plan = fixtures.execution_plan()
+    decoded = _decode(client, _encode(client, plan))
+    assert [t for t, _, _ in decoded] == [s.target.lower() for s in plan.steps]
+
+
+def test_a_live_mode_client_without_a_key_is_refused():
+    """The agent signs its own transactions — that is the trust model, so a
+    missing key is a configuration error, not a silent read-only mode."""
+    from agent.chain.vault_client import Web3VaultClient
+    from agent.config import Settings
+
+    with pytest.raises(ValueError, match="AGENT_PRIVATE_KEY"):
+        Web3VaultClient(Settings(agent_private_key=None))
