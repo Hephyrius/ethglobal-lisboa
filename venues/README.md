@@ -38,6 +38,82 @@ plan  = await venue.plan(intent, vault_state)   # -> ExecutionPlan
 | `Venue.key` | `str` | Registry key. |
 | `Venue.aclose` | `async () -> None` | Closes the HTTP/RPC client. Call at shutdown. |
 
+### What each venue can do — `manifest()`
+
+**Never hardcode a venue list.** In Wave 1 genesis carried a literal pair, and the
+fully-built Aave venue could not be granted in a mandate for an entire wave —
+invisible because the only list of venues lived in someone else's file. A test
+now fails if the registry and the manifest diverge.
+
+```python
+from venues import manifest
+
+for row in manifest():          # plain JSON, safe on every render
+    row["key"], row["role"], row["custody"], row["available"]
+```
+
+| Field | Meaning |
+|---|---|
+| `key` · `role` | `uniswap`/taker · `aqua`/maker · `aave`/lender |
+| `summary` | One line for the UI |
+| `intents` | The `VenueIntent` kinds it serves — a mandate naming it cannot produce trades the harness can only reject |
+| `tokens` | Symbols, all resolvable by `resolve_token` |
+| **`custody`** | **`virtual` · `claim` · `rotational` — see below** |
+| `custody_note` | The sentence to render next to it |
+| `requires` | Env vars needed |
+| `available` · `unavailable_reason` | Actionable, never a status word |
+| `contracts` | What must be on the vault's `execute()` allowlist |
+
+**`custody` is the field that prevents a misreading**, and the three values are
+not interchangeable:
+
+- **`virtual`** (Aqua) — tokens *never leave the vault*. This **is** the Pattern 1
+  claim.
+- **`claim`** (Aave) — the underlying really does move; the vault holds a receipt
+  token and must be able to value it.
+- **`rotational`** (Uniswap) — no position is held at all.
+
+Flatten those into "the vault has a position" and a reader concludes
+`totalAssets()` is broken when it is exactly right.
+
+**Unavailable venues are included, not filtered.** Rendering *"Aave is here but
+this deployment cannot value the aToken"* beats silence — silence is how the
+venue went missing in the first place.
+
+`manifest()` and `capabilities()` **perform no network I/O** (asserted by a
+test); they read configuration only, because genesis and the UI call them on
+every render. `probe(key)` is the opt-in live form for preflight.
+
+### Adding a fourth venue — ask these two questions first
+
+Both were learned expensively, and both are answerable from deployed bytecode in
+about ten minutes. Answer them **before** writing an adapter.
+
+**1. Can a keyless contract act here?** The vault holds no private key and
+cannot produce an EIP-712 signature. This has decided three venues:
+
+| Venue | What it wanted | Resolution |
+|---|---|---|
+| Uniswap | an EIP-712 `PermitSingle` | Permit2's signature-**free** `approve` |
+| Aqua | a signed maker order | `useAquaInsteadOfSignature = true` |
+| Limitless (prediction markets) | an EIP-712 CLOB order | **none** — ERC-1271 is the only door and `CuratedVault` does not implement it. Not built. |
+
+**2. What does the vault receive, and can `totalAssets()` value it?** The vault
+values tokens through `priceFeed(address)` — one Chainlink feed per token. So a
+venue must hand back either the base asset or a token with a feed.
+
+| Venue | Receives | Valuable? |
+|---|---|---|
+| Aave | `aBasUSDC` / `aBasWETH` | ✅ a 1:1 **rebasing** claim, so the *underlying's* feed is correct for it |
+| Morpho Blue | **nothing** — not an ERC-20, positions live in `position(bytes32,address)` | ❌ `totalAssets()` would fall by the amount supplied. Not built. |
+| MetaMorpho | ERC-4626 shares | ❌ they **appreciate** rather than rebasing, and no Chainlink feed exists for them |
+
+Aave's 1:1 rebasing property was doing far more work than it appeared to. A
+venue that fails question 2 needs a **new valuation kind on the vault**, which
+is a Lane A contract change — file a request, do not work around it. Supplying
+into a token the vault cannot value collapses every depositor's share price and
+nothing errors.
+
 ### Verifying an Aqua position — `assert_position_fillable`
 
 **Neither a successful `ship()` nor a non-zero `safeBalances()` proves a
