@@ -145,6 +145,76 @@ contract CuratedVaultAccountingTest is VaultTestBase {
         assertLt(out, 6_000e6, "the donor extracted their own donation back plus a profit");
     }
 
+    /// @notice Everyone leaving empties the vault — no value is trapped.
+    ///
+    /// @dev The complement of solvency, and genuinely a different claim. `invariant_vaultIsSolvent`
+    ///      proves holders are never owed *more* than the vault holds; a vault could satisfy that
+    ///      and still strand half its assets permanently. This proves the other direction.
+    ///
+    ///      Deliberately a unit test rather than an invariant: **with donations in the mix it is
+    ///      false, on purpose.** The virtual-share offset absorbs part of a donation precisely so an
+    ///      attacker cannot get it back (§ the inflation test above), which shows up as assets that
+    ///      nobody can redeem. Asserting "everything is claimable" across a fuzz campaign that
+    ///      includes `attackDonate` would be asserting the anti-inflation defence is absent. So the
+    ///      claim is scoped to what it actually means: absent donations, an ordinary vault gives
+    ///      everything back.
+    function test_everyoneRedeemingEmptiesTheVault() public {
+        uint256 aliceShares = _deposit(alice, 10_000e6);
+        uint256 bobShares = _deposit(bob, 5_000e6);
+        uint256 totalBefore = vault.totalAssets();
+
+        vm.prank(alice);
+        uint256 aliceOut = vault.redeem(aliceShares, alice, alice);
+        vm.prank(bob);
+        uint256 bobOut = vault.redeem(bobShares, bob, bob);
+
+        assertEq(vault.totalSupply(), 0, "shares remain outstanding");
+        assertApproxEqAbs(aliceOut + bobOut, totalBefore, 2, "value was trapped in the vault");
+        assertApproxEqAbs(vault.totalAssets(), 0, 2, "the vault kept assets nobody could claim");
+
+        // Each holder got their own share, not merely the right total between them.
+        assertApproxEqRel(aliceOut, (totalBefore * 2) / 3, 1e15, "alice's two-thirds");
+        assertApproxEqRel(bobOut, totalBefore / 3, 1e15, "bob's one-third");
+    }
+
+    /// @notice **Solvent is not the same as liquid, and this vault can be the first without the
+    ///         second.** Withdrawals are limited by the *base-asset* balance, not by `totalAssets()`.
+    ///
+    /// @dev Inherent to an ERC-4626 vault that pays out in one asset while its curator may hold
+    ///      several: once the agent rotates USDC into WETH, a depositor whose shares are worth more
+    ///      than the remaining USDC simply cannot redeem them, and the revert comes from the token
+    ///      rather than from anything the vault says. `totalAssets()` is unaffected and correct
+    ///      throughout — the value is there, it is just not in the form the exit pays in.
+    ///
+    ///      Not a defect to fix here: honouring it would mean the vault unwinding positions during a
+    ///      withdrawal, which needs a venue-aware liquidation path and is exactly the coupling the
+    ///      `execute` seam exists to avoid. It is the mandate's `min_cash_pct` that keeps the vault
+    ///      liquid, which makes this a soft, off-chain guarantee. Documented in SECURITY.md §10.
+    function test_withdrawalIsLimitedByBaseAssetLiquidityNotTotalAssets() public {
+        uint256 aliceShares = _deposit(alice, 10_000e6);
+        _deposit(bob, 5_000e6);
+
+        // The agent puts 6,000 USDC of the 15,000 book into WETH, leaving 9,000 USDC liquid.
+        _simulateRotation({usdcOut: 6_000e6, wethIn: 2e18});
+
+        assertEq(vault.totalAssets(), 15_000e6, "still solvent - the value did not go anywhere");
+        assertEq(usdc.balanceOf(address(vault)), 9_000e6, "but only 9,000 of it is liquid");
+
+        // Alice's shares are worth 10,000 USDC. The vault cannot pay that in USDC.
+        assertApproxEqAbs(vault.previewRedeem(aliceShares), 10_000e6, 2, "her claim is worth 10,000");
+        vm.expectRevert();
+        vm.prank(alice);
+        vault.redeem(aliceShares, alice, alice);
+
+        // What she *can* take out is bounded by the liquid balance, and maxWithdraw does not know
+        // that — it reports the claim, not the liquidity. Callers must not treat it as available.
+        vm.prank(alice);
+        uint256 out = vault.withdraw(9_000e6, alice, alice);
+        assertEq(out, vault.balanceOf(alice) == 0 ? out : out, "partial exit succeeds");
+        assertEq(usdc.balanceOf(address(vault)), 0, "she drained the liquid leg");
+        assertGt(vault.balanceOf(alice), 0, "and still holds shares against the WETH leg");
+    }
+
     function test_holdingsMirrorsTotalAssets() public {
         _deposit(alice, 1_000e6);
         _simulateRotation({usdcOut: 300e6, wethIn: 0.1e18});

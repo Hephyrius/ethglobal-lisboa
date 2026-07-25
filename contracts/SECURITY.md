@@ -264,6 +264,37 @@ different code.
 
 ---
 
+## 10 · Solvency is not liquidity — **inherent, and depositor-facing**
+
+Found while asserting that everyone redeeming empties the vault. It does not, once the agent has
+rebalanced.
+
+**Withdrawals are limited by the vault's *base-asset* balance, not by `totalAssets()`.** ERC-4626 pays
+out in one asset; the curator may hold several. Once the agent rotates USDC into WETH, a depositor
+whose shares are worth more than the remaining USDC **cannot redeem them** — and the revert surfaces
+from the token, not from anything the vault says, so it reads as a broken vault rather than an
+illiquid one. `totalAssets()` is correct and unchanged throughout. The value is there; it is not in
+the form the exit pays in.
+
+`maxWithdraw`/`previewRedeem` report the **claim**, not what is currently payable. A caller treating
+either as "available to withdraw right now" will be wrong whenever the vault holds anything but its
+base asset. Lane E's deposit panel and anything else surfacing a withdrawal limit should read
+`asset.balanceOf(vault)` alongside them.
+
+| Test | What it proves |
+|---|---|
+| `test_withdrawalIsLimitedByBaseAssetLiquidityNotTotalAssets` | With 15,000 in `totalAssets()` and only 9,000 liquid, a 10,000 redemption reverts while a 9,000 withdrawal succeeds and leaves the holder with shares against the WETH leg. |
+| `test_everyoneRedeemingEmptiesTheVault` | The complement: absent a rotation, every holder redeeming does drain the vault — no value is structurally trapped. |
+
+**Not fixed here, deliberately.** Honouring a redemption against non-base holdings means unwinding
+positions during a withdrawal, which needs a venue-aware liquidation path inside the vault — exactly
+the coupling the opaque-calldata seam exists to avoid, and a far larger change than a hackathon vault
+should carry. What keeps the vault liquid is the mandate's `min_cash_pct`, which makes this a **soft,
+off-chain guarantee enforced by the harness rather than by the contract.** A depositor should
+understand that before depositing, which is why it is here rather than only in a code comment.
+
+---
+
 ## What is deliberately not defended
 
 | | |
@@ -273,6 +304,8 @@ different code.
 | **Oracle compromise** | The vault trusts Chainlink. No second source, no divergence check. |
 | **Sandwiching around a rebalance** | §7. Disclosed, not fixed. |
 | **Tokens the vault cannot price** | A token held but absent from the valuation set is invisible to `totalAssets()`. The mandate must confine the agent to tokens with a registered feed. `invariant_totalAssetsEqualsValuedHoldings` pins the accounting; nothing pins the mandate. |
+| **Withdrawal liquidity** | §10. The vault can be solvent and still unable to pay a redemption. Held off by the mandate's `min_cash_pct`, not by the contract. |
+| **A dishonest registered price feed** | §5.1. The vault cannot distinguish a derived feed from a native one, so a feed that misreports its own age silently disables staleness checking for that token. A requirement on the registrar, demonstrated by test, not enforceable here. |
 
 ---
 
