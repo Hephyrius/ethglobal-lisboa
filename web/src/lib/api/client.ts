@@ -1,0 +1,127 @@
+import type { ZodType } from 'zod'
+import { API_BASE } from './routes'
+
+/**
+ * The fetch layer, and the single most important design decision in this lane.
+ *
+ * Lane E must never be blocked on Lane B (master plan §10), so every call falls
+ * back to a golden fixture when the agent API is unreachable, errors, or
+ * returns something that does not match the frozen schema. But a *silent*
+ * fallback is a trap: The Graph disqualifies mocked data on the demo path, and
+ * the way that goes wrong is not deliberate cheating — it is standing in front
+ * of a judge with fixtures on screen and believing they are live.
+ *
+ * So the fallback is loud. Every response carries the mode it came from, and
+ * the app header renders it permanently. If it says FIXTURES during the demo,
+ * we can see it from across the room.
+ *
+ * Falling back on *schema mismatch* is deliberate too: if Lane B drifts from
+ * the frozen interface, that shows up as a visible badge and a legible zod
+ * error rather than a white screen.
+ */
+
+export type SourceMode = 'live' | 'fixture'
+
+export type Sourced<T> = {
+  data: T
+  mode: SourceMode
+  /** Why we fell back. Rendered in the mode badge's tooltip. */
+  note?: string
+}
+
+/** Escape hatch for demoing with no backend at all: NEXT_PUBLIC_FIXTURES=1 */
+export const FIXTURES_FORCED = process.env.NEXT_PUBLIC_FIXTURES === '1'
+
+/** Short: a hung backend must not stall a demo. Fixtures render instantly instead. */
+const DEFAULT_TIMEOUT_MS = 4000
+
+export class ApiUnavailable extends Error {}
+
+type FetchOptions<T> = {
+  path: string
+  schema: ZodType<T>
+  /** Fixture used when the live call cannot be trusted. Lazy — never built unless needed. */
+  fallback: () => T
+  init?: RequestInit
+  timeoutMs?: number
+}
+
+export async function apiFetch<T>({
+  path,
+  schema,
+  fallback,
+  init,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+}: FetchOptions<T>): Promise<Sourced<T>> {
+  if (FIXTURES_FORCED) {
+    return { data: fallback(), mode: 'fixture', note: 'NEXT_PUBLIC_FIXTURES=1 — forced offline mode' }
+  }
+
+  try {
+    const parsed = await apiFetchStrict({ path, schema, init, timeoutMs })
+    return { data: parsed, mode: 'live' }
+  } catch (error) {
+    return {
+      data: fallback(),
+      mode: 'fixture',
+      note: error instanceof Error ? error.message : 'agent API unavailable',
+    }
+  }
+}
+
+/**
+ * Same call without the fallback — throws instead.
+ *
+ * Used for state-changing routes (`/genesis/finalize`) where quietly returning
+ * a fixture would be a lie: it would show a vault address that was never
+ * deployed. Reads degrade; writes fail honestly.
+ */
+export async function apiFetchStrict<T>({
+  path,
+  schema,
+  init,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+}: Omit<FetchOptions<T>, 'fallback'>): Promise<T> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+
+  let response: Response
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      signal: controller.signal,
+      headers: { 'Content-Type': 'application/json', ...init?.headers },
+    })
+  } catch (error) {
+    const reason =
+      error instanceof DOMException && error.name === 'AbortError'
+        ? `agent API did not respond within ${timeoutMs}ms`
+        : `cannot reach agent API at ${API_BASE}`
+    throw new ApiUnavailable(reason)
+  } finally {
+    clearTimeout(timer)
+  }
+
+  if (!response.ok) {
+    throw new ApiUnavailable(`agent API returned ${response.status} for ${path}`)
+  }
+
+  let body: unknown
+  try {
+    body = await response.json()
+  } catch {
+    throw new ApiUnavailable(`agent API returned a non-JSON body for ${path}`)
+  }
+
+  const result = schema.safeParse(body)
+  if (!result.success) {
+    const first = result.error.issues[0]
+    const where = first?.path.join('.') || '(root)'
+    throw new ApiUnavailable(`response did not match the frozen schema at ${where}: ${first?.message}`)
+  }
+  return result.data
+}
+
+export function postJson(body: unknown): RequestInit {
+  return { method: 'POST', body: JSON.stringify(body) }
+}

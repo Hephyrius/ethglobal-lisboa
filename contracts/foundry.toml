@@ -1,0 +1,40 @@
+[profile.default]
+src = "src"
+out = "out"
+test = "test"
+script = "script"
+libs = ["lib"]
+
+solc = "0.8.28"
+evm_version = "cancun"
+optimizer = true
+optimizer_runs = 200
+
+# Reproducible bytecode across Windows/WSL and the macOS handoff. Without this the metadata hash
+# embeds absolute compiler paths, so `out/**` — which this lane commits, because it is how the other
+# four lanes get their ABIs — churns on every machine and shows up as noise in every diff.
+bytecode_hash = "none"
+
+# `out/` is committed. build_info is tens of megabytes of solc input JSON that nobody downstream
+# reads; ABIs and bytecode are in the per-contract artifacts.
+build_info = false
+
+# The deploy script writes ../deployments/base-fork.json — the file every other lane reads for
+# addresses instead of hardcoding them.
+fs_permissions = [{ access = "read-write", path = "../deployments" }]
+
+[profile.default.fuzz]
+runs = 256
+
+[fmt]
+line_length = 120
+tab_width = 4
+bracket_spacing = false
+int_types = "long"
+
+[rpc_endpoints]
+base = "${BASE_RPC_URL}"
+fork = "${ANVIL_RPC_URL}"
+
+[etherscan]
+base = { key = "${BASESCAN_API_KEY}", chain = 8453 }

@@ -1,0 +1,10 @@
+# The root .gitignore ignores `out/` for Next.js. A bare pattern like that matches at *every* level,
+# so it also swallows contracts/out — which is exactly what this lane publishes for the other four
+# (master plan §10 Lane A). A .gitignore in a deeper directory overrides a shallower one, so
+# re-include it here rather than editing shared root config that Wave 0 owns.
+!/out/
+
+# Foundry local state. Already covered by the root file; repeated so this directory is
+# self-explanatory to anyone who opens it alone.
+/cache/
+/broadcast/

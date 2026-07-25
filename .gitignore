@@ -32,6 +32,8 @@ broadcast/
 *.log
 .anvil-state.json
 scratch/
+# Lane B: persisted mandates and AgentAction journals (agent/config.py state_dir)
+.agent-state/
 
 # ── OS / editor ───────────────────────────────────────────────────────────
 .DS_Store

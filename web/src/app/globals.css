@@ -1,0 +1,58 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-base text-ink antialiased;
+    background-image:
+      radial-gradient(60rem 40rem at 15% -10%, rgba(245, 184, 51, 0.05), transparent 60%),
+      radial-gradient(50rem 36rem at 90% 0%, rgba(79, 195, 232, 0.045), transparent 55%);
+    background-attachment: fixed;
+  }
+
+  ::selection {
+    @apply bg-agent/25 text-ink;
+  }
+
+  /* Numerals in tables and stats should not jitter as values update. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer components {
+  .hairline {
+    @apply border border-line;
+  }
+
+  .card {
+    @apply rounded-xl border border-line bg-surface;
+  }
+
+  .label {
+    @apply text-2xs font-medium uppercase tracking-[0.14em] text-faint;
+  }
+
+  .scroll-slim {
+    scrollbar-width: thin;
+    scrollbar-color: #2c333e transparent;
+  }
+
+  .scroll-slim::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .scroll-slim::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-line-bright;
+  }
+
+  .scroll-slim::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}

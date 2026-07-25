@@ -63,6 +63,84 @@ one file.
 
 ---
 
+## 2026-07-25 — Lane B phase 1: frozen routes live on fixtures; late binding to Lanes C and D
+
+**What changed.** `/agent` stood up: config, typed fixture access, the FastAPI app with all five
+frozen routes from §8 plus `GET /health`, `GET /genesis/sources` and `GET /vault/{addr}/mandate`,
+fixture-mode services behind a port, canonical mandate hashing, and 20 tests. Lane E is unblocked
+(cross-lane request #3).
+
+**Why route handlers depend on a service port rather than calling the loop.** The obvious shape is
+"routes call the decision loop, and fixture mode is a branch inside them." Rejected: the branch then
+lives in every handler and the fixture path drifts from the live path exactly where it matters. A
+`VaultService` / `GenesisService` Protocol means `agent/api/deps.py` is the *only* module that knows
+which mode we are in, and the endpoint Lane E integrates against at hour 2 is byte-identical to the
+one running at the demo. There is no fixture-only endpoint to migrate off.
+
+**Why other lanes are resolved from a `"module:attribute"` string instead of imported.** This is the
+most consequential decision in the lane. Rule 7 forbids importing another lane's internals, and
+neither Lane C nor Lane D existed when this was written. Options:
+
+- *Import Lane C's registry directly once it lands* — violates Rule 7, and makes `import agent` fail
+  whenever a neighbouring lane is mid-edit. With five instances pushing concurrently that is a
+  guaranteed outage of the API Lane E develops against.
+- *Copy a minimal interface and adapt later* — that is schema drift with extra steps.
+- *Late binding from config* ← **chosen.** `AGENT_DATA_REGISTRY=data.registry:registry` is imported
+  on first use, checked against the `DataSourceRegistry` Protocol, and **any** failure — missing
+  module, bad attribute, wrong shape — degrades to the fixture provider with a warning instead of
+  raising. Lane C and Lane D each cost this lane one environment variable and zero code changes, and
+  `import agent` never transitively imports another lane, so the test suite runs with no other lane
+  installed. Cost: a typo'd ref fails soft, which is why `GET /health` reports what each seam
+  actually resolved to — a live run quietly serving fixture numbers is the failure mode that
+  matters, and it is now visible in one curl.
+
+**Why fixture mode serves a feed covering every `AgentAction` status.** The golden fixture is a
+single `executed` action. Serving four copies of it would let Lane E ship a decision feed that has
+never rendered `rejected` or `failed` — and those states would first appear during the live demo.
+Fixture mode therefore synthesizes a hold, a validation rejection and an on-chain failure alongside
+the success, with timestamps counting back from *now* so the feed never reads as stale. It also
+attaches the `MarketSnapshot` to executed actions, which the golden fixture omits: Lane E's MVP
+requires showing data consulted (with provenance) → reasoning → tx hash, and that view is impossible
+if the snapshot never crosses the wire.
+
+**Why `mandate_hash` is computed for real in fixture mode.** It would have been easier to return a
+constant. But the hash is what a depositor uses to verify the mandate they were shown is the one the
+vault was deployed against, so fixture and live must agree byte-for-byte. Canonical form is defined
+once in `agent/mandate/hashing.py` — UTF-8 JSON, sorted keys, no whitespace, unset optionals omitted
+— and both modes call it. `exclude_none` matters: an explicit `"update_rules": null` must not hash
+differently from an absent one.
+
+**Two wire-format traps found by testing rather than at the demo.** Both are legal JSON Schema and
+both break zod in the browser while passing any Python-only test:
+
+1. `z.string().datetime()` accepts **only** UTC with a `Z` suffix — it rejects `+02:00` and rejects
+   naive timestamps. Pydantic serializes whatever it is handed, so a plain `datetime.now()` on the
+   Lisbon demo machine (UTC+1) emits `...+01:00` and Lane E's parser rejects it. All timestamps now
+   go through `agent/clock.py`, and a test asserts the `Z` shape on **every** datetime-looking leaf
+   of every response, not just the fields a test remembers.
+2. zod's `.optional()` accepts a missing key but **rejects an explicit `null`.** Pydantic's unset
+   optionals serialize to null by default. Every route sets `response_model_exclude_none=True` and a
+   test asserts no response contains a null anywhere. It caught `/health` immediately, which is the
+   point — the guard is cheap and the failure it prevents is a demo-time 500 in someone else's lane.
+
+**Why tests validate against `packages/schema/*.json` and not the pydantic models.** Validating a
+pydantic-produced payload with pydantic proves only that the harness agrees with itself. The JSON
+Schema is the declared source of truth and is what Lane E's zod mirror was written from, so the
+tests load the schemas into a `referencing` Registry (they cross-reference by relative URI) and
+validate there.
+
+**Additive routes, and why they do not breach the freeze.** `GET /vault/{addr}/mandate` (Lane E's
+request #5 — `VaultState` carries only `mandate_hash`, so the mandate viewer had no source),
+`GET /genesis/sources` (the user must grant data sources at genesis; that list has to come from what
+Lane C registered, not a copy hardcoded in the dApp), and `GET /health`. The freeze prevents
+*changing* agreed shapes; adding a route breaks no consumer. All five frozen routes are untouched.
+
+**Rejected:** `pydantic-settings` for config — one more dependency to read a dozen env vars that
+`os.environ` plus the already-present `python-dotenv` handles; a dataclass keeps the defaults
+readable in one screen.
+
+---
+
 ## 2026-07-25 — Lane B: root `uv` workspace config was broken, blocking all three Python lanes
 
 **What changed.** One line in the root `pyproject.toml`:
