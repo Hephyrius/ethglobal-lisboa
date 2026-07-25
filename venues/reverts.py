@@ -60,8 +60,14 @@ KNOWN_REVERTS: Final[dict[str, KnownRevert]] = {
             "went stale. On a PINNED FORK it is almost always fork staleness instead: "
             "the Trading API prices against live Base while the fork executes at a "
             "block hours behind, so the minimum is computed for a market the fork "
-            "cannot deliver. Measured on this stack: 15.5h of drift = 72 bps of price "
-            "gap against a 50 bps band. Raise UNISWAP_SLIPPAGE_BPS for fork runs, or "
+            "cannot deliver. Measured on this stack: ~15.5h of drift and ~70 bps of "
+            "price gap against a 50 bps band. "
+            "**It is DIRECTION-DEPENDENT, which is why it comes and goes.** Selling "
+            "USDC for WETH only reverts when WETH is *pricier* on the fork than live; "
+            "when the fork is cheaper the swap over-delivers and passes comfortably. "
+            "So a green run proves the drift is currently favourable, not that "
+            "anything was fixed — it flips with the market. Set "
+            "UNISWAP_SLIPPAGE_BPS=150 for fork runs to be immune either way, or "
             "re-fork nearer head. See venues/README.md.",
         ),
         _entry(
