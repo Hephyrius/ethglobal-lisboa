@@ -133,10 +133,9 @@ avoid, and it holds a key.
 | `feargreed` | `sentiment` | Crypto Fear & Greed index, normalised to 0–1 | ✅ verified live (0.27 — "Fear"). **No credential** |
 | `gas` | `gas` | Base gas price and the USD cost of one rebalance, read on-chain | ✅ verified live ($0.74 per rebalance at 1 gwei). **No credential** |
 | `morpho` | `yield`, `tvl`, `utilization` | Morpho Blue markets on Base, via Morpho's own API | ✅ verified live — 15 markets, USDC/cbBTC at 4.80% on $1.42bn. **No credential** |
-| `prediction` | `sentiment`¹ | Polymarket implied probabilities on rates, inflation and crypto | ✅ verified live (75.2% no change in Fed rates). **No credential**, read-only |
+| `prediction` | `probability` | Polymarket implied probabilities on rates, inflation and crypto | ✅ verified live (75.2% no change in Fed rates). **No credential**, read-only |
 
-¹ Interim kind. There is no `probability` in the frozen `FactKind`; requested from Lane F and held
-behind one constant in [`sources/prediction.py`](curator_data/sources/prediction.py).
+
 
 All subgraph IDs live in [`curator_data/sources/protocols.py`](curator_data/sources/protocols.py),
 including a list of candidates **rejected after live testing**, so nobody re-adds them.

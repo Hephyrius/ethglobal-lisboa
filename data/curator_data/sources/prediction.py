@@ -29,15 +29,13 @@ relevance is decided here, from `TOPICS`, against a page ordered by 24-hour
 volume. Volume is the credibility filter that matters: an implied probability
 from a market with $200 of volume is one person's opinion wearing a number.
 
-## The fact kind is an interim
+## The fact kind
 
-There is no `probability` in the frozen `FactKind` enum, and the schema says
-plainly *"Extend this list rather than overloading an existing kind."* Lane F
-owns that enum; the request is filed. Until it lands these are emitted as
-`sentiment`, which is the closest honest fit — a forward-looking market
-consensus — and `FACT_KIND` is a single constant so the switch is one line.
-The subject carries the question, so these are never confused with the
-Fear & Greed index at the point of use.
+`probability`, with unit `probability` — added to the frozen enum by Lane F on
+request. These shipped briefly as `sentiment`, the closest available fit, but
+that was a genuine overload the schema warns against: `feargreed` emits a 0–1
+index of market *mood*, while this emits P(a specific event). A consumer
+filtering on one kind would have received two incomparable things.
 """
 
 from __future__ import annotations
@@ -60,9 +58,11 @@ logger = logging.getLogger(__name__)
 
 API_URL = "https://gamma-api.polymarket.com/markets"
 
-#: Emitted kind. Becomes `probability` once Lane F extends the enum — see the
-#: module docstring. One constant so that is a one-line change.
-FACT_KIND = "sentiment"
+#: Emitted kind and unit. Held as constants because these shipped as
+#: `sentiment` for one commit while the enum was extended, and a single
+#: definition is what made that switch a one-line change rather than a hunt.
+FACT_KIND = "probability"
+FACT_UNIT = "probability"
 
 #: What a *vault curator* cares about, as opposed to what Polymarket is mostly
 #: about (sports). Data, not code: widening the agent's forward view is an edit
@@ -196,7 +196,7 @@ class PredictionSource(BaseSource):
                     FACT_KIND,
                     subject,
                     value,
-                    "ratio",
+                    FACT_UNIT,
                     confidence=MARKET_CONFIDENCE,
                 )
             )
@@ -295,4 +295,10 @@ def make_prediction_source(settings: Settings) -> PredictionSource:
     return PredictionSource(settings)
 
 
-__all__ = ["PredictionSource", "make_prediction_source", "TOPICS", "FACT_KIND"]
+__all__ = [
+    "PredictionSource",
+    "make_prediction_source",
+    "TOPICS",
+    "FACT_KIND",
+    "FACT_UNIT",
+]
