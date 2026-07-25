@@ -256,4 +256,12 @@ def build_registry(
     `factories` overrides the built-in table wholesale — used by tests and by
     anyone embedding the registry with their own source set.
     """
-    from .sources import SOURCE_FACTOR
+    from .sources import SOURCE_FACTORIES
+
+    return Registry(
+        factories=SOURCE_FACTORIES if factories is None else factories,
+        settings=settings or Settings.from_env(),
+    )
+
+
+__all__ = ["Registry", "SourceFactory", "build_registry"]
