@@ -36,6 +36,7 @@ __all__ = [
     "Violation",
     "check_decision",
     "check_rebalance_direction",
+    "check_projected_outcome",
     "check_plan",
     "describe",
 ]
@@ -318,6 +319,128 @@ def check_rebalance_direction(
                         "vault further from your own target; swap the other way",
                     )
                 )
+
+    return problems
+
+
+def _projected_weights(
+    decision: AllocationDecision, vault: VaultState
+) -> dict[str, float] | None:
+    """Where the vault would end up if these swaps executed.
+
+    Values are moved between assets at the current valuation, ignoring slippage
+    and fees — those are basis points against limits expressed in whole
+    percentage points, so they cannot change a verdict. `amount_in` is denominated
+    in the *input token*, which this module cannot convert without a price, so a
+    swap using it is not projected rather than guessed at.
+
+    Returns None when the projection cannot be made honestly.
+    """
+    total = int(vault.total_assets or 0)
+    if total <= 0:
+        return None
+
+    values = {
+        h.symbol: float(int(h.value_in_asset))
+        for h in vault.holdings
+        if h.value_in_asset is not None
+    }
+    if not values:
+        return None
+
+    for intent in decision.venue_intents or []:
+        if intent.kind != "swap":
+            continue
+        if intent.pct_of_holdings is None:
+            return None  # sized in token units; cannot project without a price
+        if intent.token_in not in values:
+            return None
+        moved = values[intent.token_in] * intent.pct_of_holdings
+        values[intent.token_in] -= moved
+        values[intent.token_out] = values.get(intent.token_out, 0.0) + moved
+
+    return {asset: value / total for asset, value in values.items()}
+
+
+def check_projected_outcome(
+    decision: AllocationDecision, mandate: Mandate, vault: VaultState | None
+) -> list[Violation]:
+    """Validate where the trade *lands*, not just what it claims to want.
+
+    Observed against the real model, and the reason this exists: on a 79/21
+    USDC/WETH book against a 50/50 target it correctly identified the gap, chose
+    the correct direction, and then sized the swap at `pct_of_holdings: 1.0`.
+    That is every USDC in the vault. The result was **0% USDC / 100% WETH** —
+    breaching both `min_cash_pct` (30%) and `max_position_pct` (60%), and
+    overshooting the target it was aiming at by fifty percentage points.
+
+    Every earlier layer passed it, and each was right to: the declared
+    `target_allocations` were 50/50 and perfectly legal, the direction was
+    correct, the assets were permitted, the facts were real. **The mandate limits
+    were being checked against what the model said it wanted, never against what
+    its trade would actually do.** Declared intent and realised effect are
+    different things, and only the second one spends money.
+
+    So the swaps are projected forward and the *result* is checked: the mandate's
+    cash floor and position ceiling must survive, and the book must end closer to
+    its target than it started.
+    """
+    projected = _projected_weights(decision, vault) if vault is not None else None
+    if projected is None:
+        return []
+
+    limits = mandate.constraints
+    problems: list[Violation] = []
+
+    cash = projected.get(mandate.base_asset, 0.0)
+    if cash + WEIGHT_SUM_TOLERANCE < limits.min_cash_pct:
+        problems.append(
+            Violation(
+                "venue_intents",
+                f"this trade would leave {cash:.1%} in {mandate.base_asset}, below the "
+                f"{limits.min_cash_pct:.0%} cash floor. Sell less",
+            )
+        )
+
+    for asset, weight in sorted(projected.items()):
+        if asset == mandate.base_asset:
+            continue
+        if weight > limits.max_position_pct + WEIGHT_SUM_TOLERANCE:
+            problems.append(
+                Violation(
+                    "venue_intents",
+                    f"this trade would take {asset} to {weight:.1%}, above the "
+                    f"{limits.max_position_pct:.0%} single-position ceiling. Buy less",
+                )
+            )
+
+    # Overshooting is its own failure: a trade can respect every limit and still
+    # sail past the target it was sized to reach.
+    #
+    # Only assets that were *already materially off* target are judged, matching
+    # layer 5's threshold. The rule being enforced is "if you claim to be closing
+    # a gap, close it" — where there is no gap the model is expressing a view
+    # rather than correcting a drift, and the floor and ceiling above still bound
+    # where it can land. The shared golden fixture is exactly that case: it
+    # declares a 70/30 target on a book already at 70/30 and then trades, which
+    # is legal but not a correction.
+    targets = {a.asset: a.weight for a in decision.target_allocations or []}
+    current = _current_weights(vault)
+    for asset, target in targets.items():
+        if asset not in projected or asset not in current:
+            continue
+        before, after = abs(current[asset] - target), abs(projected[asset] - target)
+        if before <= _DIRECTION_TOLERANCE:
+            continue
+        if after > before + _DIRECTION_TOLERANCE:
+            problems.append(
+                Violation(
+                    "venue_intents",
+                    f"this trade moves {asset} from {current[asset]:.1%} to {projected[asset]:.1%} "
+                    f"against a {target:.1%} target, ending further away than it started. "
+                    "Size the swap to land on the target",
+                )
+            )
 
     return problems
 

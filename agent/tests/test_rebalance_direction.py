@@ -1,7 +1,24 @@
-"""Validation layer 5: a swap must close the gap to its own target, not widen it.
+"""Validation layers 5 and 6: a swap must go the right way, and land in a legal place.
 
-**This layer exists because the loop executed a real transaction in the wrong
-direction.** The observed failure, on the fork, from `qwen2.5:3b-instruct-q4_K_M`:
+**Both layers exist because the loop executed real transactions that were wrong,
+and every earlier layer passed them.** Two consecutive live ticks on the fork,
+from `qwen2.5:3b-instruct-q4_K_M`, each correct in every respect but one:
+
+| tick | diagnosis | direction | size | result |
+|---|---|---|---|---|
+| `0x129da1a0…` | right | **wrong** | — | 70/30 → 79/21, away from a 50/50 target |
+| `0x704f54a2…` | right | right | **`pct: 1.0`** | 79/21 → **0/100**, breaching two limits |
+
+The shared lesson, which is the reason both checks are here rather than in the
+prompt: **the mandate limits were being applied to what the model *declared*, never
+to what its trade would *do*.** Declared intent and realised effect are different
+things, and only the second one spends money.
+
+Layer 5 checks the sign. Layer 6 projects the trade forward and checks where it
+lands. Neither is a property of the mandate alone — both compare the decision to
+reality — so they hold whatever a mandate says.
+
+The first failure, in full:
 
     current   70.0% USDC / 30.0% WETH
     target    50.0% USDC / 50.0% WETH   (the model's own target_allocations)
@@ -186,6 +203,145 @@ def test_an_asset_with_no_target_is_not_judged():
     decision = _decision("WETH", "USDC", {"USDC": 1.0})
     problems = check_rebalance_direction(decision, SEVENTY_THIRTY)
     assert all("WETH" not in str(p) for p in problems)
+
+
+# ── layer 6: where the trade LANDS ────────────────────────────────────────
+#
+# The next tick got the direction right and then sized the swap at
+# `pct_of_holdings: 1.0` — every USDC in the vault — taking a 79/21 book to
+# 0/100 against a 50/50 target and breaching both mandate limits at once.
+#
+# Every earlier layer passed it, and each was right to. The mandate limits were
+# being checked against what the model *said it wanted*, never against what its
+# trade would actually *do*. Declared intent and realised effect are different
+# things, and only the second one spends money.
+
+
+def _mandate_5030():
+    """A mandate with a 30% cash floor and a 60% position ceiling."""
+    return fixtures.mandate().model_copy(
+        update={
+            "constraints": fixtures.mandate().constraints.model_copy(
+                update={"min_cash_pct": 0.3, "max_position_pct": 0.6}
+            )
+        }
+    )
+
+
+#: The exact 79/21 book that produced tx 0x704f54a2.
+SEVENTY_NINE = _vault(1_974_825442, 524_916313)
+
+
+@pytest.mark.parametrize(
+    ("pct", "expected"),
+    [
+        (1.0, "rejected"),  # the trade that happened: 0% cash, 100% WETH
+        (0.6, "rejected"),  # still breaches the 60% position ceiling
+        (0.37, "accepted"),  # lands near 50/50
+    ],
+)
+def test_a_swap_is_judged_by_where_it_lands(pct, expected):
+    from agent.mandate.constraints import check_projected_outcome
+
+    decision = _decision("USDC", "WETH", {"USDC": 0.5, "WETH": 0.5}).model_copy(
+        update={
+            "venue_intents": [
+                SwapIntent(token_in="USDC", token_out="WETH", pct_of_holdings=pct)
+            ]
+        }
+    )
+    problems = check_projected_outcome(decision, _mandate_5030(), SEVENTY_NINE)
+
+    assert bool(problems) == (expected == "rejected"), [str(p) for p in problems]
+
+
+def test_the_cash_floor_is_checked_against_the_result_not_the_declaration():
+    """The declared target said 50% cash. The trade left 0%."""
+    from agent.mandate.constraints import check_projected_outcome
+
+    decision = _decision("USDC", "WETH", {"USDC": 0.5, "WETH": 0.5}).model_copy(
+        update={
+            "venue_intents": [
+                SwapIntent(token_in="USDC", token_out="WETH", pct_of_holdings=1.0)
+            ]
+        }
+    )
+    problems = check_projected_outcome(decision, _mandate_5030(), SEVENTY_NINE)
+    message = " ".join(str(p) for p in problems)
+
+    assert "0.0% in USDC" in message and "30% cash floor" in message
+    assert "100.0%" in message and "60% single-position ceiling" in message
+    assert "Sell less" in message
+
+
+def test_an_overshoot_within_the_limits_is_still_caught():
+    """A trade can respect every limit and still sail past its own target."""
+    from agent.mandate.constraints import check_projected_outcome
+
+    # 79% USDC, target 50%. Selling 55% lands at ~35%, i.e. 15pp past.
+    relaxed = fixtures.mandate().model_copy(
+        update={
+            "constraints": fixtures.mandate().constraints.model_copy(
+                update={"min_cash_pct": 0.0, "max_position_pct": 1.0}
+            )
+        }
+    )
+    decision = _decision("USDC", "WETH", {"USDC": 0.5, "WETH": 0.5}).model_copy(
+        update={
+            "venue_intents": [
+                SwapIntent(token_in="USDC", token_out="WETH", pct_of_holdings=0.9)
+            ]
+        }
+    )
+    message = " ".join(str(p) for p in check_projected_outcome(decision, relaxed, SEVENTY_NINE))
+    assert "further away than it started" in message
+
+
+def test_a_book_already_on_target_may_still_trade():
+    """The golden fixture declares a 70/30 target on a 70/30 book and then
+    trades. That is legal — it is expressing a view, not correcting a drift —
+    and only the floor and ceiling bound where it may land. Layer 5 skips
+    at-target assets for the same reason; the two must agree."""
+    from agent.mandate.constraints import check_projected_outcome
+
+    assert (
+        check_projected_outcome(
+            fixtures.allocation_decision(), fixtures.mandate(), fixtures.vault_state()
+        )
+        == []
+    )
+
+
+def test_a_swap_sized_in_token_units_is_not_projected():
+    """`amount_in` is denominated in the input token and this module has no
+    price. Guessing would be worse than declining to judge."""
+    from agent.mandate.constraints import check_projected_outcome
+
+    decision = _decision("USDC", "WETH", {"USDC": 0.5, "WETH": 0.5}).model_copy(
+        update={
+            "venue_intents": [
+                SwapIntent(token_in="USDC", token_out="WETH", amount_in="1974825442")
+            ]
+        }
+    )
+    assert check_projected_outcome(decision, _mandate_5030(), SEVENTY_NINE) == []
+
+
+def test_layer_six_fires_through_the_full_validator():
+    raw = (
+        _decision("USDC", "WETH", {"USDC": 0.5, "WETH": 0.5})
+        .model_copy(
+            update={
+                "venue_intents": [
+                    SwapIntent(token_in="USDC", token_out="WETH", pct_of_holdings=1.0)
+                ]
+            }
+        )
+        .model_dump_json(exclude_none=True)
+    )
+
+    with pytest.raises(ValueError, match="land the vault in a state the mandate forbids"):
+        validate_decision(raw, _mandate_5030(), fixtures.market_snapshot(), SEVENTY_NINE)
 
 
 def test_aqua_intents_are_not_direction_checked():

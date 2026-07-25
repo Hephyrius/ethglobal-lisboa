@@ -16,6 +16,7 @@ nothing unvalidated reaches a venue or the chain.
 | 3 mandate | forbidden asset, weights ≠ 1, too many actions | the breach *and the limit* |
 | 4 grounding | citing facts that were never in the snapshot | the invented ids and the real ones |
 | 5 direction | trades moving *away* from the decision's own targets | which side is past target |
+| 6 outcome | where the trade *lands* — floor, cap, overshoot | resulting weight vs the limit |
 
 The layering is what makes retries work. A single "invalid output, try again"
 teaches the model nothing and burns the tick; a message naming the breach and the
@@ -49,7 +50,12 @@ from curator_schema import AllocationDecision, Mandate, MarketSnapshot, VaultSta
 from curator_schema.ports import ModelBackend
 from pydantic import ValidationError
 
-from ..mandate.constraints import check_decision, check_rebalance_direction, describe
+from ..mandate.constraints import (
+    check_decision,
+    check_projected_outcome,
+    check_rebalance_direction,
+    describe,
+)
 from .extraction import ExtractionError, extract_json_object
 
 __all__ = [
@@ -178,6 +184,13 @@ def validate_decision(
         raise ValueError(
             f"your trades move the vault away from your own targets — {describe(violations)}. "
             "Return a corrected decision whose swaps close the gap."
+        )
+
+    # 6 — projected outcome. Checks where the trade LANDS, not what it claims.
+    if violations := check_projected_outcome(decision, mandate, vault):
+        raise ValueError(
+            f"your trade would land the vault in a state the mandate forbids — "
+            f"{describe(violations)}. Resize the swap and return a corrected decision."
         )
 
     return decision
