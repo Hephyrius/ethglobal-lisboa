@@ -23,8 +23,10 @@ export function MandateView({
   return (
     <Card>
       <CardHeader
-        title={mandate.name}
-        subtitle={`Version ${mandate.version} · crystallised at genesis · only the agent may amend it`}
+        // "Mandate", not the mandate's name: the page heading is already the
+        // name, and printing it twice reads as a duplicated section.
+        title="Mandate"
+        subtitle={`${mandate.name} · version ${mandate.version} · crystallised at genesis · only the agent may amend it`}
         right={<Badge tone="agent">{mandate.risk_posture}</Badge>}
       />
       <CardBody className="space-y-5">

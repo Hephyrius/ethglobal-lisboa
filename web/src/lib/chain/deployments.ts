@@ -17,6 +17,8 @@ type Deployments = {
   rpcUrl: string
   contracts: { VaultFactory: string | null; CuratedVaultImplementation: string | null }
   vaults: Array<string | { address?: string; name?: string }>
+  /** Lane A's deploy script records the demo vault separately, with its symbol. */
+  demoVault?: { address?: string; symbol?: string }
   external: Record<string, string | undefined>
   executeAllowlist?: { targets?: string[] }
 }
@@ -37,10 +39,22 @@ export function vaultFactoryAddress(): `0x${string}` | null {
 /** Vaults Lane A has deployed, if any. Normalised — the file allows two shapes. */
 export function deployedVaults(): Array<{ address: `0x${string}`; name?: string }> {
   const raw = deployments.vaults ?? []
+  const demo = deployments.demoVault
+
   return raw.flatMap((entry) => {
     const address = asAddress(typeof entry === 'string' ? entry : entry.address)
     if (!address) return []
-    return [{ address, name: typeof entry === 'string' ? undefined : entry.name }]
+
+    const named = typeof entry === 'string' ? undefined : entry.name
+    // `vaults` is a bare address list, but the deploy script also records the
+    // demo vault with its share symbol — worth using so the list reads
+    // "cUSDC vault" rather than a generic label.
+    const fromDemo =
+      demo?.symbol && asAddress(demo.address)?.toLowerCase() === address.toLowerCase()
+        ? `${demo.symbol} vault`
+        : undefined
+
+    return [{ address, name: named ?? fromDemo }]
   })
 }
 
