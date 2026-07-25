@@ -6,7 +6,11 @@ name = "curator-schema"
 # bytes under a number the repo had already reused - and curator-data, which
 # imports SourceNote, could not import against it. A version number is a
 # promise about bytes; bump it whenever the content moves.
-version = "0.2.0"
+#
+# 0.3.0: Wave 3 adds curator_schema.archetypes and puts "morpho" in the
+# permitted_venues enum. Both are additive for a reader, but archetypes ships
+# DATA as well as code — see the force-include below.
+version = "0.3.0"
 description = "Frozen cross-lane interface: models and ports shared by every Python component"
 requires-python = ">=3.10"
 dependencies = ["pydantic>=2.7"]
@@ -22,3 +26,11 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["curator_schema"]
+
+# The archetype envelopes are DATA the code cannot work without: load_archetypes()
+# reads them at runtime, so a wheel carrying only the module would import fine and
+# then fail at the first call. They live outside this directory because the JSON
+# Schemas are the source of truth and the Python package is a view of them, so they
+# are copied in rather than moved. `_archetype_dir()` prefers this packaged copy.
+[tool.hatch.build.targets.wheel.force-include]
+"../archetypes" = "curator_schema/_data/archetypes"

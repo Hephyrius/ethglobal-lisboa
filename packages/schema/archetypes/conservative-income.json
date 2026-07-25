@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "key": "conservative-income",
+  "name": "Conservative Income",
+  "headline": "Earns on USDC in lending markets, and never holds anything else.",
+  "tradeoff": "Gives up every source of return that is not an interest rate. A quarter to two fifths of the book sits in cash by rule, so it under-earns whenever lending pays well.",
+  "base_asset": "USDC",
+  "allowed_assets": {
+    "subset_of": ["USDC"],
+    "must_include": ["USDC"],
+    "min_count": 1,
+    "max_count": 1
+  },
+  "permitted_venues": {
+    "subset_of": ["aave", "morpho"],
+    "must_include": [],
+    "min_count": 1,
+    "max_count": 2
+  },
+  "permitted_data_sources": {
+    "subset_of": ["aave", "morpho", "messari", "defillama", "chainlink", "gas"],
+    "must_include": ["chainlink"],
+    "min_count": 2,
+    "max_count": 6
+  },
+  "risk_postures": ["conservative"],
+  "constraint_ranges": {
+    "max_position_pct": { "min": 1, "max": 1 },
+    "min_cash_pct": { "min": 0.2, "max": 0.4 },
+    "max_slippage_bps": { "min": 10, "max": 50 },
+    "rebalance_cooldown_seconds": { "min": 3600, "max": 21600 },
+    "max_actions_per_tick": { "min": 1, "max": 3 },
+    "tolerance_band_pct": { "min": 0, "max": 0.03 }
+  },
+  "emphases": [
+    "Rank markets by the depth behind the rate rather than the rate itself, and say which market was passed over and why.",
+    "Treat the cash floor as the product rather than as drag: write the mandate around what a depositor who may leave at any hour needs to find waiting.",
+    "Split across both lending venues by default, and state what concentration in a single market would have earned instead.",
+    "Optimise for the rate that survives a withdrawal wave, not the rate quoted at today's utilisation."
+  ],
+  "persona": {
+    "required": true,
+    "conviction": ["low", "medium"]
+  }
+}

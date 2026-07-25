@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "key": "balanced-growth",
+  "name": "Balanced Growth",
+  "headline": "Holds ETH exposure alongside a lending book, and rebalances between them.",
+  "tradeoff": "Carries directional risk a stablecoin mandate does not. A drawdown in ETH shows up in the share price, and rebalancing into it costs spread each time.",
+  "base_asset": "USDC",
+  "allowed_assets": {
+    "subset_of": ["USDC", "WETH"],
+    "must_include": ["USDC"],
+    "min_count": 2,
+    "max_count": 2
+  },
+  "permitted_venues": {
+    "subset_of": ["uniswap", "aave", "morpho"],
+    "must_include": ["uniswap"],
+    "min_count": 2,
+    "max_count": 3
+  },
+  "permitted_data_sources": {
+    "subset_of": ["chainlink", "aave", "morpho", "messari", "defillama", "token_api", "feargreed", "gas"],
+    "must_include": ["chainlink"],
+    "min_count": 3,
+    "max_count": 8
+  },
+  "risk_postures": ["balanced"],
+  "constraint_ranges": {
+    "max_position_pct": { "min": 0.3, "max": 0.6 },
+    "min_cash_pct": { "min": 0.1, "max": 0.25 },
+    "max_slippage_bps": { "min": 20, "max": 80 },
+    "rebalance_cooldown_seconds": { "min": 1800, "max": 10800 },
+    "max_actions_per_tick": { "min": 2, "max": 4 },
+    "tolerance_band_pct": { "min": 0.02, "max": 0.08 }
+  },
+  "emphases": [
+    "Fix a target ETH weight and defend it: the mandate is about what triggers a rebalance, not about picking a direction.",
+    "Treat the idle half as a lending book in its own right — USDC waiting to buy ETH should still be earning while it waits.",
+    "Write the cost of rebalancing into the rules: state how far the book must drift before the spread is worth paying.",
+    "Let the cooldown do the work sentiment cannot, and say plainly that a fast-moving price is a reason to wait rather than to act."
+  ],
+  "persona": {
+    "required": true,
+    "conviction": ["low", "medium", "high"]
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "key": "opportunistic",
+  "name": "Opportunistic",
+  "headline": "Goes where the yield is, across four assets and every venue including market making.",
+  "tradeoff": "The widest mandate here, and the one most exposed to being wrong. A thin cash floor, a loose band and the shortest cooldown mean it can be caught mid-rotation.",
+  "base_asset": "USDC",
+  "allowed_assets": {
+    "subset_of": ["USDC", "WETH", "CBBTC", "AERO"],
+    "must_include": ["USDC"],
+    "min_count": 2,
+    "max_count": 4
+  },
+  "permitted_venues": {
+    "subset_of": ["uniswap", "aqua", "aave", "morpho"],
+    "must_include": ["uniswap"],
+    "min_count": 2,
+    "max_count": 4
+  },
+  "permitted_data_sources": {
+    "subset_of": ["chainlink", "aave", "morpho", "messari", "defillama", "token_api", "feargreed", "gas", "prediction"],
+    "must_include": ["chainlink"],
+    "min_count": 4,
+    "max_count": 9
+  },
+  "risk_postures": ["balanced", "aggressive"],
+  "constraint_ranges": {
+    "max_position_pct": { "min": 0.35, "max": 0.75 },
+    "min_cash_pct": { "min": 0.05, "max": 0.15 },
+    "max_slippage_bps": { "min": 30, "max": 100 },
+    "rebalance_cooldown_seconds": { "min": 900, "max": 7200 },
+    "max_actions_per_tick": { "min": 2, "max": 5 },
+    "tolerance_band_pct": { "min": 0.03, "max": 0.1 }
+  },
+  "emphases": [
+    "Rotate on the spread between venues rather than on any single headline rate, and name the spread that would reverse the trade.",
+    "Use the market-making venue as a standing home for capital that has no better use, not as a one-off.",
+    "Concentrate: pick the two assets with the clearest case and say what would have to happen for a third to earn its place.",
+    "Weigh a forward-looking probability against a trailing yield, and state which one is being trusted when they disagree.",
+    "Treat gas and spread as the hurdle every rotation must clear, and write that hurdle into the rules as a number."
+  ],
+  "persona": {
+    "required": true,
+    "conviction": ["medium", "high"]
+  }
+}

@@ -98,10 +98,14 @@ class Mandate(Frozen):
     #: Registry keys resolved by the data layer. Granting a new source is a
     #: mandate edit, not a code change — this is the extension point.
     permitted_data_sources: list[str] = Field(min_length=1)
-    #: "aave" joined in Wave 1. Kept a closed Literal rather than a free
-    #: string: a mandate naming a venue with no adapter produces a vault
-    #: whose agent proposes trades the harness can only ever reject.
-    permitted_venues: list[Literal["uniswap", "aqua", "aave"]] = Field(min_length=1)
+    #: "aave" joined in Wave 1, "morpho" in Wave 3. Kept a closed Literal rather
+    #: than a free string: a mandate naming a venue with no adapter produces a
+    #: vault whose agent proposes trades the harness can only ever reject.
+    #: That reasoning argues for admitting the venue that DOES have an adapter,
+    #: which is why morpho is here — it shipped with supply and withdraw paths
+    #: and was published as one of four while this list held three, making the
+    #: fourth venue unreachable from every mandate.
+    permitted_venues: list[Literal["uniswap", "aqua", "aave", "morpho"]] = Field(min_length=1)
     created_at: datetime | None = None
     risk_posture: Literal["conservative", "balanced", "aggressive"] = "balanced"
     #: Optional character the agent argues in. None means a neutral curator.

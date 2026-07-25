@@ -10,6 +10,16 @@ package and the zod mirror in packages/schema/ts are views of them, kept
 honest by the golden fixtures in packages/schema/fixtures/.
 """
 
+from .archetypes import (
+    Archetype,
+    ArchetypePersona,
+    EnvelopeViolation,
+    NumericRange,
+    SetBound,
+    check_envelope,
+    load_archetype,
+    load_archetypes,
+)
 from .models import (
     AgentAction,
     AllocationDecision,
@@ -47,6 +57,14 @@ __all__ = [
     "AgentAction",
     "AllocationSlice",
     "AllocationDecision",
+    "Archetype",
+    "ArchetypePersona",
+    "EnvelopeViolation",
+    "NumericRange",
+    "SetBound",
+    "check_envelope",
+    "load_archetype",
+    "load_archetypes",
     "AquaDockIntent",
     "AquaProgram",
     "AquaShipIntent",
@@ -76,4 +94,6 @@ __all__ = [
     "WithdrawIntent",
 ]
 
-__version__ = "0.1.0"
+#: Kept in step with pyproject.toml by hand. It drifted once already — this
+#: string said 0.1.0 through two waves of content changes.
+__version__ = "0.3.0"

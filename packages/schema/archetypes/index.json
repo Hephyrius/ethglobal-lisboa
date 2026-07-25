@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "archetypes": [
+    { "key": "conservative-income", "file": "archetypes/conservative-income.json" },
+    { "key": "balanced-growth", "file": "archetypes/balanced-growth.json" },
+    { "key": "opportunistic", "file": "archetypes/opportunistic.json" }
+  ]
+}

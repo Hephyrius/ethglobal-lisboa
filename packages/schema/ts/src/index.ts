@@ -77,7 +77,11 @@ export const Mandate = z
     /** Registry keys resolved by the data layer. Granting a source is a
      *  mandate edit, not a code change — the extension point for new providers. */
     permitted_data_sources: z.array(z.string()).min(1),
-    permitted_venues: z.array(z.enum(['uniswap', 'aqua', 'aave'])).min(1),
+    /** Closed on purpose: a mandate naming a venue with no adapter yields an
+     *  agent whose every proposal the harness must reject. 'morpho' joined in
+     *  Wave 3 — it had shipped with supply and withdraw paths and was published
+     *  as one of four while this list held three. */
+    permitted_venues: z.array(z.enum(['uniswap', 'aqua', 'aave', 'morpho'])).min(1),
     created_at: z.string().datetime().optional(),
     risk_posture: z.enum(['conservative', 'balanced', 'aggressive']).default('balanced'),
     /** Optional character the agent argues in. Absent means a neutral curator. */
@@ -502,3 +506,176 @@ export type AllocationSlice = z.infer<typeof AllocationSlice>
 export type PerformancePoint = z.infer<typeof PerformancePoint>
 export type PerformanceSummary = z.infer<typeof PerformanceSummary>
 export type VaultPerformance = z.infer<typeof VaultPerformance>
+
+/**
+ * Archetypes — the constraint envelopes a generated mandate must sit inside.
+ *
+ * An archetype is BOUNDS, not a template. One click asks the model for a fresh
+ * mandate; two clicks on the same card must produce two different vaults.
+ *
+ * ## This file does not gate anything
+ *
+ * The gate is Python — `curator_schema.archetypes.check_envelope()`. Lane B
+ * calls it before deploying, and nothing here decides whether a mandate may go
+ * on-chain, so there is no second implementation to disagree with the first.
+ *
+ * What this gives the dApp is the type and `describeEnvelope()`, which generates
+ * a card's bound lines MECHANICALLY from the same JSON the gate reads. That is
+ * the whole reason it exists: a hand-written card can promise a number the
+ * envelope does not enforce, and nobody notices until a judge asks. Copy that
+ * nobody types cannot drift.
+ *
+ * Distinct from `presets/`, which are fixed mandates seeding the curator chat.
+ */
+
+export const NumericRange = z
+  .object({
+    min: z.number(),
+    max: z.number(),
+  })
+  .strict()
+  .refine((r) => r.min <= r.max, { message: 'range is empty: min > max' })
+
+/** `subset_of` is the ceiling, `must_include` the floor. The ceiling is what
+ *  makes "the model invents a strategy and it deploys unread" safe to ship. */
+export const SetBound = z
+  .object({
+    subset_of: z.array(z.string()).min(1),
+    must_include: z.array(z.string()).default([]),
+    min_count: z.number().int().min(1).default(1),
+    /** Absent means subset_of.length. */
+    max_count: z.number().int().min(1).optional(),
+  })
+  .strict()
+
+export const ArchetypePersona = z
+  .object({
+    required: z.boolean(),
+    conviction: z.array(z.enum(['low', 'medium', 'high'])).min(1).optional(),
+  })
+  .strict()
+
+export const Archetype = z
+  .object({
+    version: z.number().int().min(1),
+    key: z.string().regex(/^[a-z][a-z0-9-]{2,40}$/),
+    /** The archetype's name, NOT the generated vault's — the model writes that,
+     *  and two vaults from one card must not share it. */
+    name: z.string().min(1).max(80),
+    headline: z.string().min(1).max(120),
+    /** What the depositor gives up. Required: a menu where every option has only
+     *  upsides helps nobody choose. */
+    tradeoff: z.string().min(1).max(240),
+    base_asset: z.string(),
+    allowed_assets: SetBound,
+    permitted_venues: SetBound,
+    permitted_data_sources: SetBound,
+    risk_postures: z.array(z.enum(['conservative', 'balanced', 'aggressive'])).min(1),
+    /** Keyed by the exact field names of Mandate.constraints. */
+    constraint_ranges: z.record(z.string(), NumericRange),
+    /** Rotated one per click. Uniqueness is structural, not a hope about temperature. */
+    emphases: z.array(z.string()).min(3),
+    persona: ArchetypePersona.optional(),
+  })
+  .strict()
+
+export const ArchetypeIndex = z
+  .object({
+    version: z.number().int().min(1),
+    archetypes: z.array(z.object({ key: z.string(), file: z.string() }).strict()).min(1),
+  })
+  .strict()
+
+export type Archetype = z.infer<typeof Archetype>
+export type SetBound = z.infer<typeof SetBound>
+export type NumericRange = z.infer<typeof NumericRange>
+
+// ── Describing an envelope, without a human typing a number ────────────────
+
+const VENUE_LABELS: Record<string, string> = {
+  uniswap: 'Uniswap',
+  aqua: 'Aqua',
+  aave: 'Aave',
+  morpho: 'Morpho',
+}
+
+const label = (key: string) => VENUE_LABELS[key] ?? key
+
+/** Oxford-comma list. Empty renders as "nothing", which is a legitimate bound. */
+function list(items: readonly string[]): string {
+  if (items.length === 0) return 'nothing'
+  if (items.length === 1) return items[0]
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
+}
+
+/** A pinned range reads as one value, not as "30–30%". */
+function span(min: string, max: string): string {
+  return min === max ? min : `${min}–${max}`
+}
+
+const pct = (n: number) => `${Math.round(n * 100)}%`
+
+/** Durations a person reads, not seconds. Chosen by magnitude rather than by a
+ *  lookup table so a new bound never falls through to a raw number. */
+function duration(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`
+  if (seconds < 3600) return `${Math.round(seconds / 60)} min`
+  const hours = seconds / 3600
+  return `${Number.isInteger(hours) ? hours : hours.toFixed(1)} h`
+}
+
+function describeSet(noun: string, bound: SetBound, pretty: (s: string) => string): string {
+  const ceiling = bound.max_count ?? bound.subset_of.length
+  const options = list(bound.subset_of.map(pretty))
+  const required = bound.must_include.length
+    ? `, always including ${list(bound.must_include.map(pretty))}`
+    : ''
+  if (bound.min_count === ceiling && ceiling === bound.subset_of.length) {
+    return `${noun}: ${options}`
+  }
+  const count = span(String(bound.min_count), String(ceiling))
+  return `${noun}: ${count} of ${options}${required}`
+}
+
+/**
+ * The card's bound lines, generated from the envelope itself.
+ *
+ * Lane E renders these verbatim. Every number here came out of the same JSON
+ * `check_envelope()` reads, so a card cannot advertise a bound that is not
+ * enforced — which is the failure mode this replaces.
+ */
+export function describeEnvelope(archetype: Archetype): string[] {
+  const r = archetype.constraint_ranges
+  const lines = [
+    describeSet('Holds', archetype.allowed_assets, (s) => s),
+    describeSet('Trades on', archetype.permitted_venues, label),
+  ]
+
+  if (r.min_cash_pct) {
+    lines.push(`Keeps ${span(pct(r.min_cash_pct.min), pct(r.min_cash_pct.max))} in cash`)
+  }
+  // Only meaningful when a non-base asset can be held; with one permitted asset
+  // the cap binds on nothing and the line would state a rule that never applies.
+  if (r.max_position_pct && archetype.allowed_assets.subset_of.length > 1) {
+    lines.push(
+      `No single position above ${span(pct(r.max_position_pct.min), pct(r.max_position_pct.max))}`,
+    )
+  }
+  if (r.max_slippage_bps) {
+    lines.push(
+      `Slippage capped at ${span(String(r.max_slippage_bps.min), String(r.max_slippage_bps.max))} bps`,
+    )
+  }
+  if (r.rebalance_cooldown_seconds) {
+    const { min, max } = r.rebalance_cooldown_seconds
+    lines.push(`Rebalances no more often than every ${span(duration(min), duration(max))}`)
+  }
+  if (r.max_actions_per_tick) {
+    const { min, max } = r.max_actions_per_tick
+    lines.push(`At most ${span(String(min), String(max))} actions per decision`)
+  }
+
+  lines.push(`Risk posture: ${list(archetype.risk_postures)}`)
+  return lines
+}
+

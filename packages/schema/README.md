@@ -19,13 +19,14 @@ python/curator_schema/ pydantic mirror (models.py) + port Protocols (ports.py)
 ts/src/index.ts        zod mirror + inferred TypeScript types
 fixtures/*.json        golden fixtures — every lane develops against these
 presets/*.json         starting-point mandates offered at genesis, + index.json
-python/tests/          conformance: fixtures AND presets satisfy JSON Schema and pydantic
+archetypes/*.json      constraint ENVELOPES a generated mandate must fit, + index.json
+python/tests/          conformance: fixtures, presets AND archetypes satisfy schema + pydantic
 ```
 
 Check a change to the TypeScript mirror without needing `web/`:
 
 ```bash
-uv run pytest packages/schema/python -q                 # 57 tests
+uv run pytest packages/schema/python -q                 # 103 tests
 pnpm --filter @curator/schema typecheck                 # or: npx tsc --noEmit -p packages/schema/ts
 ```
 
@@ -94,6 +95,78 @@ directory agree in both directions. A preset is validated against `Mandate` **pl
 schema cannot express — every venue it names has an adapter, a multi-asset mandate grants a swap
 venue, and every preset grants a venue that can earn on idle capital. That is what makes *"a preset
 can never be un-deployable"* a test rather than an intention.
+
+### Archetype envelopes (`archetypes/`) — **not** presets
+
+A preset is a **fixed mandate a human reads before it deploys**. An archetype is a **constraint
+envelope the model writes a fresh mandate inside, on every click** — no conversation, no user input
+beyond the key and the deployer address, and nobody reads the result before it goes on-chain.
+
+That last clause is the whole reason `check_envelope()` exists. A generated mandate that escapes its
+envelope is **regenerated, never deployed.**
+
+```python
+from curator_schema import Mandate, check_envelope, load_archetype, load_archetypes
+
+archetype = load_archetype("balanced-growth")
+violations = check_envelope(candidate, archetype)   # [] means it may deploy
+if violations:
+    for v in violations:                            # every fault, not just the first
+        print(v.field, v.message)                   # 'constraints.min_cash_pct is 0.05, outside the permitted 0.1–0.25'
+```
+
+| Key | Envelope | Postures |
+|---|---|---|
+| `conservative-income` | USDC only · 1–2 lending venues · cash 20–40% · 10–50 bps | conservative |
+| `balanced-growth` | USDC + WETH · Uniswap required · position 30–60% · cash 10–25% | balanced |
+| `opportunistic` | 2–4 of USDC/WETH/CBBTC/AERO · all four venues · cash 5–15% | balanced, aggressive |
+
+**The field names are the mandate's field names, widened.** `Mandate.constraints.min_cash_pct` is one
+number; `Archetype.constraint_ranges.min_cash_pct` is `{min, max}` — the interval it must fall in. So
+the gate is a loop over keys, not a hand-written mapping, and `numeric_constraint_names()` reads the
+list off `MandateConstraints` itself. **Add a numeric constraint to the mandate and every archetype
+fails to load until it declares a range for it** — because an unranged dimension is one the model may
+set freely, which is the opposite of an envelope.
+
+Three bound kinds and no more:
+
+| Kind | Fields | Meaning |
+|---|---|---|
+| `set_bound` | `allowed_assets`, `permitted_venues`, `permitted_data_sources` | `subset_of` is the ceiling, `must_include` the floor, plus `min_count`/`max_count` |
+| `range` | everything in `constraint_ranges` | closed interval, **inclusive both ends** — `min == max` pins a value |
+| enum list | `risk_postures` | the postures the card admits |
+
+**The card copy lives on the archetype, not on the index** — the opposite of `presets/`, and
+deliberately. A preset file must validate as a `Mandate` and has nowhere to put a `headline`, so the
+index carries it. An archetype is its own document, so `headline` and `tradeoff` live on it and
+`archetypes/index.json` holds only keys and paths. That deletes the class of bug where a card
+promises a bound the gate does not enforce.
+
+**One gate, two readers.** `check_envelope()` is Python and only Python; nothing in TypeScript decides
+whether a mandate may deploy. The zod side gives Lane E the type and `describeEnvelope(archetype)`,
+which builds the card's bound lines *mechanically from the same JSON*:
+
+```ts
+import { Archetype, describeEnvelope } from '@curator/schema'
+describeEnvelope(Archetype.parse(json))
+// ['Holds: USDC and WETH', 'Trades on: 2–3 of Uniswap, Aave and Morpho, always including Uniswap',
+//  'Keeps 10%–25% in cash', 'No single position above 30%–60%', …]
+```
+
+No human types a number into a card, so no card can drift from the envelope.
+
+**Uniqueness is structural.** `emphases` carries at least three materially different angles, pinned
+distinct by a test, for the generator to rotate through. Temperature alone collides, and two clicks
+producing the same vault is the failure the feature is judged on. A nonce and the live snapshot are
+the agent's to add; the emphasis list is in the shared interface because the card the user reads and
+the mandate the model writes must describe the same archetype.
+
+Load-time guards, each pinned to a mistake that is easy to make by hand: `must_include ⊄ subset_of`,
+an inverted range, a missing or unknown range key, a repeated emphasis, a `base_asset` a mandate
+could omit, and — **when and only when non-base assets are permitted** — a cash floor that leaves no
+room for a full position. That last exception is the generalisation of a real preset bug: with only
+the base asset permitted, `max_position_pct` binds on nothing, so `min_cash_pct 0.4` beside a `1.0`
+cap is correct rather than contradictory.
 
 ### The soft mandate band, and where it must never apply
 

@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ethglobal-lisboa/schema/archetype.schema.json",
+  "title": "Archetype",
+  "description": "A constraint ENVELOPE the model writes a fresh Mandate inside, on every click. NOT a template and NOT a preset: presets/ are fixed mandates that seed the genesis conversation, and the user reads one before it deploys. An archetype takes no user input, has no conversation, and nobody reads the mandate it produces before that mandate goes on-chain — which is exactly why check_envelope() is not optional. A generated mandate that escapes its envelope is REGENERATED, never deployed.\n\nThe field names here are the MANDATE's field names, widened: Mandate.constraints.min_cash_pct is one number, Archetype.constraint_ranges.min_cash_pct is the interval it must fall in. That is deliberate — the check iterates keys and tests containment, so there is no hand-written mapping table to drift, and a numeric constraint with no range declared is a hole a conformance test can see.",
+  "type": "object",
+  "required": [
+    "version",
+    "key",
+    "name",
+    "headline",
+    "tradeoff",
+    "base_asset",
+    "allowed_assets",
+    "permitted_venues",
+    "permitted_data_sources",
+    "risk_postures",
+    "constraint_ranges",
+    "emphases"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Increments when any bound changes. A vault records the archetype version it was generated under, so a later widening cannot be mistaken for the envelope the vault was actually checked against."
+    },
+    "key": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{2,40}$",
+      "description": "Stable identifier, equal to the file's stem, and the {key} in POST /archetypes/{key}/deploy. Named after what the strategy does, never after a firm we do not speak for."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "description": "Display name of the archetype itself. NOT the generated vault's name — the model writes that, and two vaults from one card must not share it."
+    },
+    "headline": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "description": "One line for the card: what this archetype optimises for."
+    },
+    "tradeoff": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240,
+      "description": "What the depositor gives up by choosing it. Required, exactly as on a preset: a menu where every option has only upsides helps nobody choose."
+    },
+    "base_asset": {
+      "$ref": "#/$defs/symbol",
+      "description": "Fixed, not ranged. The ERC-4626 accounting asset is bound into the vault at deployment and share pricing depends on it, so it is not something a generation may vary. Must appear in allowed_assets.must_include."
+    },
+    "allowed_assets": {
+      "$ref": "#/$defs/set_bound",
+      "description": "Bounds on Mandate.constraints.allowed_assets. Every symbol in subset_of must be one the vault can actually PRICE — an asset with no usable feed produces a vault whose totalAssets() cannot be computed, and the mandate is written by a model that will not know that."
+    },
+    "permitted_venues": {
+      "allOf": [{ "$ref": "#/$defs/set_bound" }],
+      "description": "Bounds on Mandate.permitted_venues. subset_of is further constrained by the Mandate's own closed enum, so an envelope cannot admit a venue with no adapter.",
+      "properties": {
+        "subset_of": {
+          "items": { "type": "string", "enum": ["uniswap", "aqua", "aave", "morpho"] }
+        }
+      }
+    },
+    "permitted_data_sources": {
+      "$ref": "#/$defs/set_bound",
+      "description": "Bounds on Mandate.permitted_data_sources. Registry keys resolved by the data layer."
+    },
+    "risk_postures": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 3,
+      "uniqueItems": true,
+      "items": { "type": "string", "enum": ["conservative", "balanced", "aggressive"] },
+      "description": "The postures this archetype admits. Plural because an envelope may legitimately span two — 'opportunistic' covering balanced and aggressive is a real archetype; one covering conservative and aggressive is a card promising nothing."
+    },
+    "constraint_ranges": {
+      "type": "object",
+      "description": "One closed interval per numeric field of Mandate.constraints, keyed by that field's exact name. Inclusive at both ends. The conformance test asserts this object covers EVERY numeric constraint the mandate schema defines — an unranged constraint is a dimension the model may set freely, which is the opposite of an envelope.",
+      "required": [
+        "max_position_pct",
+        "min_cash_pct",
+        "max_slippage_bps",
+        "rebalance_cooldown_seconds",
+        "max_actions_per_tick",
+        "tolerance_band_pct"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "max_position_pct": { "$ref": "#/$defs/range", "description": "Bounds a ceiling on any single non-base asset, 0-1." },
+        "min_cash_pct": { "$ref": "#/$defs/range", "description": "Bounds the withdrawal-liquidity floor, 0-1." },
+        "max_slippage_bps": { "$ref": "#/$defs/int_range", "description": "Bounds the slippage ceiling, in bps." },
+        "rebalance_cooldown_seconds": { "$ref": "#/$defs/int_range" },
+        "max_actions_per_tick": { "$ref": "#/$defs/int_range" },
+        "tolerance_band_pct": { "$ref": "#/$defs/range", "description": "Bounds the soft band, 0-0.5. An archetype may pin it to {min: 0, max: 0} to demand strict rejection." }
+      }
+    },
+    "emphases": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 12,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 8, "maxLength": 200 },
+      "description": "Materially different angles the generator rotates through, one per click. Uniqueness has to be STRUCTURAL — temperature alone collides, and two clicks producing the same vault is the failure the whole feature is judged on. This list lives in the shared interface rather than in the agent because the card the user reads and the mandate the model writes must be describing the same archetype. Distinctness is pinned by a test; three is the floor, not the target."
+    },
+    "persona": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Whether the generated mandate carries a persona, and what it may be. Absent means the generator decides.",
+      "required": ["required"],
+      "properties": {
+        "required": {
+          "type": "boolean",
+          "description": "If true, a generation with no persona is an envelope violation."
+        },
+        "conviction": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "enum": ["low", "medium", "high"] },
+          "description": "Convictions this archetype admits. Conviction steers sizing WITHIN max_position_pct — it widens nothing, so this bound is about coherence with the card, not about safety."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "symbol": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9]{2,12}$"
+    },
+    "set_bound": {
+      "type": "object",
+      "description": "Bounds on one of the mandate's list-valued fields. subset_of is the ceiling and must_include is the floor; the generated list must sit between them.",
+      "required": ["subset_of"],
+      "additionalProperties": false,
+      "properties": {
+        "subset_of": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string" },
+          "description": "The generated list may contain nothing outside this set. THE HARD CEILING — this is the field that makes 'the model invents a strategy and it deploys unread' safe enough to ship."
+        },
+        "must_include": {
+          "type": "array",
+          "uniqueItems": true,
+          "default": [],
+          "items": { "type": "string" },
+          "description": "Every one of these must appear. Must itself be a subset of subset_of, or the envelope admits nothing — checked by a test rather than left to whoever edits the file."
+        },
+        "min_count": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1,
+          "description": "Fewest entries the generated list may have."
+        },
+        "max_count": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Most entries it may have. Absent means len(subset_of). Bounding this is how an archetype says 'concentrated' rather than merely hoping the model concentrates."
+        }
+      }
+    },
+    "range": {
+      "type": "object",
+      "description": "A closed interval, inclusive at both ends. min == max pins the value, which is how an envelope fixes one dimension while leaving the rest generative.",
+      "required": ["min", "max"],
+      "additionalProperties": false,
+      "properties": {
+        "min": { "type": "number" },
+        "max": { "type": "number" }
+      }
+    },
+    "int_range": {
+      "type": "object",
+      "description": "As range, but both ends are integers, matching the integer-typed constraints on the mandate.",
+      "required": ["min", "max"],
+      "additionalProperties": false,
+      "properties": {
+        "min": { "type": "integer" },
+        "max": { "type": "integer" }
+      }
+    }
+  }
+}

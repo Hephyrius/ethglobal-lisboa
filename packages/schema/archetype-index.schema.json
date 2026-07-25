@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ethglobal-lisboa/schema/archetype-index.schema.json",
+  "title": "ArchetypeIndex",
+  "description": "The catalogue of envelopes in packages/schema/archetypes/. Carries ONLY keys and paths — unlike preset-index.schema.json, which also holds each preset's headline and tradeoff. That difference is deliberate: a preset file must validate as a Mandate and so has nowhere to put its card copy, whereas an archetype is its own document and carries its own. Keeping the copy on the archetype deletes the class of bug where a card promises something the envelope does not enforce. The conformance test asserts this index and the directory agree in BOTH directions: listed-but-missing and present-but-unoffered are different failures and both are silent.",
+  "type": "object",
+  "required": ["version", "archetypes"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Increments when an entry is added, removed or re-keyed."
+    },
+    "archetypes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/archetype_entry" }
+    }
+  },
+  "$defs": {
+    "archetype_entry": {
+      "type": "object",
+      "required": ["key", "file"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{2,40}$",
+          "description": "Stable identifier, equal to the file's stem AND to the key inside the file. The {key} in POST /archetypes/{key}/deploy."
+        },
+        "file": {
+          "type": "string",
+          "pattern": "^archetypes/[a-z][a-z0-9-]{2,40}\\.json$",
+          "description": "Path relative to packages/schema/."
+        }
+      }
+    }
+  }
+}
