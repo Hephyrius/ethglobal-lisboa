@@ -1424,6 +1424,56 @@ path shapes and remembers the first that answers.
 
 ---
 
+## 2026-07-25 — Lane D (Wave 2): a venue manifest, and the front-running answer nearly came out backwards
+
+**What changed.** `venues/capabilities.py` — every venue publishes its intents, tokens, custody
+model, required credentials and current availability — plus `venues/tests/test_uniswap_minout.py`,
+five live tests decoding the real router calldata. 127 Lane D tests.
+
+**Why the manifest is a cause fix rather than a symptom fix.** In Wave 1 `get_venue(key)` could
+construct an adapter and nothing else. There was no way to ask *what does this venue do* or *is it
+usable*, so genesis offered a hardcoded pair and **the fully-built Aave venue could never be granted
+in a mandate** — an entire venue invisible for a wave, because the only list of venues was a literal
+in someone else's file. Patching that literal fixes the instance. Publishing capabilities means the
+list cannot disagree with reality, and `test_every_registered_venue_has_a_manifest` fails if anyone
+adds a venue and forgets to describe it.
+
+**The field that earns its place is `custody`.** `virtual` (Aqua — tokens never leave, which *is* the
+Pattern 1 claim), `claim` (Aave — the underlying really moves and the vault holds a receipt) and
+`rotational` (Uniswap — no position at all). Those three are routinely flattened into "the vault has
+a position", and the flattening is what makes a reader conclude `totalAssets()` is wrong when it is
+exactly right.
+
+**Unavailable venues are included, not filtered.** "Aave is here but this deployment cannot value the
+aToken, run `expand-universe.sh`" is a far more useful thing to render than silence — and silence is
+precisely how the venue went missing. Availability is computed from configuration and **touches no
+network**, because genesis and the UI call this on every render; `probe()` is the opt-in live form,
+and a test asserts the non-probe path performs no I/O.
+
+**The `minOut` answer, and how it nearly came out backwards.** Lane A asked whether the swap calldata
+carries a real minimum-out derived from the mandate bound, since the vault executes opaque calldata
+and cannot inspect what it never parses. First check: search the transaction data for
+`quote.output.minimumAmount`. **Not present.** On that evidence the honest-looking report is "the
+demo path has no slippage protection" — a serious claim, and wrong.
+
+Decoding properly: `UniversalRouter.execute(bytes commands, bytes[] inputs, uint256 deadline)`, each
+`V3_SWAP_EXACT_IN` input being `(recipient, amountIn, amountOutMin, path, payerIsUser)`. The trade
+**splits across two pools**, and each leg carries its *own* `amountOutMin`. Neither is zero. They sum
+to 1 wei off the quoted minimum — per-leg rounding — and the haircut against expected output is
+exactly **0.5000%**, the 50 bps we request. Confirmed non-coincidental by asking for 10 and 200 bps
+and watching the floor move correctly.
+
+So the protection is real and mandate-derived; it is merely *distributed*, and the aggregate never
+appears anywhere in the bytes. **A grep would have produced a confident false negative**, which is
+the general lesson: when checking a security property in encoded data, decode the encoding. The
+absence of a value you expected to find is not evidence of its absence.
+
+Residual risk stated rather than buried: the bound is per-process (`UNISWAP_SLIPPAGE_BPS`), not
+per-mandate, so a second mandate with a tighter ceiling on the same process is protected at the
+process bound. The real fix is a `SwapIntent` field, which is a frozen-schema change.
+
+---
+
 ## 2026-07-25 — Lane D: an ordinary market condition was escalating into a broken integration
 
 **What changed.** `_api_error` in `venues/uniswap/client.py` now classifies `ResourceNotFound` and

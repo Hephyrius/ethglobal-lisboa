@@ -14,6 +14,13 @@ venue is, which is the seam that lets Lanes A and D build independently.
 See README.md for the integration surface.
 """
 
+from .capabilities import (
+    VenueCapability,
+    capabilities,
+    capability,
+    manifest,
+    probe,
+)
 from .errors import (
     NoRouteError,
     PlanValidationError,
@@ -26,6 +33,11 @@ from .registry import VENUES, get_venue
 __all__ = [
     "VENUES",
     "get_venue",
+    "VenueCapability",
+    "capabilities",
+    "capability",
+    "manifest",
+    "probe",
     "VenueError",
     "VenueAPIError",
     "NoRouteError",
