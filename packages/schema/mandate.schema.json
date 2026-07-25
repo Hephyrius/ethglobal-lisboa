@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ethglobal-lisboa/schema/mandate.schema.json",
+  "title": "Mandate",
+  "description": "The rules and constraints a curator agent operates under. Crystallized once at genesis from a natural-language conversation. Soft (LLM-side, not enforced on-chain) and mutable ONLY by the agent as it pursues its mandate — the human deployer cannot change it after genesis. Its keccak256 hash is recorded on-chain at vault creation.",
+  "type": "object",
+  "required": [
+    "version",
+    "name",
+    "objective",
+    "base_asset",
+    "constraints",
+    "permitted_data_sources",
+    "permitted_venues"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Increments on every agent-initiated mutation. Genesis is 1."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "description": "Human-readable strategy name, e.g. 'Conservative Base Stables'."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "objective": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "description": "Natural-language investment intent, as agreed at genesis. This is the primary instruction to the model — the constraints below bound it, they do not replace it."
+    },
+    "base_asset": {
+      "$ref": "#/$defs/symbol",
+      "description": "The ERC-4626 accounting asset. Deposits, withdrawals and share pricing are denominated in this."
+    },
+    "constraints": {
+      "type": "object",
+      "description": "Hard bounds the agent must respect. Enforced by the harness at validation time, not on-chain.",
+      "required": ["allowed_assets", "max_slippage_bps"],
+      "additionalProperties": false,
+      "properties": {
+        "allowed_assets": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/symbol" },
+          "description": "The agent may only ever hold these. Must include base_asset."
+        },
+        "max_position_pct": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 1,
+          "description": "Ceiling on any single non-base asset as a fraction of totalAssets."
+        },
+        "min_cash_pct": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0,
+          "description": "Floor on unencumbered base_asset, as a fraction of totalAssets. Protects withdrawal liquidity."
+        },
+        "max_slippage_bps": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000,
+          "description": "Maximum acceptable slippage on any execution, in basis points."
+        },
+        "rebalance_cooldown_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 3600,
+          "description": "Minimum wall-clock time between executed rebalances. Prevents churn."
+        },
+        "max_actions_per_tick": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 3,
+          "description": "Bounds blast radius of a single decision cycle."
+        }
+      }
+    },
+    "permitted_data_sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string" },
+      "description": "Registry keys, resolved by the data layer's source registry (see data/README.md). The user grants these at genesis. Adding a source later is a mandate edit, NOT a code change — this is the extension point for Chainlink, Pyth, DefiLlama and anything else.",
+      "examples": [["messari", "token_api"]]
+    },
+    "permitted_venues": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "enum": ["uniswap", "aqua"] },
+      "description": "Registry keys for execution venues the agent may use."
+    },
+    "risk_posture": {
+      "type": "string",
+      "enum": ["conservative", "balanced", "aggressive"],
+      "default": "balanced",
+      "description": "Coarse steer for the model. Advisory; constraints are what actually bind."
+    },
+    "update_rules": {
+      "type": "string",
+      "maxLength": 1000,
+      "description": "The conditions under which the agent may amend this mandate, and what it may never change. Self-imposed at genesis."
+    }
+  },
+  "$defs": {
+    "symbol": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9]{2,12}$",
+      "description": "Token symbol resolved to an address by the venue/data layer, never hardcoded in the mandate."
+    }
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ethglobal-lisboa/schema/execution-plan.schema.json",
+  "title": "ExecutionPlan",
+  "description": "Concrete transactions, produced by a venue adapter (Lane D) and executed by the vault (Lane A). THIS IS THE SEAM THAT KEEPS LANES A AND D APART: Lane D builds arbitrary calldata off-chain and never touches contracts/; Lane A's vault exposes one generic allowlisted execute(target, value, data) and never learns what a venue is. A third venue is a new adapter, not a contract change.",
+  "type": "object",
+  "required": ["venue", "steps"],
+  "additionalProperties": false,
+  "properties": {
+    "venue": {
+      "type": "string",
+      "description": "Registry key of the adapter that produced this plan."
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/step" },
+      "description": "Executed in order, each via the vault's execute(). If one reverts the tick fails; adapters must order approvals before the calls that need them."
+    },
+    "expected_effect": {
+      "type": "string",
+      "maxLength": 500,
+      "description": "Plain-language summary shown in the decision feed, e.g. 'swap 1,000 USDC for ~0.31 WETH'."
+    },
+    "expected_slippage_bps": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Adapter's estimate. The harness rejects the plan if this exceeds mandate.constraints.max_slippage_bps."
+    },
+    "quote_expires_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Router quotes go stale. The harness must not submit a plan past this."
+    }
+  },
+  "$defs": {
+    "step": {
+      "type": "object",
+      "required": ["target", "value", "calldata", "why"],
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "$ref": "#/$defs/address",
+          "description": "MUST be on the vault's allowlist {Aqua, SwapVM, Uniswap UniversalRouter, Permit2, WETH} or execute() reverts."
+        },
+        "value": {
+          "$ref": "#/$defs/uint256String",
+          "description": "Native ETH in wei. Usually \"0\"."
+        },
+        "calldata": {
+          "type": "string",
+          "pattern": "^0x([a-fA-F0-9]{2})*$",
+          "description": "ABI-encoded call. Opaque to the vault."
+        },
+        "why": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Per-step human explanation, e.g. 'approve Permit2 for USDC'. Makes the decision feed readable and makes a failed step diagnosable."
+        }
+      }
+    },
+    "address": { "type": "string", "pattern": "^0x[a-fA-F0-9]{40}$" },
+    "uint256String": { "type": "string", "pattern": "^[0-9]+$" }
+  }
+}

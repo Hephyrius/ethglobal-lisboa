@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ethglobal-lisboa/schema/vault-state.schema.json",
+  "title": "VaultState",
+  "description": "On-chain state of one vault, read by the harness and rendered by the dApp. Invariant: the vault is SOLE CUSTODIAN (Pattern 1). Capital never leaves it — Aqua tracks virtual balances while the tokens stay put — so holdings[] is literally the vault's token balances and total_assets is derived from them.",
+  "type": "object",
+  "required": ["address", "asset", "total_assets", "total_supply", "holdings"],
+  "additionalProperties": false,
+  "properties": {
+    "address": { "$ref": "#/$defs/address" },
+    "asset": {
+      "$ref": "#/$defs/address",
+      "description": "ERC-4626 accounting asset (USDC on Base for the demo)."
+    },
+    "asset_decimals": { "type": "integer", "minimum": 0, "maximum": 36, "default": 6 },
+    "total_assets": {
+      "$ref": "#/$defs/uint256String",
+      "description": "totalAssets() — base-asset balance plus non-base holdings valued via Chainlink Base feeds. Single source of truth for share pricing."
+    },
+    "total_supply": { "$ref": "#/$defs/uint256String" },
+    "share_price": {
+      "type": "string",
+      "description": "convertToAssets(1e18) as a decimal string. Decimal, not float — precision matters here."
+    },
+    "holdings": {
+      "type": "array",
+      "description": "Every token the vault holds. Under Pattern 1 this is the complete picture, including capital committed to Aqua strategies.",
+      "items": {
+        "type": "object",
+        "required": ["token", "symbol", "balance"],
+        "additionalProperties": false,
+        "properties": {
+          "token": { "$ref": "#/$defs/address" },
+          "symbol": { "type": "string" },
+          "decimals": { "type": "integer", "minimum": 0, "maximum": 36 },
+          "balance": { "$ref": "#/$defs/uint256String" },
+          "value_in_asset": {
+            "$ref": "#/$defs/uint256String",
+            "description": "Valued in base asset via the same Chainlink feed totalAssets() uses, so the UI and the contract never disagree."
+          },
+          "committed_to_venue": {
+            "type": ["string", "null"],
+            "default": null,
+            "description": "Venue key if this balance backs an open position (e.g. 'aqua'). Still custodied by the vault — this flags encumbrance, not location."
+          }
+        }
+      }
+    },
+    "agent": {
+      "$ref": "#/$defs/address",
+      "description": "Holder of AGENT_ROLE. This key executes directly with no human override — that is the trust model, stated plainly."
+    },
+    "mandate_hash": {
+      "type": "string",
+      "pattern": "^0x[a-fA-F0-9]{64}$",
+      "description": "keccak256 of the canonical mandate JSON, recorded at genesis. Lets a depositor verify the off-chain mandate they were shown is the one the vault was created with."
+    },
+    "aqua_strategies": {
+      "type": "array",
+      "description": "Open Aqua positions. Informational — these do NOT move assets out of the vault.",
+      "items": {
+        "type": "object",
+        "required": ["strategy_hash", "tokens"],
+        "additionalProperties": false,
+        "properties": {
+          "strategy_hash": { "type": "string", "pattern": "^0x[a-fA-F0-9]{64}$" },
+          "app": { "$ref": "#/$defs/address" },
+          "tokens": { "type": "array", "items": { "$ref": "#/$defs/address" } },
+          "shipped_at": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+    "paused": { "type": "boolean", "default": false },
+    "block_number": { "type": "integer", "minimum": 0 }
+  },
+  "$defs": {
+    "address": { "type": "string", "pattern": "^0x[a-fA-F0-9]{40}$" },
+    "uint256String": { "type": "string", "pattern": "^[0-9]+$" }
+  }
+}

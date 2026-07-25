@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ethglobal-lisboa/schema/agent-action.schema.json",
+  "title": "AgentAction",
+  "description": "One complete decision cycle, persisted. This is the audit trail AND the demo: the dApp feed renders these as 'data consulted → reasoning → transaction'. Recorded even when the agent holds or fails, because a curator that did nothing and said why is still curating.",
+  "type": "object",
+  "required": ["id", "vault", "timestamp", "status"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "description": "Unique, monotonic within a vault." },
+    "vault": { "$ref": "#/$defs/address" },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "status": {
+      "type": "string",
+      "enum": ["pending", "executed", "held", "rejected", "failed"],
+      "description": "'rejected' = the model's output failed schema or mandate-constraint validation and never reached the chain. Keep these: they are evidence the validation layer is load-bearing."
+    },
+    "snapshot": {
+      "$ref": "market-snapshot.schema.json",
+      "description": "Exactly what the agent could see. Stored whole so a decision is reproducible after the fact."
+    },
+    "decision": { "$ref": "allocation-decision.schema.json" },
+    "plan": { "$ref": "execution-plan.schema.json" },
+    "tx_hashes": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^0x[a-fA-F0-9]{64}$" },
+      "default": []
+    },
+    "mandate_version_before": { "type": "integer", "minimum": 1 },
+    "mandate_version_after": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Differs from _before only when the agent amended its own mandate this tick."
+    },
+    "model": {
+      "type": "object",
+      "description": "Provenance of the reasoning itself.",
+      "additionalProperties": false,
+      "properties": {
+        "backend": { "type": "string", "examples": ["ollama", "vllm"] },
+        "name": { "type": "string" },
+        "validation_retries": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How many malformed outputs were rejected before a valid one. Worth surfacing — it is the honest cost of small open models."
+        }
+      }
+    },
+    "error": {
+      "type": ["string", "null"],
+      "default": null,
+      "description": "Populated for 'rejected' and 'failed'."
+    },
+    "duration_ms": { "type": "integer", "minimum": 0 }
+  },
+  "$defs": {
+    "address": { "type": "string", "pattern": "^0x[a-fA-F0-9]{40}$" }
+  }
+}

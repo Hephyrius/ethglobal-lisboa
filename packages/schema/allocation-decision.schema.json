@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ethglobal-lisboa/schema/allocation-decision.schema.json",
+  "title": "AllocationDecision",
+  "description": "What the LLM must emit, exactly. This schema is LOAD-BEARING: the agent holds a key and executes directly, and smaller open models produce malformed structured output. The harness validates against this and reject-and-retries on failure (agent/model/validation.py). Nothing reaches the chain unvalidated.",
+  "type": "object",
+  "required": ["action", "reasoning", "facts_used"],
+  "additionalProperties": false,
+  "properties": {
+    "action": {
+      "type": "string",
+      "enum": ["hold", "rebalance", "enter", "exit"],
+      "description": "'hold' is a first-class, frequently-correct answer. A model that never holds is a model that churns the vault."
+    },
+    "reasoning": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "description": "Why. Surfaced verbatim in the dApp decision feed — this is the product, not a debug field."
+    },
+    "facts_used": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "MarketSnapshot fact ids that drove this decision. Lets the UI show data → reasoning → transaction, and lets us catch a model inventing numbers."
+    },
+    "target_allocations": {
+      "type": "array",
+      "description": "Desired end state as portfolio weights. Required when action != 'hold'. Weights must sum to ~1.0 (tolerance 0.01) and every asset must be in mandate.constraints.allowed_assets — the harness enforces both.",
+      "items": {
+        "type": "object",
+        "required": ["asset", "weight"],
+        "additionalProperties": false,
+        "properties": {
+          "asset": { "type": "string" },
+          "weight": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      }
+    },
+    "venue_intents": {
+      "type": "array",
+      "description": "Venue-level intent, NOT calldata. The venue adapters (Lane D) turn these into an ExecutionPlan. The model never produces calldata.",
+      "items": { "$ref": "#/$defs/venueIntent" }
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "mandate_amendment": {
+      "type": "object",
+      "description": "Optional. The agent may amend its own mandate as it pursues it — the only actor permitted to. Applying this bumps Mandate.version and is recorded as an AgentAction.",
+      "required": ["rationale", "patch"],
+      "additionalProperties": false,
+      "properties": {
+        "rationale": { "type": "string", "maxLength": 1000 },
+        "patch": {
+          "type": "object",
+          "description": "Partial Mandate; merged over the current one, then re-validated against mandate.schema.json."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "venueIntent": {
+      "oneOf": [
+        {
+          "type": "object",
+          "title": "SwapIntent",
+          "description": "Rotate what the vault holds. Uniswap is the taker-side venue for this.",
+          "required": ["venue", "kind", "token_in", "token_out"],
+          "additionalProperties": false,
+          "properties": {
+            "venue": { "const": "uniswap" },
+            "kind": { "const": "swap" },
+            "token_in": { "type": "string" },
+            "token_out": { "type": "string" },
+            "amount_in": {
+              "$ref": "#/$defs/uint256String",
+              "description": "Base units. Mutually exclusive with pct_of_holdings."
+            },
+            "pct_of_holdings": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Fraction of the vault's token_in balance. Easier for a model to get right than base units."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "title": "AquaShipIntent",
+          "description": "Open/resize a market-making position. Tokens NEVER leave the vault — Aqua tracks virtual balances only, which is what preserves Pattern 1 custody.",
+          "required": ["venue", "kind", "tokens", "amounts"],
+          "additionalProperties": false,
+          "properties": {
+            "venue": { "const": "aqua" },
+            "kind": { "const": "ship" },
+            "tokens": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+            "amounts": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/uint256String" } },
+            "program": {
+              "type": "object",
+              "description": "SwapVM program parameters. Lane D compiles these to bytecode via the official Solidity ProgramBuilder — the model supplies parameters, never bytes.",
+              "additionalProperties": false,
+              "properties": {
+                "shape": { "type": "string", "enum": ["xyc", "pegged"], "default": "xyc" },
+                "fee_bps": { "type": "integer", "minimum": 0, "maximum": 10000 }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "title": "AquaDockIntent",
+          "description": "Close a position, returning virtual balances to free vault liquidity.",
+          "required": ["venue", "kind", "strategy_hash"],
+          "additionalProperties": false,
+          "properties": {
+            "venue": { "const": "aqua" },
+            "kind": { "const": "dock" },
+            "strategy_hash": { "$ref": "#/$defs/bytes32" }
+          }
+        }
+      ]
+    },
+    "uint256String": {
+      "type": "string",
+      "pattern": "^[0-9]+$",
+      "description": "Decimal string. Never a JSON number — uint256 exceeds float64."
+    },
+    "bytes32": { "type": "string", "pattern": "^0x[a-fA-F0-9]{64}$" }
+  }
+}

@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ethglobal-lisboa/schema/market-snapshot.schema.json",
+  "title": "MarketSnapshot",
+  "description": "What the agent can see at one moment in time. DELIBERATELY SOURCE-AGNOSTIC: this is a flat list of provenance-carrying facts, not a Graph-shaped response. Each data source contributes a partial set of facts and the registry merges them; sources never see each other and never have to agree on coverage. Adding Chainlink or Pyth later requires no change to this schema. No field here may be named after any provider.",
+  "type": "object",
+  "required": ["taken_at", "facts"],
+  "additionalProperties": false,
+  "properties": {
+    "taken_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the registry assembled this snapshot."
+    },
+    "facts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/fact" },
+      "description": "Merged contributions from every permitted source. Order is not significant."
+    },
+    "errors": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "object",
+        "required": ["source", "message"],
+        "additionalProperties": false,
+        "properties": {
+          "source": { "type": "string" },
+          "message": { "type": "string" }
+        }
+      },
+      "description": "Sources that failed. A failing source DEGRADES the snapshot; it must never crash the decision loop. The model is shown these so it knows what it could not see."
+    }
+  },
+  "$defs": {
+    "fact": {
+      "type": "object",
+      "required": ["id", "kind", "subject", "value", "unit", "source", "observed_at"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Stable within a snapshot. AllocationDecision.facts_used references these, so the UI can show exactly which data drove a decision."
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["yield", "price", "tvl", "liquidity", "volatility", "utilization", "volume"],
+          "description": "Extend this list rather than overloading an existing kind."
+        },
+        "subject": {
+          "type": "object",
+          "description": "What the fact is about. All fields optional so any source can describe whatever it knows.",
+          "additionalProperties": false,
+          "properties": {
+            "protocol": { "type": "string", "examples": ["aave-v3", "morpho-blue", "uniswap-v3"] },
+            "market": { "type": "string", "description": "Market/pool identifier within the protocol." },
+            "token": { "$ref": "#/$defs/symbolOrAddress" },
+            "pair": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "items": { "$ref": "#/$defs/symbolOrAddress" }
+            },
+            "chain": { "type": "string", "default": "base" }
+          }
+        },
+        "value": { "type": "number" },
+        "unit": {
+          "type": "string",
+          "enum": ["apy_fraction", "usd", "ratio", "bps", "token_amount"],
+          "description": "apy_fraction is 0.0432 for 4.32%, never 4.32. Normalize at the source adapter."
+        },
+        "source": {
+          "type": "string",
+          "description": "Registry key of the contributing source. This is the provenance the UI displays — 'where did this number come from'."
+        },
+        "observed_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the SOURCE observed it, which may lag taken_at. Staleness is the agent's problem to reason about."
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Optional source-reported confidence."
+        }
+      }
+    },
+    "symbolOrAddress": {
+      "type": "string",
+      "description": "Token symbol or 0x-address; adapters may emit either."
+    }
+  }
+}
