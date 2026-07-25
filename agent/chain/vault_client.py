@@ -24,21 +24,43 @@ read from `convertToAssets`, so the number matches the golden fixture's
 definition exactly: assets per whole share in 1e18 fixed point. Two lanes
 disagreeing about what "share price" scales to is the kind of thing that only
 surfaces when a depositor sees the wrong number.
+
+⚠️ The frozen interface disagrees with *itself* here, and this follows the
+fixture. `vault-state.schema.json` describes the field as `convertToAssets(1e18)`
+— 6-decimal for a USDC vault — while `fixtures/vault-state.json` carries
+`1002506265664160401` for 50,000 USDC over 49,875 shares, which is the
+dimensionless ratio × 1e18. The two differ by exactly 10¹². Request #50 asks
+Lane F to rule; until it does, the fixture wins, because every lane's tests
+validate against the fixture and nothing validates against the prose.
+
+## Why `state()` reads in two waves
+
+`/state` used to take 4.70s against a fork answering in 0.22s — about twenty
+sequential round trips, and past the dApp's 4s read timeout, so the UI fell back
+to reading the contract directly and showed "the agent API is unreachable" while
+the agent was fine (#46). None of those reads depended on each other except
+through `holdings()`, so they are now two `gather` waves: everything the vault
+can answer about itself, then the per-token metadata that needs the holdings list
+first. Token symbols and decimals are immutable, so they are also cached — the
+second tick pays for wave 1 only.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from collections.abc import Sequence
 from typing import Any
 
 from curator_schema import Holding, Mandate, VaultState
 from eth_account import Account
-from web3 import AsyncHTTPProvider, AsyncWeb3
+from web3 import AsyncHTTPProvider
 from web3.logs import DISCARD
 
 from ..config import Settings
 from .abi import ERC20_ABI, load_abi
 from .receipts import underlying_symbol
+from .rpc import make_async_web3
 
 __all__ = ["Web3VaultClient"]
 
@@ -76,10 +98,17 @@ class Web3VaultClient:
                 "transactions, which is the trust model, not an implementation detail"
             )
         self._settings = settings
-        self._w3 = AsyncWeb3(AsyncHTTPProvider(settings.rpc_url))
+        self._w3 = make_async_web3(AsyncHTTPProvider(settings.rpc_url))
         self._account = Account.from_key(settings.agent_private_key)
         self._vault_abi = load_abi("CuratedVault")
         self._factory_abi = load_abi("VaultFactory")
+        #: ERC-20 symbol and decimals never change for an address, so they are
+        #: worth exactly one round trip per token for the life of the process.
+        #: **Successful lookups only** — caching a failure would pin a token to
+        #: its truncated-address placeholder until the next restart, turning one
+        #: dropped RPC call into a permanently mislabelled holding.
+        self._symbols: dict[str, str] = {}
+        self._decimals: dict[str, int] = {}
         log.info("agent signing as %s against %s", self._account.address, settings.rpc_url)
 
     @property
@@ -93,54 +122,99 @@ class Web3VaultClient:
 
     # ── reads ─────────────────────────────────────────────────────────────
 
+    def _placeholder(self, token: str) -> str:
+        """What an unreadable token is called in the feed.
+
+        ASCII on purpose. This string reaches the model's prompt through
+        `_render_holdings`, and Lane C established that a Windows console turns a
+        UTF-8 ellipsis into a mojibake box. A holding whose `symbol()` call
+        failed is exactly the case no fixture covers, so the ASCII guard in
+        `test_prompt_rendering.py` could never have caught it.
+        """
+        return f"{token[:6]}...{token[-4:]}"
+
     async def _symbol(self, token: str) -> str:
-        """Best-effort ERC-20 symbol.
+        """Best-effort ERC-20 symbol, cached.
 
         `holdings()` returns addresses; the feed shows names. A token that does
         not implement `symbol()` (or a non-standard one returning bytes32) must
         degrade to something renderable rather than failing the whole read.
         """
+        key = token.lower()
+        if (cached := self._symbols.get(key)) is not None:
+            return cached
         try:
             erc20 = self._w3.eth.contract(
                 address=self._w3.to_checksum_address(token), abi=ERC20_ABI
             )
-            return await erc20.functions.symbol().call()
+            symbol = str(await erc20.functions.symbol().call())
         except Exception:  # noqa: BLE001
-            return f"{token[:6]}…{token[-4:]}"
+            return self._placeholder(token)
+        self._symbols[key] = symbol
+        return symbol
+
+    async def _resolve_symbols(self, tokens: Sequence[str]) -> dict[str, str]:
+        """Every token's symbol, concurrently and once each.
+
+        Deduplicated before dispatch: a vault holding both a token and its
+        receipt can list the same address twice, and paying twice for an
+        immutable answer is the N+1 in miniature.
+        """
+        wanted = list(dict.fromkeys(token.lower() for token in tokens))
+        resolved = await asyncio.gather(*(self._symbol(token) for token in wanted))
+        return dict(zip(wanted, resolved, strict=True))
 
     async def state(self, vault: str) -> VaultState:
-        contract = self._vault(vault)
-        fns = contract.functions
+        fns = self._vault(vault).functions
 
-        asset = await fns.asset().call()
-        total_assets = await fns.totalAssets().call()
-        total_supply = await fns.totalSupply().call()
-        share_decimals = await fns.decimals().call()
-        raw_holdings = await fns.holdings().call()
-        block_number = await self._w3.eth.block_number
+        # Wave 1 — everything the vault can answer about itself. Independent of
+        # each other, so one wall-clock round trip rather than eight (#46).
+        (
+            asset,
+            total_assets,
+            total_supply,
+            share_decimals,
+            raw_holdings,
+            block_number,
+            agent,
+            mandate_hash,
+        ) = await asyncio.gather(
+            fns.asset().call(),
+            fns.totalAssets().call(),
+            fns.totalSupply().call(),
+            fns.decimals().call(),
+            fns.holdings().call(),
+            self._w3.eth.block_number,
+            self._maybe(fns.agent()),
+            self._maybe(fns.mandateHash()),
+        )
 
-        agent = await self._maybe(fns.agent())
-        mandate_hash = await self._maybe(fns.mandateHash())
-        asset_decimals = await self._token_decimals(asset)
+        # Wave 2 — the token metadata, which needed the holdings list to exist.
+        # `holdings()` already carries each token's decimals, so the base asset's
+        # usually costs nothing at all; the ERC-20 call is the fallback for a
+        # vault holding none of its own asset.
+        by_token = {row[0].lower(): int(row[1]) for row in raw_holdings}
+        symbols, asset_decimals = await asyncio.gather(
+            self._resolve_symbols([row[0] for row in raw_holdings]),
+            self._asset_decimals(asset, by_token),
+        )
 
-        holdings: list[Holding] = []
-        for token, decimals, balance, value_in_asset in raw_holdings:
-            holdings.append(
-                Holding(
-                    token=token,
-                    symbol=await self._symbol(token),
-                    balance=str(balance),
-                    decimals=int(decimals),
-                    value_in_asset=str(value_in_asset),
-                )
+        holdings: list[Holding] = [
+            Holding(
+                token=token,
+                symbol=symbols[token.lower()],
+                balance=str(balance),
+                decimals=int(decimals),
+                value_in_asset=str(value_in_asset),
             )
+            for token, decimals, balance, value_in_asset in raw_holdings
+        ]
 
         # Second pass, because resolving a receipt token's underlying prefers a
         # symbol the vault is already reporting — which needs every holding
         # named first. See `agent/chain/receipts.py` for why this matters:
         # unfolded, a supplied balance reads as an asset the mandate never
-        # permitted and every constraint layer fights it.
-        symbols = {h.token.lower(): h.symbol for h in holdings}
+        # permitted and every constraint layer fights it. Local, no round trips.
         holdings = [
             h.model_copy(update={"represents": represented, "committed_to_venue": "aave"})
             if (represented := underlying_symbol(h.token, symbols)) is not None
@@ -161,14 +235,30 @@ class Web3VaultClient:
             block_number=block_number,
         )
 
-    async def _token_decimals(self, token: str) -> int:
+    async def _asset_decimals(self, asset: str, from_holdings: dict[str, int]) -> int:
+        """The base asset's decimals, preferring the answer already in hand.
+
+        `holdings()` reports decimals per token and Lane A guarantees index 0 is
+        the base asset (#13), so the common path costs no round trip. The ERC-20
+        call remains for the case that guarantee does not cover — a vault holding
+        none of its own asset — and 6 is the last resort rather than a default,
+        because a wrong scaling here misreports the vault by 10¹².
+        """
+        key = asset.lower()
+        if (known := from_holdings.get(key)) is not None:
+            return known
+        if (cached := self._decimals.get(key)) is not None:
+            return cached
         try:
             erc20 = self._w3.eth.contract(
-                address=self._w3.to_checksum_address(token), abi=ERC20_ABI
+                address=self._w3.to_checksum_address(asset), abi=ERC20_ABI
             )
-            return int(await erc20.functions.decimals().call())
+            decimals = int(await erc20.functions.decimals().call())
         except Exception:  # noqa: BLE001
+            log.warning("could not read decimals() for %s; assuming 6", asset)
             return 6
+        self._decimals[key] = decimals
+        return decimals
 
     async def _maybe(self, call) -> Any | None:
         """Optional view — absent from an older deployment is not an error."""
