@@ -94,9 +94,22 @@ function normalizeAddress(address: string): string {
  *                layer is load-bearing, which is why the schema says to keep
  *                rejected actions rather than discard them.
  */
+const DERIVED_FEED: AgentActionT[] = buildFeed()
+
 export function fixtureDecisions(address: string): AgentActionT[] {
   const vault = normalizeAddress(address)
+  return DERIVED_FEED.map((action) => ({ ...action, vault }))
+}
+
+/**
+ * Built once at module load, not per call — so these hand-authored actions are
+ * validated against the zod mirror at import time. Any drift fails the Next
+ * build (this module is imported by the landing page, which is prerendered)
+ * rather than throwing in a click handler during a demo.
+ */
+function buildFeed(): AgentActionT[] {
   const base = FIXTURE_ACTION
+  const vault = FIXTURE_VAULT_STATE.address
 
   const executed: AgentActionT = { ...base, vault }
 

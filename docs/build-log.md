@@ -8,6 +8,94 @@ the hackathon window.
 
 ---
 
+## 2026-07-25 — Lane E: the dApp — three routes, and the decision feed as the product
+
+**What changed.** `web/` MVP complete: `/` (thesis + vault list), `/create` (genesis chat → live
+mandate draft → deploy), `/vault/[address]` (state, holdings, mandate viewer, deposit/withdraw, and
+the decision feed). `pnpm build` clean; all three routes render with **nothing else running** —
+no agent API, no anvil, no deployed contracts. Usage doc at `web/README.md`.
+
+**The one architectural decision everything else follows from: reads degrade, writes fail.**
+
+Every *read* falls back to the golden fixtures when Lane B is unreachable, errors, or returns
+something that does not match the frozen schema — so this lane is never blocked (cross-lane request
+#3 is a courtesy, not a dependency). But the fallback is **loud**: each response carries the mode it
+came from and the header badge shows it on every page.
+
+That second half matters more than the first. The Graph disqualifies mocked data on the demo path,
+and the realistic way that goes wrong is not deliberate cheating — it is standing in front of a
+judge with fixtures on screen and not noticing the API fell over. A silent fallback is a trap; a
+loud one is a rail you can see from across the room. Falling back on *schema mismatch* is the same
+reasoning applied to Lane B drifting from the frozen interface: an amber badge and a legible zod
+error beat a white screen.
+
+*Writes do not fall back.* `POST /genesis/finalize` fails honestly rather than handing back a vault
+address that was never deployed and a tx hash that does not exist — someone would eventually show
+that hash to a judge. On failure the mandate stays on screen and the UI offers a clearly-labelled
+fixture *preview* of the vault surface instead, so the flow is still demonstrable end to end
+without ever displaying a fabricated deployment.
+
+**Why the decision feed is laid out as three columns.** `AllocationDecision.facts_used` holding real
+`Fact.id`s is the load-bearing invariant of the whole frozen interface for this lane: it is what
+makes data → reasoning → transaction *drawable* rather than merely adjacent. Rendering it as three
+columns makes the causality spatial instead of something a viewer reconstructs from a log. Four
+choices inside it are arguments, not decoration:
+
+- `snapshot.errors[]` renders as **"could not see"**. A failing source degrades the snapshot rather
+  than crashing the loop, so the agent routinely decides on incomplete information. Hiding that
+  would be the easy call and the wrong one — an agent that reasons openly about the limits of its
+  inputs is more trustworthy than one that appears omniscient, and the golden decision itself cites
+  a missing volatility series as its reason to size down.
+- `status: "rejected"` renders **in full**, with the retry count. It is the only visible evidence
+  that Lane B's output validation is load-bearing, which is exactly why the schema says to keep
+  those records. A feed showing only successes looks like a feed with nothing to validate.
+- `facts_used` ids that do not resolve render as **unresolved** rather than being dropped — the
+  schema says that is how a model inventing numbers gets caught, so dropping them defeats it.
+- Steps and tx hashes **pair by index only when the counts match**. The schema declares no
+  correspondence, so inventing one would be a guess presented as a fact.
+
+**A number we deliberately do not show.** `VaultState` carries `asset_decimals` but no share
+decimals, and OZ's ERC-4626 decimals offset means the two differ (the fixture has 6-decimal assets
+against 18-decimal shares). "Shares outstanding" rendered with an assumed scale would be wrong by a
+factor of 1e12, so the dashboard omits it; TVL and share price are well-defined without it, and the
+depositor's own position is read from the chain where the scale is known. Same reasoning drove
+`lib/format/units.ts` being the only place a uint256 becomes human-readable — it stays bigint until
+after the scaling divide.
+
+**Working before Lane A exists.** Deposits and withdrawals go through the *standard* ERC-4626/ERC-20
+surface, which is a standard rather than Lane A's invention, and addresses come from
+`deployments/base-fork.json` instead of constants. So the wallet flow was built and type-checked
+before any contract was deployed, and nothing has to be rewritten when the real ABIs land. When no
+vault answers at an address, the panel says so plainly rather than rendering zeroes that look like a
+funded, empty vault.
+
+**Explorer links are suppressed on a local RPC.** The anvil fork reports chain id 8453 exactly like
+mainnet, so a BaseScan link built from the chain id opens a transaction that does not exist. A dead
+explorer link opened in front of a judge reads as a fabricated transaction — worse than no link, so
+the hash renders as copyable text marked `fork` instead.
+
+**Fixtures are validated at build time, not at click time.** The three feed states (executed / held
+/ rejected) are hand-authored on top of the golden pair, and they are now built once at module load
+so `AgentAction.parse` runs during the prerender. Any drift fails `pnpm build` rather than throwing
+in a click handler mid-demo. This also closes a real gap: Wave 0's `test_conformance.py` validates
+the fixtures against the JSON Schema and the *pydantic* mirror, but nothing checked them against the
+*zod* mirror — importing and parsing them here is the TypeScript half of that conformance check.
+
+**Genesis is one page, not a wizard.** The narrative beat is *a conversation produces a mandate*, and
+watching the mandate assemble itself beside the chat is the point; a multi-step form would turn the
+same data collection back into filling in a form. The draft accumulates across turns rather than
+being replaced, because `mandate_draft` is a partial — each turn contributes what it learned.
+Empty fields are listed from the start rather than progressively disclosed, so the user sees the
+shape of what they are about to hand an autonomous agent.
+
+**Two gaps in the frozen interface, filed rather than patched** (requests #5 and #6): FastAPI needs
+CORS since the browser calls it directly, and no route returns a `Mandate` for an existing vault.
+The second is worked around client-side — the mandate is cached at finalize and otherwise the viewer
+shows the fixture badged `SAMPLE MANDATE` with a note to verify against `mandate_hash`. Neither
+blocks; both are one-line fixes on Lane B's side.
+
+---
+
 ## 2026-07-25 — Lane E: supply-chain policy for the JavaScript tree (all deps ≥180 days old)
 
 **What changed.** Every JavaScript dependency is now pinned to an exact version at least 180 days
