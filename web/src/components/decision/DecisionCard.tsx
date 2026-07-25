@@ -5,6 +5,8 @@ import type { AgentAction, Fact } from '@curator/schema'
 import { Badge, type BadgeTone } from '@/components/ui/Badge'
 import { FactCard, UnresolvedFactCard } from './FactCard'
 import { BlindSpots } from './BlindSpots'
+import { SourceNotes } from './SourceNotes'
+import { InjectionFindings } from './InjectionFindings'
 import { ExecutionSteps } from './ExecutionSteps'
 import { VenueIntents } from './VenueIntents'
 import { YieldComparison } from './YieldComparison'
@@ -132,6 +134,11 @@ export function DecisionCard({
 
           {uncited.length > 0 ? <UncitedFacts facts={uncited} /> : null}
           {action.snapshot ? <BlindSpots snapshot={action.snapshot} /> : null}
+          {action.snapshot ? <SourceNotes snapshot={action.snapshot} /> : null}
+          {/* Last in the column, directly above the reasoning it was trying to
+              influence. The adjacency is the argument: here is what the feed
+              was carrying, and here is what the agent decided anyway. */}
+          <InjectionFindings action={action} />
         </Stage>
 
         <Stage

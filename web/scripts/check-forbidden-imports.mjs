@@ -49,6 +49,26 @@ const RULES = [
   },
 ]
 
+/**
+ * Source constructs banned outright, checked the same way and for the same
+ * reason: nothing in the type system objects to them.
+ *
+ * `dangerouslySetInnerHTML` earns its place as of Wave 3. The decision journal
+ * now deliberately contains attacker-authored strings — Lane B keeps a flagged
+ * payload byte for byte so an attack is provable after the fact, and this lane
+ * renders it rather than redacting it. React escapes text children, so the
+ * default is safe and the whole exposure is this one prop. Lane B raised it as
+ * a note rather than a request; a note is a thing a person remembers for about
+ * a day, so it is a build failure instead.
+ */
+const SOURCE_RULES = [
+  {
+    pattern: /\bdangerouslySetInnerHTML\b/,
+    why: 'the decision journal contains attacker-authored strings by design (peer vault names, pool names, ERC-20 symbols) — React escapes text children, and this prop is the one way to lose that',
+    instead: 'render the value as a text child; if it must be markup, sanitise it explicitly and justify it here',
+  },
+]
+
 const EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.js', '.jsx', '.mjs'])
 
 /** `from '…'`, `import '…'`, `require('…')`, and `import('…')`. */
@@ -104,6 +124,8 @@ async function main() {
     const source = stripComments(await readFile(file, 'utf8'))
     const lines = source.split('\n')
 
+    const relative = path.relative(path.join(HERE, '..'), file).replace(/\\/g, '/')
+
     lines.forEach((line, index) => {
       for (const pattern of IMPORT_PATTERNS) {
         pattern.lastIndex = 0
@@ -113,13 +135,27 @@ async function main() {
           const rule = RULES.find((candidate) => candidate.pattern.test(specifier))
           if (rule) {
             violations.push({
-              file: path.relative(path.join(HERE, '..'), file).replace(/\\/g, '/'),
+              file: relative,
               line: index + 1,
               specifier,
               why: rule.why,
               instead: rule.instead,
             })
           }
+        }
+      }
+
+      // Comments are already stripped above, so the file explaining this rule
+      // does not trip it — the same reasoning as the import rules.
+      for (const rule of SOURCE_RULES) {
+        if (rule.pattern.test(line)) {
+          violations.push({
+            file: relative,
+            line: index + 1,
+            specifier: line.trim().slice(0, 60),
+            why: rule.why,
+            instead: rule.instead,
+          })
         }
       }
     })
