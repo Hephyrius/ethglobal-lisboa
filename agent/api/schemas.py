@@ -20,7 +20,7 @@ than pydantic is by default:
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from curator_schema import Mandate, MandateConstraints
 from curator_schema.models import Address, Bytes32
@@ -98,6 +98,39 @@ class SourcesResponse(Strict):
 
     sources: list[str]
     venues: list[str]
+
+
+class FieldDrift(Strict):
+    """One field the running harness applies that the stored mandate omits."""
+
+    path: str
+    absent: bool
+    stored: Any | None = None
+    effective: Any | None = None
+    #: The same fact as a sentence, so the dApp can render it without knowing
+    #: which of the three shapes above apply.
+    detail: str
+
+
+class MandateVerificationResponse(Strict):
+    """Whether this vault's mandate still hashes to what the chain recorded.
+
+    Exists because the answer stopped being a plain yes/no when the schema
+    gained a defaulted field (cross-lane #71). A mismatch has three possible
+    causes and only one is alarming, so the response separates them rather than
+    returning a boolean a reader would have to interpret.
+    """
+
+    vault: str
+    recomputed: str
+    matches: bool
+    #: The agent amends mandates; genesis binds the hash to version 1. A version
+    #: above 1 is an expected mismatch, not a failed verification.
+    version: int
+    amended: bool
+    drift: list[FieldDrift]
+    explanation: str
+    on_chain: str | None = None
 
 
 class HealthResponse(Strict):

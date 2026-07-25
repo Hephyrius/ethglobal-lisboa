@@ -56,6 +56,7 @@ Plus three additions that are **not** part of the freeze:
 | Route | Returns | Why it exists |
 |---|---|---|
 | `GET /vault/{addr}/mandate` | `Mandate` | Cross-lane request #5. `VaultState` carries only `mandate_hash`, so the mandate viewer had no source for a vault the browser did not itself create. |
+| `GET /vault/{addr}/mandate/verification` | `MandateVerificationResponse` | Cross-lane request #71. Whether the stored mandate still hashes to what the chain recorded — and, when it does not, **which of three reasons applies**. |
 | `GET /genesis/sources` | `{sources[], venues[]}` | The genesis flow asks the user to grant data sources. That list must come from what Lane C actually registered, not a copy hardcoded in the dApp. |
 | `GET /health` | see below | Reports **which provider each seam actually resolved to**. |
 
@@ -78,6 +79,35 @@ Every shape is imported from `packages/schema` — none are redefined here. `Man
 
 The request/response envelopes (`GenesisChatRequest`, `MandateDraft`, …) live in
 [`agent/api/schemas.py`](api/schemas.py) and mirror the zod definitions exactly.
+
+#### A mandate hash can stop matching, and usually that is the honest answer
+
+`mandate_hash` is keccak256 over the canonical serialization of the **parsed** mandate. That means a
+schema field with a non-`None` default moves the hash of vaults that were already deployed: the
+field materializes when the stored JSON is parsed, and then appears in the canonical form. Lane F
+measured exactly this when Wave 2 added `tolerance_band_pct = 0.05` (#71). `persona` does **not** do
+it — it defaults to `None` and drops out — so the rule is: *a defaulted field in `Mandate` is a
+hash-visible change.*
+
+**This is not treated as a bug to engineer around.** A vault deployed before that delta really is now
+curated by a harness that will accept a decision 5% over `max_position_pct`, on a mandate whose
+depositors were promised a hard cap. A digest built to keep matching would be an on-chain assertion
+that nothing had changed — the precise claim the hash exists to make falsifiable. (Hashing the stored
+bytes would also not work here: the store writes a re-serialization and this API returns another, so
+a depositor is never handed the preimage.)
+
+So the hash stays honest and `GET /vault/{addr}/mandate/verification` separates the three reasons a
+recompute can differ:
+
+| `explanation` says | Cause | Alarming? |
+|---|---|---|
+| *has not changed since deployment* | `matches` | no |
+| *is version N — the agent has amended it* | `amended`; genesis binds the hash to version 1 | no |
+| *predates part of the current schema* | `drift[]`, each naming a field the stored mandate omits | no, but it is a real disclosure |
+| *no schema difference or amendment explains it* | none of the above | **yes** |
+
+The shared demo vault `0x0E2c…B5d1` has the middle two at once, which is worth knowing before
+diagnosing it. Note the route is not part of the frozen interface — Lane E may render it or not.
 
 #### `VaultState.share_price` is a ratio × 10¹⁸, not `convertToAssets(1e18)`
 

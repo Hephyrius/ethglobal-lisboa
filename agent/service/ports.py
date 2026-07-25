@@ -16,7 +16,12 @@ from typing import Protocol, runtime_checkable
 
 from curator_schema import AgentAction, Mandate, VaultPerformance, VaultState
 
-from ..api.schemas import ChatMessage, GenesisChatResponse, GenesisFinalizeResponse
+from ..api.schemas import (
+    ChatMessage,
+    GenesisChatResponse,
+    GenesisFinalizeResponse,
+    MandateVerificationResponse,
+)
 
 __all__ = ["GenesisService", "VaultService"]
 
@@ -83,6 +88,15 @@ class VaultService(Protocol):
 
     async def mandate(self, vault: str) -> Mandate:
         """The mandate this vault is curated under."""
+        ...
+
+    async def mandate_verification(self, vault: str) -> MandateVerificationResponse:
+        """Whether the stored mandate still hashes to what the chain recorded.
+
+        Not a boolean, because since Wave 2 a mismatch has three causes and only
+        one of them means something is wrong (cross-lane #71). See
+        `agent/mandate/hashing.py`.
+        """
         ...
 
     async def performance(self, vault: str, window: str = "all") -> VaultPerformance:

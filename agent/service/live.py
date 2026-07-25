@@ -19,6 +19,7 @@ from ..api.schemas import (
     GenesisChatResponse,
     GenesisFinalizeResponse,
     MandateDraft,
+    MandateVerificationResponse,
 )
 from ..config import Settings
 from ..loop.cycle import DecisionCycle
@@ -33,6 +34,7 @@ from ..model.openai_compat import ModelUnavailable
 from ..model.prompts.genesis import genesis_messages, genesis_schema
 from ..performance import PerformanceStore, point_from_state, summarize
 from ..performance.window import window_points
+from .verification import verification_response
 
 __all__ = ["LiveVaultService", "LiveGenesisService"]
 
@@ -90,6 +92,25 @@ class LiveVaultService:
 
     async def mandate(self, vault: str) -> Mandate:
         return self._mandates.load(vault)
+
+    async def mandate_verification(self, vault: str) -> MandateVerificationResponse:
+        """Recompute the hash and account for any difference from the chain.
+
+        The stored bytes are read separately from the parsed mandate on purpose:
+        a schema field with a non-`None` default materializes on parse, so the
+        model alone cannot say whether this vault's mandate ever mentioned it.
+        """
+        mandate = self._mandates.load(vault)
+        stored = self._mandates.load_raw(vault) or ""
+        on_chain = None
+        try:
+            on_chain = (await self._chain.state(vault)).mandate_hash
+        except Exception as exc:  # noqa: BLE001
+            # An unreachable chain is "cannot verify", not "verification
+            # failed" — reporting a mismatch here would accuse a vault of
+            # something the RPC outage is responsible for.
+            log.warning("could not read %s's on-chain mandate hash: %s", vault, exc)
+        return verification_response(vault, stored, mandate, on_chain)
 
     async def decisions(self, vault: str, limit: int) -> list[AgentAction]:
         return self._journal.recent(vault, limit)

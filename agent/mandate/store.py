@@ -58,6 +58,18 @@ class MandateStore:
             )
         return Mandate.model_validate_json(path.read_text(encoding="utf-8"))
 
+    def load_raw(self, vault: str) -> str | None:
+        """The bytes on disk, before they meet today's models.
+
+        Needed to explain a hash mismatch (#71): a field added to the schema with
+        a non-`None` default materializes on parse, so `load()` alone cannot tell
+        you whether the stored mandate ever mentioned it. `None` when no mandate
+        is stored — the caller is asking a question about a file, not loading one,
+        and an absent file is an answer rather than an error.
+        """
+        path = self._path(vault)
+        return path.read_text(encoding="utf-8") if path.is_file() else None
+
     def save(self, vault: str, mandate: Mandate) -> str:
         """Persist and return the mandate hash."""
         path = self._path(vault)

@@ -4,6 +4,7 @@
     GET  /vault/{addr}/decisions?limit=   -> AgentAction[]
     POST /vault/{addr}/tick               -> AgentAction
     GET  /vault/{addr}/mandate            -> Mandate           (cross-lane request #5)
+    GET  /vault/{addr}/mandate/verification -> MandateVerificationResponse (#71)
     GET  /vault/{addr}/performance?window= -> VaultPerformance (Wave 1 P2)
 
 `response_model_exclude_none=True` on every route is load-bearing, not tidiness:
@@ -23,6 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from ...performance.window import WINDOWS
 from ...service.ports import VaultService
 from ..deps import get_vault_service
+from ..schemas import MandateVerificationResponse
 
 router = APIRouter(prefix="/vault", tags=["vault"])
 
@@ -116,3 +118,28 @@ async def vault_mandate(addr: VaultAddress, service: Service) -> Mandate:
     browser did not itself create.
     """
     return await service.mandate(_checked(addr))
+
+
+@router.get(
+    "/{addr}/mandate/verification",
+    response_model=MandateVerificationResponse,
+    response_model_exclude_none=True,
+)
+async def vault_mandate_verification(
+    addr: VaultAddress, service: Service
+) -> MandateVerificationResponse:
+    """Does this vault's mandate still hash to what the chain recorded?
+
+    Added for cross-lane request #71. The dApp's docs drawer claims *"the keccak
+    hash is the depositor's entire verification handle"*, and that claim went
+    conditional the moment the schema gained a field with a non-`None` default:
+    a vault deployed before `tolerance_band_pct` no longer reproduces its own
+    hash, because the field materializes when the stored mandate is parsed.
+
+    Rather than engineer the digest to keep matching — which would make the
+    on-chain hash assert something untrue, since such a vault really is being
+    run under a constraint it never agreed to — this route separates the three
+    reasons a recompute can differ and says which one applies. Only the last is
+    alarming: schema drift, an agent amendment, or an unexplained mismatch.
+    """
+    return await service.mandate_verification(_checked(addr))

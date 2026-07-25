@@ -215,11 +215,20 @@ async def test_one_state_read_costs_far_fewer_round_trips_than_it_did(client):
     assert provider.round_trips <= 11, f"N+1 is back: {provider.calls}"
 
 
-async def test_the_reads_actually_overlap(client):
+async def test_the_reads_actually_overlap():
     """**The assertion a call count cannot make.** Fifteen calls issued one at a
     time and fifteen issued together are identical by count and 3.3s apart on the
-    fork. Peak concurrency is the thing that was actually broken."""
-    vault_client, provider = client
+    fork. Peak concurrency is the thing that was actually broken.
+
+    Measured on the *second* read, and with a latency well above scheduling
+    jitter. On the first, the chain-id fetch is coalesced under a lock, so the
+    eight vault reads queue behind one another there and peak in flight reports
+    the lock rather than the batching — which showed up as a flake at 5 when the
+    box was busy with the rest of the suite.
+    """
+    vault_client, provider = _client(latency=0.05)
+    await vault_client.state(VAULT)
+    provider.peak_in_flight = 0
     await vault_client.state(VAULT)
 
     assert provider.peak_in_flight >= 6, (
@@ -239,11 +248,18 @@ async def test_the_read_costs_waves_of_latency_rather_than_calls():
     fast, slow = 0.005, 0.05
 
     async def elapsed(latency: float) -> float:
+        """Best of three. The minimum is the right statistic for a timing bound:
+        scheduling noise on a loaded box only ever *adds*, so a single sample
+        flakes while a minimum cannot be made to look faster than the code is."""
         vault_client, _ = _client(latency)
         await vault_client.state(VAULT)  # warm the caches, then measure
-        started = time.perf_counter()
-        await vault_client.state(VAULT)
-        return time.perf_counter() - started
+
+        samples = []
+        for _ in range(3):
+            started = time.perf_counter()
+            await vault_client.state(VAULT)
+            samples.append(time.perf_counter() - started)
+        return min(samples)
 
     network = await elapsed(slow) - await elapsed(fast)
     per_wave = slow - fast

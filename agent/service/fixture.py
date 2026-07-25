@@ -41,13 +41,15 @@ from ..api.schemas import (
     GenesisChatResponse,
     GenesisFinalizeResponse,
     MandateDraft,
+    MandateVerificationResponse,
 )
 from ..clock import utcnow
 from ..config import Settings
-from ..mandate.hashing import mandate_hash
+from ..mandate.hashing import canonical_json, mandate_hash
 from ..performance import summarize
 from ..performance.fixture_curve import fixture_curve
 from ..performance.window import window_points
+from .verification import verification_response
 
 __all__ = ["FixtureVaultService", "FixtureGenesisService"]
 
@@ -70,6 +72,17 @@ class FixtureVaultService:
 
     async def mandate(self, vault: str) -> Mandate:
         return fixtures.mandate()
+
+    async def mandate_verification(self, vault: str) -> MandateVerificationResponse:
+        """The golden mandate verifies against its own hash.
+
+        Fixture mode has no chain, so the "on-chain" value is the hash of the
+        fixture itself. That makes the happy path renderable before a vault
+        exists, and it is honest: the fixture genuinely is what it claims.
+        """
+        mandate = fixtures.mandate()
+        stored = canonical_json(mandate)
+        return verification_response(vault, stored, mandate, mandate_hash(mandate))
 
     async def tick(self, vault: str) -> AgentAction:
         """A fresh successful cycle, timestamped now."""
