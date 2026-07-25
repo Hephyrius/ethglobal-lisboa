@@ -217,7 +217,16 @@ YOUR MANDATE
 MARKET DATA. Cite these ids in `facts_used`:
 {_render_facts(snapshot)}{_render_gaps(snapshot)}
 
-Decide what to do with this vault now.
+Decide what to do with this vault now. Work in this order:
+
+1. Read your objective above and write down the allocation it asks for.
+2. Compare it with the percentages already shown under THE VAULT CURRENTLY HOLDS.
+3. If they differ by more than your objective tolerates, act. If they match, hold.
+
+`target_allocations` is where you want the vault to BE, not where it already is. \
+If your targets differ from the current percentages, you must supply the \
+`venue_intents` that close the gap; restating the current split as a target and \
+then holding is not a decision, it is a description.
 
 Return exactly this JSON shape:
 {{
