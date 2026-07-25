@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import pathlib
 
+import pytest
 from curator_schema.models import MarketSnapshot
 
 from curator_data.queries import errors_as_dicts, pivot_markets, pivot_pools, prices
@@ -74,6 +75,54 @@ def test_prices_pivot_by_symbol():
     assert weth["price_usd"] == 3218.44
     assert weth["source"] == "token_api"
     assert weth["fact_id"] == "f5"
+    assert weth["sources"] == ["token_api"]
+    assert weth["disagreement"] is False
+
+
+def _priced(*pairs: tuple[str, float]) -> MarketSnapshot:
+    """A snapshot with one WETH price fact per (source, value) pair."""
+    from curator_data.facts import FactBuilder
+
+    facts = []
+    for source, value in pairs:
+        builder = FactBuilder(source)
+        facts.append(builder.usd("price", builder.subject(token="WETH"), value))
+    return MarketSnapshot(taken_at=_snapshot().taken_at, facts=facts)
+
+
+def test_two_independent_sources_are_both_kept_not_collapsed():
+    """Cross-validation is the reason for registering both; last-wins loses it."""
+    priced = prices(_priced(("chainlink", 1858.98), ("token_api", 1857.03)))["WETH"]
+
+    assert priced["sources"] == ["chainlink", "token_api"]
+    assert len(priced["observations"]) == 2
+    assert {o["source"] for o in priced["observations"]} == {"chainlink", "token_api"}
+
+
+def test_the_consensus_price_is_the_median_of_the_observations():
+    priced = prices(_priced(("chainlink", 1858.98), ("token_api", 1857.03)))["WETH"]
+    assert priced["price_usd"] == pytest.approx(1858.005)
+
+
+def test_close_agreement_is_not_flagged_as_disagreement():
+    """Live, an oracle and dex-derived price sat 0.06% apart."""
+    priced = prices(_priced(("chainlink", 1858.98), ("token_api", 1857.03)))["WETH"]
+    assert priced["spread_pct"] < 1.0
+    assert priced["disagreement"] is False
+
+
+def test_a_wide_spread_is_flagged():
+    """A stale oracle or a manipulated pool is a signal, not noise to average."""
+    priced = prices(_priced(("chainlink", 1858.98), ("token_api", 1200.00)))["WETH"]
+    assert priced["disagreement"] is True
+    assert priced["spread_pct"] > 30
+
+
+def test_the_primary_reading_is_stable_across_runs():
+    """`source`/`fact_id` must not flip between calls for the same data."""
+    a = prices(_priced(("token_api", 1857.03), ("chainlink", 1858.98)))["WETH"]
+    b = prices(_priced(("chainlink", 1858.98), ("token_api", 1857.03)))["WETH"]
+    assert a["source"] == b["source"] == "chainlink"
 
 
 def test_errors_survive_the_pivot():

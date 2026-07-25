@@ -16,6 +16,7 @@ gateway data and on `packages/schema/fixtures/market-snapshot.json`.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from statistics import median
 
 from curator_schema.models import Fact, MarketSnapshot
 
@@ -148,22 +149,66 @@ def pivot_pools(snapshot: MarketSnapshot) -> list[PoolRow]:
     return sorted(rows.values(), key=lambda r: -(r.liquidity_usd or 0.0))
 
 
+#: Relative spread between independent price sources beyond which they are
+#: treated as disagreeing. Chainlink (oracle) and the Token API (executed dex
+#: swaps) measure price by mechanically unrelated means, so they should track
+#: closely on a liquid asset — live they were 0.06% apart. A gap materially
+#: wider than that is a signal in itself: a stale oracle, a manipulated pool,
+#: or a genuinely dislocated market. All three are things a curator should act
+#: on rather than average away.
+PRICE_DISAGREEMENT_PCT = 1.0
+
+
 def prices(snapshot: MarketSnapshot) -> dict[str, dict]:
-    """symbol → {price_usd, fact_id, source, observed_at}."""
-    out: dict[str, dict] = {}
+    """symbol → consensus price plus every independent observation of it.
+
+    Deliberately not "last source wins". Two sources pricing the same asset by
+    different mechanisms is the point of registering both, and collapsing them
+    to one number throws away the only cross-check the agent has.
+
+    `price_usd` is the median so a single bad source cannot set it; the
+    individual readings stay in `observations` so a caller can show its work,
+    and `disagreement` flags when they are far enough apart to be worth saying
+    out loud.
+    """
+    grouped: dict[str, list[Fact]] = {}
     for fact in snapshot.facts:
         if fact.kind != "price" or fact.unit != "usd":
             continue
         symbol = (fact.subject.token or "").upper()
-        if not symbol:
-            continue
+        if symbol:
+            grouped.setdefault(symbol, []).append(fact)
+
+    out: dict[str, dict] = {}
+    for symbol, facts in grouped.items():
+        # Stable ordering so the "primary" reading never flips between runs.
+        facts = sorted(facts, key=lambda f: f.source)
+        values = [f.value for f in facts]
+        consensus = median(values)
+        spread_pct = (
+            (max(values) - min(values)) / consensus * 100.0 if consensus and len(values) > 1
+            else 0.0
+        )
         out[symbol] = {
             "symbol": symbol,
-            "price_usd": fact.value,
-            "fact_id": fact.id,
-            "source": fact.source,
-            "observed_at": fact.observed_at.isoformat(),
-            "confidence": fact.confidence,
+            "price_usd": consensus,
+            # Kept for consumers written against the single-source shape.
+            "fact_id": facts[0].id,
+            "source": facts[0].source,
+            "observed_at": facts[0].observed_at.isoformat(),
+            "confidence": facts[0].confidence,
+            "sources": [f.source for f in facts],
+            "observations": [
+                {
+                    "source": f.source,
+                    "price_usd": f.value,
+                    "fact_id": f.id,
+                    "observed_at": f.observed_at.isoformat(),
+                }
+                for f in facts
+            ],
+            "spread_pct": spread_pct,
+            "disagreement": spread_pct > PRICE_DISAGREEMENT_PCT,
         }
     return out
 

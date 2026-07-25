@@ -35,6 +35,7 @@ from curator_data.queries import (
     prices,
     snapshot_for,
 )
+from curator_data.sources.feeds import known_symbols as feed_symbols
 from curator_data.sources.protocols import ALL as ALL_PROTOCOLS
 from curator_data.sources.tokens import known_symbols
 
@@ -156,13 +157,17 @@ def build_server(settings: Settings | None = None) -> FastMCP:
 
     @mcp.tool()
     async def get_token_price(symbol: str) -> dict:
-        """Spot USD price for a token.
+        """Spot USD price for a token, cross-checked across independent sources.
 
         Args:
             symbol: Token symbol, e.g. "WETH".
 
-        Only symbols with a known contract address on the configured chain can
-        be priced; `known_symbols` in the response lists them.
+        `price.price_usd` is the consensus (median). `price.observations` lists
+        each source separately — a Chainlink oracle read and a price derived
+        from executed DEX swaps measure the same number by unrelated means, so
+        when they agree the figure is well corroborated. `price.disagreement`
+        is true when they diverge enough to be worth acting on: a stale oracle,
+        a manipulated pool, or a genuinely dislocated market.
         """
         token = symbol.strip().upper()
         snapshot = await snapshot_for([token], kinds=PRICE_KINDS, settings=resolved)
@@ -170,7 +175,9 @@ def build_server(settings: Settings | None = None) -> FastMCP:
         return {
             "symbol": token,
             "price": found,
-            "known_symbols": known_symbols(resolved.chain),
+            "known_symbols": sorted(
+                set(known_symbols(resolved.chain)) | set(feed_symbols(resolved.chain))
+            ),
             "taken_at": snapshot.taken_at.isoformat(),
             "errors": errors_as_dicts(snapshot),
         }

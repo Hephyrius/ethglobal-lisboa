@@ -123,7 +123,15 @@ async def _snapshot(args: argparse.Namespace) -> int:
         print()
 
     for symbol, price in prices(snapshot).items():
-        print(f"  price {symbol}: ${price['price_usd']:,.2f}  (via {price['source']})")
+        via = ", ".join(price["sources"])
+        line = f"  price {symbol}: ${price['price_usd']:,.2f}  (via {via}"
+        if len(price["sources"]) > 1:
+            # Independent mechanisms agreeing is worth showing, not just
+            # asserting — and disagreeing is worth showing even more.
+            line += f", spread {price['spread_pct']:.2f}%"
+            if price["disagreement"]:
+                line += " DISAGREEMENT"
+        print(line + ")")
 
     errors = errors_as_dicts(snapshot)
     if errors:

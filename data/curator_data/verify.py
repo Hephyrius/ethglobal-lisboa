@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from .config import Settings
 from .facts import utcnow
 from .sources.aave import AaveSource
+from .sources.chainlink import ChainlinkSource
 from .sources.messari import MessariSource
 from .sources.protocols import ALL, Protocol
 from .sources.token_api import TokenApiSource
@@ -124,6 +125,32 @@ async def check_protocol(protocol: Protocol, settings: Settings) -> CheckResult:
         await source.close()
 
 
+async def check_chainlink(
+    settings: Settings, symbols: tuple[str, ...] = ("WETH", "USDC")
+) -> CheckResult:
+    """Read the on-chain feeds. Needs an RPC, not a credential."""
+    source = ChainlinkSource(settings)
+    try:
+        facts = await source.fetch(list(symbols))
+        notes = source.drain_notes()
+        if not facts:
+            return CheckResult(
+                name="chainlink",
+                ok=False,
+                detail=notes[0] if notes else "no feeds returned a price",
+            )
+        return CheckResult(
+            name="chainlink",
+            ok=True,
+            detail=f"{len(facts)} feed(s) read from {settings.rpc_url}",
+            sample=[f"{f.subject.token} = ${f.value:,.4f}" for f in facts],
+        )
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult(name="chainlink", ok=False, detail=f"{type(exc).__name__}: {exc}")
+    finally:
+        await source.close()
+
+
 async def check_token_api(settings: Settings, symbol: str = "WETH") -> CheckResult:
     source = TokenApiSource(settings)
     try:
@@ -183,6 +210,21 @@ async def verify_live(
         results += list(
             await asyncio.gather(*(check_protocol(p, resolved) for p in protocols))
         )
+
+    if only is None:
+        # Needs no credential, so it is checked whatever else is missing — and
+        # it is the reason price facts survive an absent API key.
+        if resolved.rpc_url:
+            results.append(await check_chainlink(resolved))
+        else:
+            results.append(
+                CheckResult(
+                    name="chainlink",
+                    ok=False,
+                    skipped=True,
+                    detail="skipped - no DATA_RPC_URL / ANVIL_RPC_URL / BASE_RPC_URL",
+                )
+            )
 
     if include_token_api and only is None:
         if resolved.has_token_api_credential:

@@ -77,6 +77,9 @@ class Settings:
     token_api_url: str = DEFAULT_TOKEN_API_URL
     token_api_key: str | None = None
     chain: str = DEFAULT_CHAIN
+    #: JSON-RPC endpoint for on-chain sources (Chainlink feeds). Prefers the
+    #: local fork so a snapshot matches the chain the vault is actually on.
+    rpc_url: str | None = None
     #: 30s, not 15: the live Uniswap V3 Base subgraph repeatedly answered in
     #: ~20s during testing (its indexers are slow and intermittently
     #: unavailable). A timeout below that turns a working source into a
@@ -125,6 +128,14 @@ class Settings:
             # confusing 401 is worse than an attempt.
             token_api_key=os.getenv("TOKEN_API_KEY") or os.getenv("GRAPH_API_KEY") or None,
             chain=os.getenv("DATA_CHAIN") or DEFAULT_CHAIN,
+            # Fork first: the agent reasons about the chain its vault lives on,
+            # and during development that is anvil, not mainnet.
+            rpc_url=(
+                os.getenv("DATA_RPC_URL")
+                or os.getenv("ANVIL_RPC_URL")
+                or os.getenv("BASE_RPC_URL")
+                or None
+            ),
             request_timeout_s=_env_float("DATA_REQUEST_TIMEOUT_S", 15.0),
             source_timeout_s=_env_float("DATA_SOURCE_TIMEOUT_S", 20.0),
             x402_enabled=_env_flag("X402_ENABLED", False),

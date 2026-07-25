@@ -25,6 +25,7 @@ from collections.abc import Callable, Mapping
 from ..config import Settings
 from ..ports import DataSource
 from .aave import make_aave_source
+from .chainlink import make_chainlink_source
 from .messari import make_messari_source
 from .token_api import make_token_api_source
 
@@ -41,7 +42,12 @@ SOURCE_FACTORIES: Mapping[str, SourceFactory] = {
     # schema, the MCP server or the agent. That is the claim above, exercised
     # on a real provider rather than a test double.
     "aave": make_aave_source,
-    # "chainlink": make_chainlink_source,   ← a future provider is this line
+    # `chainlink` is the strongest evidence for the claim above: it is not an
+    # HTTP API at all, it reads a contract over JSON-RPC. One file, one line,
+    # and the registry merges it with three GraphQL/REST sources without
+    # knowing the difference. The comment that used to sit here as a
+    # hypothetical is now the real thing.
+    "chainlink": make_chainlink_source,
 }
 
 
