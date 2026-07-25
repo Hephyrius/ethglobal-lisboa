@@ -90,17 +90,17 @@ GET  /health                               → {status, mode, …}   provenance 
 GET  /vault/{addr}/mandate                 → Mandate             mandate viewer
 GET  /vault/{addr}/performance?window=     → VaultPerformance    track record
 GET  /genesis/sources                      → {sources[], venues[]}
-GET  /venues                               → VenueManifest[]     ⚠️ not implemented yet (#73)
+GET  /venues                               → VenueManifest[]     venue capability manifest
 ```
 
 Every response is parsed with the zod mirror from `@curator/schema` before it reaches a component.
 Unvalidated JSON never enters the UI.
 
-`GET /venues` is the one route the app asks for that does not exist. Lane D's capability manifest is
-live in Python (#61) but nothing serves it over HTTP, so the venue strip degrades to the bare venue
-keys `/genesis/sources` returns and says capability detail is unavailable. **It does not guess** —
-writing "aqua is virtual" into the UI would be right today and is exactly the habit that hid the
-fully-built Aave venue for an entire wave.
+`GET /venues` serves Lane D's capability manifest (#61, exposed by Lane B in #73). The strip renders
+`custody` — `virtual` / `claim` / `rotational` — as the primary badge, because flattening those three
+is how a reader concludes `totalAssets()` is broken when it is right. If the route is ever absent the
+strip falls back to bare venue keys and says capability detail is unavailable; it does **not** guess,
+because a description written in the UI cannot know what the registry actually holds.
 
 **Lane A — the chain.** Reads addresses from `deployments/base-fork.json` (never hardcoded) and
 calls the **standard ERC-4626 / ERC-20 surface** declared in
@@ -113,10 +113,17 @@ which is why deposits work before `contracts/out/**` exists. Anything Lane A add
 
 | From | What | Status |
 |---|---|---|
-| B | The five routes above | Fixtures until they land |
-| B | **CORS** for `http://localhost:3000` — the browser calls the API directly (request #5) | open |
-| B | A route returning the `Mandate` for an existing vault (request #6) | open — worked around, see below |
-| A | ABIs + `deployments/base-fork.json` (request #2) | standard subset used meanwhile |
+| B | The five frozen routes | ✅ live |
+| B | **CORS** for `http://localhost:3000` — the browser calls the API directly (#5) | ✅ done |
+| B | `GET /vault/{addr}/mandate` for a vault this browser did not create (#6) | ✅ done — the local cache is now only a second rung |
+| B | `GET /venues` exposing Lane D's capability manifest (#73) | ✅ done |
+| A | ABIs + `deployments/base-fork.json` (#2) | ✅ done — addresses always read from the file |
+| B | A decision carrying `warnings[]`, so the banded-acceptance UI has something to show (§B3) | ⏳ renderer built and wired; 0 of 40 actions carry one yet |
+
+> **After Lane B ships a route, the shared `:8000` needs a restart to serve it.** Lane F alone
+> restarts the shared stack (Wave 2 §9), so ask rather than doing it. To verify against new API code
+> without touching theirs, run your own instance on another port and point the dev server at it:
+> `NEXT_PUBLIC_API_URL=http://localhost:8002 pnpm --filter @curator/web dev`.
 
 ---
 

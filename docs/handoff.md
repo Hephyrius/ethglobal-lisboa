@@ -48,11 +48,7 @@ time.
 - **Banded acceptances** (`AgentAction.warnings`) render beside the reasoning.
 - **`pnpm --filter @curator/web lint:imports`** — `'wagmi'` can never be imported again; it runs
   automatically as `prebuild`. The build log explains why `tsc` cannot catch that class of bug.
-- **Venue strip** renders Lane D's capability manifest. `custody` — `virtual` / `claim` /
-  `rotational` — is the field that stops a reader concluding `totalAssets()` is broken, so it is the
-  primary badge. Unavailable venues render *with* their reason rather than being filtered out.
-  Degrades to bare venue keys until Lane B exposes `GET /venues` (note #73), and in that state it
-  says capability detail is unavailable rather than guessing it.
+- **Venue strip** renders Lane D's capability manifest live from `GET /venues` (#61 + #73). `custody` — `virtual` / `claim` / `rotational` — is the primary badge: flattening those three is how a reader concludes `totalAssets()` is broken when it is right. Verified enriching with zero code change the moment Lane B shipped the route. Unavailable venues render *with* their reason rather than being filtered out.
 
 > ⚠️ **If you are taking screenshots or recording the video, read cross-lane note #66 first.**
 > `msedge --headless --window-size=375,H` lays out at 492px and *crops* — it does not give you the
