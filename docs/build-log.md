@@ -219,6 +219,48 @@ path shapes and remembers the first that answers.
 
 ---
 
+## 2026-07-25 — Lane D: proving the Aqua integration against the real contract, and two wrong checksums
+
+**What changed.** `venues/aqua/solidity/test/AquaShipFork.t.sol` — 5 tests that execute our `ship()`
+and `dock()` against **Aqua at its real Base address** on a mainnet fork. Plus
+`venues/tests/test_addresses.py`. 54 Python + 18 Foundry tests green.
+
+**Why this test exists.** Everything else in the lane proves we *build* correct calldata. None of it
+proved 1inch's live contract would *accept* it. Those are different claims, and the gap between them
+would have been discovered at the mainnet demo. The fork test closes it: real address, real token
+approvals via `deal()`, real `ship()`.
+
+Three assertions carry real weight:
+
+1. **The `strategyHash` Aqua returns equals the one we compute off-chain.** If it did not, every
+   `dock()` would target a position that does not exist — and we would only find out when trying to
+   close one.
+2. **`ship()` moves zero tokens.** This is the Pattern 1 custody invariant, and until now we had only
+   *asserted* it in prose. It is now checked against the contract itself: maker balances unchanged,
+   Aqua custodying nothing. If this ever fails, Aqua is not the venue we think it is and the entire
+   1inch rationale collapses — better to learn that from a test than from a judge.
+3. **Virtual balances match the shipped amounts**, so the position is genuinely fillable rather than
+   merely recorded.
+
+**A real bug this surfaced: two invalid EIP-55 checksums.** solc refused to compile
+`0x499943e74Fb0ce105688bEEe8ef2ABEc5d936d31` (Aqua) and the SwapVM equivalent. The master plan lists
+both in lowercase; I hand-cased them and got them wrong. **Python never noticed** — every address
+comparison in this lane lowercases first, so the allowlist, the encoder and all 37 tests passed
+happily. But `web3.py`, a wallet, or Lane E doing strict validation would reject an address this
+lane published as correct in its README. Now parametrised over every address constant so it cannot
+recur.
+
+The general lesson, which is the reason this is in the log rather than just the commit: *our own
+tolerance hid the defect.* Case-insensitive comparison is right for matching and wrong for
+publishing, and the tests that "passed" were passing on a weaker property than the one we needed.
+Where a value crosses a boundary to someone else, validate it in its strict form.
+
+**Fork URL note.** The public `https://mainnet.base.org` is entirely sufficient for these five tests
+— a handful of calls, not the archive-heavy workload that made `BASE_RPC_URL` a blocking credential.
+So this suite runs today even though that credential is still unset.
+
+---
+
 ## 2026-07-25 — Lane D: Aqua maker path, and why the program builder needs no deployment
 
 **What changed.** `venues/aqua/solidity/` (Foundry, 13 tests incl. a 256-run fuzz) and

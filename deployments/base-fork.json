@@ -1,36 +1,45 @@
 {
-  "_comment": "Shape only — Lane A's deploy script overwrites this with real addresses. Every other lane reads it rather than hardcoding. Do not hand-edit.",
+  "_comment": "Written by contracts/script/Deploy.s.sol. Do not hand-edit - re-run the deploy. Every lane reads addresses from here instead of hardcoding them.",
+  "blockNumber": 49077772,
   "chainId": 8453,
-  "network": "base-fork",
-  "rpcUrl": "http://localhost:8540",
-  "forkBlockNumber": null,
-  "deployedAt": null,
   "contracts": {
-    "VaultFactory": null,
-    "CuratedVaultImplementation": null
+    "CuratedVaultImplementation": "0xd5a7373214426f7eF18666a65c66dC614E1767ce",
+    "VaultFactory": "0x02827a276587B906a4DDb2C4863C9EbD6Abf302D"
   },
-  "vaults": [],
-  "external": {
-    "_comment": "Live Base mainnet addresses, present on the fork.",
-    "_verified": "Aqua and SwapVM taken from the official 1inch repos; USDC/WETH/Permit2 are canonical. UniswapUniversalRouter is NOT verified — see _unverified below.",
-    "Aqua": "0x499943e74fb0ce105688beee8ef2abec5d936d31",
-    "SwapVM": "0x8fdd04dbf6111437b44bbca99c28882434e0958f",
-    "USDC": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-    "WETH": "0x4200000000000000000000000000000000000006",
-    "Permit2": "0x000000000022D473030F116dDEE9F6B43aC78BA3"
+  "demoVault": {
+    "address": "0x0E2c0e50E67B96C9C401C94e111a3DBD00DEB5d1",
+    "agent": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+    "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "guardian": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+    "mandateHash": "0xd00e91f708cf16c2d6e1448f08fe691e0efb134c0247891ff0a886954dc72fcf",
+    "shareDecimals": 18,
+    "symbol": "cUSDC"
   },
-  "_unverified": {
-    "_comment": "Lane D: confirm before use. The Uniswap Trading API's /swap response returns the target `to` address directly, so prefer reading it from the response over hardcoding a router — versions differ across chains and have changed. Whatever it resolves to must be added to executeAllowlist, or every Uniswap plan reverts.",
-    "UniswapUniversalRouter": null
-  },
+  "deployedAt": 1784944891,
   "executeAllowlist": {
-    "_comment": "Cross-lane request #1 — Lane A confirms by CP1. Every ExecutionPlan.steps[].target must appear here or the call reverts. Incomplete: the Uniswap router target is pending Lane D's confirmation from a live /swap response.",
     "targets": [
-      "0x499943e74fb0ce105688beee8ef2abec5d936d31",
-      "0x8fdd04dbf6111437b44bbca99c28882434e0958f",
+      "0x499943E74FB0cE105688beeE8Ef2ABec5D936d31",
+      "0x8fDD04Dbf6111437B44bbca99C28882434e0958f",
+      "0x6fF5693b99212Da76ad316178A184AB56D299b43",
+      "0x2626664c2603336E57B271c5C0b26F421741e481",
       "0x000000000022D473030F116dDEE9F6B43aC78BA3",
-      "0x4200000000000000000000000000000000000006",
-      "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+      "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "0x4200000000000000000000000000000000000006"
     ]
-  }
+  },
+  "external": {
+    "Aqua": "0x499943E74FB0cE105688beeE8Ef2ABec5D936d31",
+    "ChainlinkEthUsdFeed": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+    "Permit2": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+    "SwapVM": "0x8fDD04Dbf6111437B44bbca99C28882434e0958f",
+    "USDC": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "UniswapSwapRouter02": "0x2626664c2603336E57B271c5C0b26F421741e481",
+    "UniswapUniversalRouter": "0x6fF5693b99212Da76ad316178A184AB56D299b43",
+    "WETH": "0x4200000000000000000000000000000000000006"
+  },
+  "network": "base-fork",
+  "priceMaxAge": 0,
+  "vaults": [
+    "0x0E2c0e50E67B96C9C401C94e111a3DBD00DEB5d1"
+  ]
 }

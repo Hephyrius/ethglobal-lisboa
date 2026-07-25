@@ -126,11 +126,33 @@ dependency on Foundry being installed. Aqua second — higher risk, needs the WS
 
 ## 7. Definition of done for this lane
 
-- [ ] `POST /quote` returns a live route; `UniswapVenue.plan()` emits a schema-valid `ExecutionPlan`
-- [ ] `SwapVMProgramBuilder` `eth_call` returns non-empty program bytes
-- [ ] `AquaVenue.plan()` emits a schema-valid `ExecutionPlan` with `useAquaInsteadOfSignature = true`
-- [ ] Both validate against `packages/schema/execution-plan.schema.json`, not just the pydantic mirror
-- [ ] `venues/README.md` complete enough that Lane B integrates without reading any source
-- [ ] `FEEDBACK.md` written + Uniswap Developer Feedback Form submitted
-- [ ] Build-log entries for every non-trivial decision
-- [ ] Claim released in `docs/active-work.md`
+- [x] `POST /quote` returns a live route; `UniswapVenue.plan()` emits a schema-valid `ExecutionPlan`
+- [x] `SwapVMProgramBuilder` `eth_call` returns non-empty program bytes
+- [x] `AquaVenue.plan()` emits a schema-valid `ExecutionPlan` with `useAquaInsteadOfSignature = true`
+- [x] Both validate against `packages/schema/execution-plan.schema.json`, not just the pydantic mirror
+- [x] `venues/README.md` complete enough that Lane B integrates without reading any source
+      *(confirmed: Lane B bound to `venues:get_venue` with zero code change on either side)*
+- [x] `FEEDBACK.md` written — **the Developer Feedback Form still needs a human to submit it** (§9)
+- [x] Build-log entries for every non-trivial decision
+- [x] **Beyond the stated DoD:** `ship()`/`dock()` executed against the **real deployed Aqua** on a
+      Base fork, including the zero-token-movement custody assertion
+- [x] Fresh-clone handoff verified — the lane works with no Foundry, no `node_modules`, no credentials
+- [ ] Claim released in `docs/active-work.md` *(held open until the allowlist requests 7/8 are answered)*
+
+**MVP complete.** 54 Python tests + 18 Foundry tests green.
+
+---
+
+## 8. What is left, and who owns it
+
+| Item | Owner | Note |
+|---|---|---|
+| **Uniswap Developer Feedback Form** | **a human** | `FEEDBACK.md` is written and ready to paste. The form is a browser submission and gates the $10K track — an agent cannot do it. |
+| Allowlist requests 7 & 8 | Lane A | The only open risk here. If the deployed allowlist disagrees with `addresses.EXPECTED_ALLOWLIST`, plans revert on-chain instead of failing in this lane where the message names the seam. |
+| `BASE_RPC_URL` | Wave 0 / whoever | Not blocking Lane D — the fork tests run on public Base and the program builder needs no chain state. Still blocking the *shared* fork every other lane sits on. |
+| Mainnet run | refine window | The fork test is the rehearsal; the same calls against real Base produce the BaseScan links for the submission. |
+
+**Stretch (untouched, per the MVP-only rule):** wider SwapVM instruction coverage — `PeggedSwap` for
+stable pairs, `XYCConcentrate` for concentrated ranges, Dutch-auction/TWAP programs. All are new
+`Opcode` compositions in `buildXYCProgram`'s shape; the adapter, port and plan builder do not change,
+which is the payoff from putting the encoding in Solidity behind one entry point.

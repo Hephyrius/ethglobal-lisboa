@@ -276,9 +276,27 @@ wsl -d Ubuntu-24.04 -- anvil --host 0.0.0.0 --port 8547
 Solidity tests (needs Foundry, in `wsl -d Ubuntu-24.04`):
 
 ```sh
-cd venues/aqua/solidity && forge test      # 13 tests
-sh build.sh                                # recompile + republish the artifact
+cd venues/aqua/solidity
+forge test                                   # 13 encoding tests, offline
+forge test --fork-url $BASE_RPC_URL          # + 5 against REAL deployed Aqua
+sh build.sh                                  # recompile + republish the artifact
 ```
+
+**The fork suite is the one that matters for the 1inch track.** It executes our
+`ship()` and `dock()` against Aqua at its real Base address, and asserts:
+
+- the strategy is accepted by the live registry, and the `strategyHash` it
+  returns equals the one we compute off-chain (so a later `dock()` targets the
+  right position);
+- **`ship()` moves zero tokens** — the Pattern 1 custody invariant, verified
+  against the actual contract rather than against our description of it;
+- virtual balances match the shipped amounts, so the position is genuinely
+  fillable;
+- `dock()` is equally capital-neutral.
+
+It skips itself without a fork URL, so the default suite stays green offline.
+The public `https://mainnet.base.org` is sufficient here — no archive node
+needed for a handful of calls.
 
 > `pnpm install` here **must** use `--ignore-workspace`. Without it pnpm walks
 > up, finds the repo-root workspace, and installs the web app's dependencies

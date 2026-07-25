@@ -80,7 +80,18 @@ contract Deploy is Script {
         vm.stopBroadcast();
 
         _log(factory, vault, agent, guardian, priceMaxAge);
-        _publish(network, factory, vault, agent, guardian, mandateHash, priceMaxAge);
+        _publish(
+            Published({
+                network: network,
+                factory: address(factory),
+                implementation: factory.implementation(),
+                vault: vault,
+                agent: agent,
+                guardian: guardian,
+                mandateHash: mandateHash,
+                priceMaxAge: priceMaxAge
+            })
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -113,65 +124,78 @@ contract Deploy is Script {
     // Publishing
     // ─────────────────────────────────────────────────────────────────────
 
-    function _publish(
-        string memory network,
-        VaultFactory factory,
-        address vault,
-        address agent,
-        address guardian,
-        bytes32 mandateHash,
-        uint256 priceMaxAge
-    ) internal {
-        string memory contractsObj = "contracts";
-        vm.serializeAddress(contractsObj, "VaultFactory", address(factory));
-        string memory contractsJson =
-            vm.serializeAddress(contractsObj, "CuratedVaultImplementation", factory.implementation());
+    /// @dev Grouped into a struct and split across helpers because Solidity's stack cannot hold
+    ///      this many live locals at once — `serializeJson` keeps every intermediate alive.
+    struct Published {
+        string network;
+        address factory;
+        address implementation;
+        address vault;
+        address agent;
+        address guardian;
+        bytes32 mandateHash;
+        uint256 priceMaxAge;
+    }
 
-        string memory externalObj = "external";
-        vm.serializeAddress(externalObj, "Aqua", AQUA);
-        vm.serializeAddress(externalObj, "SwapVM", SWAPVM);
-        vm.serializeAddress(externalObj, "UniswapUniversalRouter", UNIVERSAL_ROUTER);
-        vm.serializeAddress(externalObj, "UniswapSwapRouter02", SWAP_ROUTER_02);
-        vm.serializeAddress(externalObj, "Permit2", PERMIT2);
-        vm.serializeAddress(externalObj, "USDC", USDC);
-        vm.serializeAddress(externalObj, "WETH", WETH);
-        string memory externalJson = vm.serializeAddress(externalObj, "ChainlinkEthUsdFeed", ETH_USD_FEED);
-
-        string memory demoObj = "demoVault";
-        vm.serializeAddress(demoObj, "address", vault);
-        vm.serializeAddress(demoObj, "asset", USDC);
-        vm.serializeAddress(demoObj, "agent", agent);
-        vm.serializeAddress(demoObj, "guardian", guardian);
-        vm.serializeString(demoObj, "symbol", "cUSDC");
-        vm.serializeUint(demoObj, "shareDecimals", 18);
-        string memory demoJson = vm.serializeBytes32(demoObj, "mandateHash", mandateHash);
-
-        address[] memory vaultList = new address[](1);
-        vaultList[0] = vault;
-
-        string memory allowlistObj = "executeAllowlist";
-        string memory allowlistJson = vm.serializeAddress(allowlistObj, "targets", _allowlist());
-
+    function _publish(Published memory p) internal {
         string memory root = "root";
         vm.serializeString(
             root,
             "_comment",
             "Written by contracts/script/Deploy.s.sol. Do not hand-edit - re-run the deploy. Every lane reads addresses from here instead of hardcoding them."
         );
-        vm.serializeString(root, "network", network);
+        vm.serializeString(root, "network", p.network);
         vm.serializeUint(root, "chainId", block.chainid);
         vm.serializeUint(root, "blockNumber", block.number);
         vm.serializeUint(root, "deployedAt", block.timestamp);
-        vm.serializeUint(root, "priceMaxAge", priceMaxAge);
-        vm.serializeString(root, "contracts", contractsJson);
-        vm.serializeAddress(root, "vaults", vaultList);
-        vm.serializeString(root, "demoVault", demoJson);
-        vm.serializeString(root, "external", externalJson);
-        string memory out = vm.serializeString(root, "executeAllowlist", allowlistJson);
+        vm.serializeUint(root, "priceMaxAge", p.priceMaxAge);
+        vm.serializeString(root, "contracts", _contractsJson(p));
+        vm.serializeAddress(root, "vaults", _vaultList(p));
+        vm.serializeString(root, "demoVault", _demoJson(p));
+        vm.serializeString(root, "external", _externalJson());
+        string memory out = vm.serializeString(root, "executeAllowlist", _allowlistJson());
 
-        string memory path = string.concat("../deployments/", network, ".json");
+        string memory path = string.concat("../deployments/", p.network, ".json");
         vm.writeJson(out, path);
         console2.log("published ->", path);
+    }
+
+    function _contractsJson(Published memory p) private returns (string memory) {
+        string memory obj = "contracts";
+        vm.serializeAddress(obj, "VaultFactory", p.factory);
+        return vm.serializeAddress(obj, "CuratedVaultImplementation", p.implementation);
+    }
+
+    function _demoJson(Published memory p) private returns (string memory) {
+        string memory obj = "demoVault";
+        vm.serializeAddress(obj, "address", p.vault);
+        vm.serializeAddress(obj, "asset", USDC);
+        vm.serializeAddress(obj, "agent", p.agent);
+        vm.serializeAddress(obj, "guardian", p.guardian);
+        vm.serializeString(obj, "symbol", "cUSDC");
+        vm.serializeUint(obj, "shareDecimals", 18);
+        return vm.serializeBytes32(obj, "mandateHash", p.mandateHash);
+    }
+
+    function _externalJson() private returns (string memory) {
+        string memory obj = "external";
+        vm.serializeAddress(obj, "Aqua", AQUA);
+        vm.serializeAddress(obj, "SwapVM", SWAPVM);
+        vm.serializeAddress(obj, "UniswapUniversalRouter", UNIVERSAL_ROUTER);
+        vm.serializeAddress(obj, "UniswapSwapRouter02", SWAP_ROUTER_02);
+        vm.serializeAddress(obj, "Permit2", PERMIT2);
+        vm.serializeAddress(obj, "USDC", USDC);
+        vm.serializeAddress(obj, "WETH", WETH);
+        return vm.serializeAddress(obj, "ChainlinkEthUsdFeed", ETH_USD_FEED);
+    }
+
+    function _allowlistJson() private returns (string memory) {
+        return vm.serializeAddress("executeAllowlist", "targets", _allowlist());
+    }
+
+    function _vaultList(Published memory p) private pure returns (address[] memory list) {
+        list = new address[](1);
+        list[0] = p.vault;
     }
 
     function _log(VaultFactory factory, address vault, address agent, address guardian, uint256 priceMaxAge)
