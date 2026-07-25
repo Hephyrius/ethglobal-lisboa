@@ -17,13 +17,15 @@ from typing import Protocol, runtime_checkable
 from curator_schema import AgentAction, Mandate, VaultPerformance, VaultState
 
 from ..api.schemas import (
+    ArchetypeDeployResponse,
+    ArchetypeSummary,
     ChatMessage,
     GenesisChatResponse,
     GenesisFinalizeResponse,
     MandateVerificationResponse,
 )
 
-__all__ = ["GenesisService", "VaultService"]
+__all__ = ["ArchetypeService", "GenesisService", "VaultService"]
 
 
 @runtime_checkable
@@ -43,12 +45,18 @@ class GenesisService(Protocol):
         """
         ...
 
-    async def finalize(self, mandate: Mandate) -> GenesisFinalizeResponse:
+    async def finalize(
+        self, mandate: Mandate, deployer: str | None = None
+    ) -> GenesisFinalizeResponse:
         """Crystallize the mandate and deploy its vault.
 
         Hashes the canonical mandate, deploys a vault via the factory bound to
         that hash, and persists the mandate under the deployed address so the
         agent can load it on every subsequent tick.
+
+        `deployer` is Lane A's §A1 attribution field, forwarded to
+        `createVault` when the deployed factory has one. The agent submits the
+        transaction either way, so it records who asked and is never proof.
         """
         ...
 
@@ -58,6 +66,33 @@ class GenesisService(Protocol):
 
     def available_venues(self) -> list[str]:
         """Venue keys the mandate may permit."""
+        ...
+
+
+@runtime_checkable
+class ArchetypeService(Protocol):
+    """Genesis with the model in the seat the human normally occupies.
+
+    Separate from `GenesisService` because the two differ in the one way that
+    matters: genesis has a person reading the mandate before it deploys, and
+    this has nobody. Everything specific to that — the envelope check, the
+    regeneration, the record of which archetype made which vault — belongs on
+    this side of the seam and not in a flag on the other one.
+    """
+
+    def summaries(self) -> list[ArchetypeSummary]:
+        """Every envelope the dApp may offer, with how many vaults each has made."""
+        ...
+
+    async def deploy(self, key: str, deployer: str | None = None) -> ArchetypeDeployResponse:
+        """Generate a mandate inside this envelope and put it on-chain.
+
+        Raises `KeyError` for an unknown archetype and
+        `agent.archetypes.GenerationFailed` when nothing generated sat inside
+        the bounds. **Never returns a deployed vault whose mandate escaped its
+        envelope** — that is the whole contract, because nothing else reads the
+        mandate before the transaction is signed.
+        """
         ...
 
 

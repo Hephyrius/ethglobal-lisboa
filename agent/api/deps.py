@@ -20,8 +20,12 @@ from ..config import Settings, settings
 from ..providers.fixture_data import FixtureDataRegistry
 from ..providers.fixture_venue import FixtureVenueRegistry
 from ..providers.resolve import ProviderResolution, resolve_provider
-from ..service.fixture import FixtureGenesisService, FixtureVaultService
-from ..service.ports import GenesisService, VaultService
+from ..service.fixture import (
+    FixtureArchetypeService,
+    FixtureGenesisService,
+    FixtureVaultService,
+)
+from ..service.ports import ArchetypeService, GenesisService, VaultService
 
 __all__ = [
     "get_settings",
@@ -31,6 +35,7 @@ __all__ = [
     "venue_resolution",
     "get_vault_service",
     "get_genesis_service",
+    "get_archetype_service",
     "reset",
 ]
 
@@ -89,11 +94,15 @@ def _live_services():
     is working against.
     """
     try:
-        from ..service.live import LiveGenesisService, LiveVaultService
+        from ..service.live import (
+            LiveArchetypeService,
+            LiveGenesisService,
+            LiveVaultService,
+        )
     except ImportError as exc:  # pragma: no cover - only during the build
         log.warning("AGENT_MODE=live but live services are unavailable (%s); serving fixtures", exc)
         return None
-    return LiveVaultService, LiveGenesisService
+    return LiveVaultService, LiveGenesisService, LiveArchetypeService
 
 
 @lru_cache(maxsize=1)
@@ -112,8 +121,22 @@ def get_genesis_service() -> GenesisService:
     return FixtureGenesisService(cfg)
 
 
+@lru_cache(maxsize=1)
+def get_archetype_service() -> ArchetypeService:
+    cfg = get_settings()
+    if cfg.is_live and (live := _live_services()):
+        return live[2](cfg)
+    return FixtureArchetypeService(cfg)
+
+
 def reset() -> None:
     """Drop cached settings and services. For tests that patch the environment."""
     settings.cache_clear()
-    for cached in (data_resolution, venue_resolution, get_vault_service, get_genesis_service):
+    for cached in (
+        data_resolution,
+        venue_resolution,
+        get_vault_service,
+        get_genesis_service,
+        get_archetype_service,
+    ):
         cached.cache_clear()

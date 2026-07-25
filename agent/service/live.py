@@ -12,15 +12,25 @@ from __future__ import annotations
 
 import logging
 
-from curator_schema import AgentAction, Mandate, VaultPerformance, VaultState
+from curator_schema import (
+    AgentAction,
+    Mandate,
+    VaultPerformance,
+    VaultState,
+    load_archetype,
+    load_archetypes,
+)
 
 from ..api.schemas import (
+    ArchetypeDeployResponse,
+    ArchetypeSummary,
     ChatMessage,
     GenesisChatResponse,
     GenesisFinalizeResponse,
     MandateDraft,
     MandateVerificationResponse,
 )
+from ..archetypes import ArchetypeStore, Deployment, generate_mandate, market_context
 from ..config import Settings
 from ..loop.cycle import DecisionCycle
 from ..loop.engine import LlmDecisionEngine
@@ -36,7 +46,7 @@ from ..performance import PerformanceStore, point_from_state, summarize
 from ..performance.window import window_points
 from .verification import verification_response
 
-__all__ = ["LiveVaultService", "LiveGenesisService"]
+__all__ = ["LiveArchetypeService", "LiveVaultService", "LiveGenesisService"]
 
 log = logging.getLogger(__name__)
 
@@ -247,7 +257,9 @@ class LiveGenesisService:
 
         return GenesisChatResponse(reply=reply, mandate_draft=draft)
 
-    async def finalize(self, mandate: Mandate) -> GenesisFinalizeResponse:
+    async def finalize(
+        self, mandate: Mandate, deployer: str | None = None
+    ) -> GenesisFinalizeResponse:
         """Hash the mandate, deploy its vault, and persist it under that address.
 
         The order matters: the hash is computed from the mandate as given, the
@@ -256,7 +268,112 @@ class LiveGenesisService:
         leave a vault-less mandate the agent might later tick against.
         """
         digest = mandate_hash(mandate)
-        vault, deploy_tx = await self._chain.deploy(mandate, digest)
+        # Forwarded, not stored: attribution is Lane A's event (SS A1), and a
+        # second copy in this lane would be a second thing to disagree with it.
+        vault, deploy_tx = await self._chain.deploy(mandate, digest, deployer)
         self._mandates.save(vault, mandate)
         log.info("genesis complete: vault %s bound to mandate %s", vault, digest[:10])
         return GenesisFinalizeResponse(mandate_hash=digest, deploy_tx=deploy_tx, vault=vault)
+
+
+class LiveArchetypeService:
+    """`ArchetypeService` over the real model and the real factory.
+
+    Reuses `LiveGenesisService.finalize` for the last step rather than
+    reimplementing it, which is the point of §4 B1's *"deploy through the
+    existing genesis path"*: hashing, `createVault` and the mandate store are
+    identical, so an archetype vault is indistinguishable from a curated one
+    afterwards and every downstream route already works on it.
+    """
+
+    def __init__(self, settings: Settings) -> None:
+        from ..api.deps import get_data_registry
+
+        self._settings = settings
+        self._backend = build_backend(settings)
+        self._genesis = LiveGenesisService(settings)
+        self._store = ArchetypeStore(settings.state_dir)
+        self._registry = get_data_registry()
+
+    def summaries(self) -> list[ArchetypeSummary]:
+        return [
+            _summary(archetype, len(self._store.deployments(archetype.key)))
+            for archetype in load_archetypes()
+        ]
+
+    async def deploy(self, key: str, deployer: str | None = None) -> ArchetypeDeployResponse:
+        archetype = load_archetype(key)  # KeyError names what is available
+        generated = await generate_mandate(
+            self._backend,
+            archetype,
+            emphasis_index=self._store.next_emphasis_index(key, len(archetype.emphases)),
+            seen=self._store.signatures(key),
+            known_names=self._store.names(key),
+            context=market_context(await self._snapshot(archetype)),
+            max_attempts=self._settings.archetype_attempts,
+        )
+
+        # Only now. Everything above can fail, and a failure above must leave no
+        # trace on-chain — which is the difference between "regenerate" and
+        # "never deploy".
+        finalized = await self._genesis.finalize(generated.mandate, deployer)
+        self._store.record(
+            Deployment(
+                vault=finalized.vault,
+                archetype=key,
+                name=generated.mandate.name,
+                signature=generated.signature,
+                emphasis_index=generated.emphasis_index,
+                deployer=deployer,
+            )
+        )
+        log.info(
+            "archetype %s deployed %s in %d attempt(s)", key, finalized.vault, generated.attempts
+        )
+        return ArchetypeDeployResponse(
+            vault=finalized.vault,
+            mandate_hash=finalized.mandate_hash,
+            deploy_tx=finalized.deploy_tx,
+            archetype=key,
+            mandate=generated.mandate,
+            emphasis=generated.emphasis,
+            attempts=generated.attempts,
+            rejections=generated.rejections,
+            collided=generated.collided,
+        )
+
+    async def _snapshot(self, archetype):
+        """What the market looks like right now, as generation seed only.
+
+        Degrades to nothing rather than failing the click: the snapshot varies
+        the generation, it does not authorise it, so an unreachable data source
+        costs some variety and no correctness. Asking for the archetype's own
+        permitted sources keeps this inside the same access-control rule every
+        other read obeys.
+        """
+        try:
+            return await self._registry.snapshot(
+                list(archetype.permitted_data_sources.subset_of),
+                list(archetype.allowed_assets.subset_of),
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("no market context for archetype %s (%s)", archetype.key, exc)
+            return None
+
+
+def _summary(archetype, deployed: int) -> ArchetypeSummary:
+    return ArchetypeSummary(
+        key=archetype.key,
+        name=archetype.name,
+        headline=archetype.headline,
+        tradeoff=archetype.tradeoff,
+        base_asset=archetype.base_asset,
+        allowed_assets=list(archetype.allowed_assets.subset_of),
+        permitted_venues=list(archetype.permitted_venues.subset_of),
+        risk_postures=list(archetype.risk_postures),
+        constraint_ranges={
+            name: {"min": r.min, "max": r.max}
+            for name, r in archetype.constraint_ranges.items()
+        },
+        deployed=deployed,
+    )

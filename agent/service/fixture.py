@@ -30,19 +30,27 @@ from curator_schema import (
     AgentAction,
     AllocationDecision,
     Mandate,
+    MandateConstraints,
     ModelProvenance,
+    Persona,
     VaultPerformance,
     VaultState,
+    check_envelope,
+    load_archetype,
+    load_archetypes,
 )
 
 from .. import fixtures
 from ..api.schemas import (
+    ArchetypeDeployResponse,
+    ArchetypeSummary,
     ChatMessage,
     GenesisChatResponse,
     GenesisFinalizeResponse,
     MandateDraft,
     MandateVerificationResponse,
 )
+from ..archetypes import ArchetypeStore, GenerationFailed
 from ..clock import utcnow
 from ..config import Settings
 from ..mandate.hashing import canonical_json, mandate_hash
@@ -51,7 +59,7 @@ from ..performance.fixture_curve import fixture_curve
 from ..performance.window import window_points
 from .verification import verification_response
 
-__all__ = ["FixtureVaultService", "FixtureGenesisService"]
+__all__ = ["FixtureArchetypeService", "FixtureVaultService", "FixtureGenesisService"]
 
 #: Deterministic stand-ins. Recognisably fake, valid `Address` / `Bytes32`.
 _FIXTURE_VAULT = "0x1111111111111111111111111111111111111111"
@@ -252,7 +260,9 @@ class FixtureGenesisService:
         )
         return GenesisChatResponse(reply=reply, mandate_draft=draft)
 
-    async def finalize(self, mandate: Mandate) -> GenesisFinalizeResponse:
+    async def finalize(
+        self, mandate: Mandate, deployer: str | None = None
+    ) -> GenesisFinalizeResponse:
         # The hash is real even in fixture mode: same canonicalization, same
         # keccak256 as live. So the value Lane E displays here is the value that
         # will be committed on-chain for this mandate, and it can be verified.
@@ -260,4 +270,106 @@ class FixtureGenesisService:
             mandate_hash=mandate_hash(mandate),
             deploy_tx=_FIXTURE_DEPLOY_TX,
             vault=_FIXTURE_VAULT,
+        )
+
+
+class FixtureArchetypeService:
+    """`ArchetypeService` with a scripted generation.
+
+    Serves a **real** archetype envelope and a mandate that genuinely passes
+    `check_envelope()` against it — so Lane E's card renders the same bounds it
+    will see live, and an envelope that stops admitting its own fixture fails a
+    test here rather than at the demo.
+
+    The one thing it cannot fake is uniqueness: without a model, two clicks
+    produce mandates that differ only in name and cash floor. That is enough for
+    the dApp to prove it is not re-showing the same vault, and it is called out
+    rather than dressed up, because *two clicks, two different vaults* is the
+    feature being judged and fixture mode is not evidence for it.
+    """
+
+    def __init__(self, settings: Settings) -> None:
+        self._settings = settings
+        self._store = ArchetypeStore(settings.state_dir)
+        self._served = 0
+
+    def summaries(self) -> list[ArchetypeSummary]:
+        from .live import _summary
+
+        return [
+            _summary(archetype, len(self._store.deployments(archetype.key)))
+            for archetype in load_archetypes()
+        ]
+
+    async def deploy(self, key: str, deployer: str | None = None) -> ArchetypeDeployResponse:
+        archetype = load_archetype(key)  # KeyError names what is available
+        self._served += 1
+        mandate = self._invent(archetype, self._served)
+
+        # The same gate live mode uses, run against a mandate this lane wrote.
+        # A fixture that skipped it would be the one path where an envelope
+        # violation reaches a response.
+        if violations := check_envelope(mandate, archetype):
+            detail = "; ".join(f"{v.field} {v.message}" for v in violations)
+            raise GenerationFailed(key, 1, [f"the fixture escapes its own envelope — {detail}"])
+
+        index = self._served % len(archetype.emphases)
+        return ArchetypeDeployResponse(
+            vault=_FIXTURE_VAULT,
+            mandate_hash=mandate_hash(mandate),
+            deploy_tx=_FIXTURE_DEPLOY_TX,
+            archetype=key,
+            mandate=mandate,
+            emphasis=archetype.emphases[index],
+            attempts=1,
+        )
+
+    def _invent(self, archetype, nth: int) -> Mandate:
+        """A mandate at a different point in the ranges each call."""
+        ranges = archetype.constraint_ranges
+
+        def within(name: str, fraction: float) -> float:
+            allowed = ranges[name]
+            return allowed.min + (allowed.max - allowed.min) * fraction
+
+        # Walks the ranges rather than sitting at a midpoint, so a bound that is
+        # too tight to admit anything shows up as a failure here.
+        fraction = (nth % 3) / 2
+        venues = archetype.permitted_venues
+        sources = archetype.permitted_data_sources
+        constraints = MandateConstraints(
+            allowed_assets=list(archetype.allowed_assets.subset_of),
+            max_position_pct=within("max_position_pct", fraction),
+            min_cash_pct=within("min_cash_pct", fraction),
+            max_slippage_bps=int(within("max_slippage_bps", fraction)),
+            rebalance_cooldown_seconds=int(within("rebalance_cooldown_seconds", fraction)),
+            max_actions_per_tick=int(within("max_actions_per_tick", fraction)),
+            tolerance_band_pct=within("tolerance_band_pct", fraction),
+        )
+        return Mandate(
+            version=1,
+            name=f"{archetype.name} #{nth}",
+            objective=(
+                f"{archetype.headline} This is a fixture-mode generation: the live "
+                f"path asks the model for a fresh strategy inside the same bounds."
+            ),
+            base_asset=archetype.base_asset,
+            constraints=constraints,
+            permitted_data_sources=list(sources.subset_of)[: max(sources.min_count, 2)],
+            permitted_venues=list(venues.subset_of)[: venues.min_count],
+            risk_posture=archetype.risk_postures[0],
+            update_rules=(
+                "Amend only to stay inside this vault's archetype: the assets, venues "
+                "and ranges it was deployed under do not widen."
+            ),
+            created_at=utcnow(),
+            persona=(
+                Persona(
+                    name=f"The {archetype.name} Curator",
+                    voice="Plain, numerate, and willing to say when it did nothing.",
+                    conviction=(archetype.persona.conviction or ["medium"])[0],
+                )
+                if archetype.persona and archetype.persona.required
+                else None
+            ),
         )

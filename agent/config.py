@@ -143,6 +143,12 @@ class Settings:
     #: latency; the deterministic half, which is the trustworthy half, still
     #: runs.
     injection_classifier: bool = True
+    #: Generations attempted before `POST /archetypes/{key}/deploy` gives up.
+    #: An envelope violation always regenerates and never deploys, so this is
+    #: the cost of a model that keeps missing a bound rather than a safety
+    #: setting. Four is roughly ten seconds on Grok; it was a minute on the 3B,
+    #: which is why this feature was not practical before the backend changed.
+    archetype_attempts: int = 4
 
     # ── other lanes, resolved late (never imported at module scope) ───────
     #: "module:attribute" pointing at Lane C's DataSourceRegistry, e.g.
@@ -233,6 +239,7 @@ def _build() -> Settings:
         model_timeout_s=_env_float("AGENT_MODEL_TIMEOUT_S", d.model_timeout_s),
         max_validation_retries=_env_int("AGENT_MAX_VALIDATION_RETRIES", d.max_validation_retries),
         injection_classifier=_env_bool("AGENT_INJECTION_CLASSIFIER", d.injection_classifier),
+        archetype_attempts=_env_int("AGENT_ARCHETYPE_ATTEMPTS", d.archetype_attempts),
         data_registry_ref=_env_or_none("AGENT_DATA_REGISTRY"),
         venue_registry_ref=_env_or_none("AGENT_VENUE_REGISTRY"),
         venue_manifest_ref=_env("AGENT_VENUE_MANIFEST", d.venue_manifest_ref),

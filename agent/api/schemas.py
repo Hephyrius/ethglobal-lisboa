@@ -27,6 +27,9 @@ from curator_schema.models import Address, Bytes32
 from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = [
+    "ArchetypeDeployRequest",
+    "ArchetypeDeployResponse",
+    "ArchetypeSummary",
     "ChatMessage",
     "GenesisChatRequest",
     "GenesisChatResponse",
@@ -131,6 +134,72 @@ class MandateVerificationResponse(Strict):
     drift: list[FieldDrift]
     explanation: str
     on_chain: str | None = None
+
+
+class ArchetypeDeployRequest(Strict):
+    """Everything a card click carries, which is deliberately almost nothing.
+
+    No mandate, no draft, no preferences: an archetype is generated, not
+    configured (§4 B1, *"no user input beyond the archetype key and the deployer
+    address"*). A field here would be a field someone has to be shown, and the
+    feature is one button.
+    """
+
+    #: The wallet that clicked. Optional so the route works before a wallet is
+    #: connected, and **asserted rather than proven** — the agent submits the
+    #: transaction, so this records who asked, exactly as Lane A's on-chain
+    #: `deployer` does (§A1). Never treat it as a signature.
+    deployer: Address | None = None
+
+
+class ArchetypeDeployResponse(Strict):
+    """A vault nobody wrote, on-chain.
+
+    Extends the genesis finalize shape rather than replacing it, because that is
+    the honest description: this *is* a genesis, with the model in the seat the
+    human normally occupies.
+    """
+
+    vault: Address
+    mandate_hash: Bytes32
+    deploy_tx: Bytes32
+    archetype: str
+    #: The generated mandate itself, returned so the dApp can render what it just
+    #: deployed without a second round trip — nothing else has ever seen it.
+    mandate: Mandate
+    #: Which of the archetype's angles produced this one. The most legible piece
+    #: of evidence that two clicks are not the same click.
+    emphasis: str
+    #: Generations it took, including the successful one. Above 1 means the
+    #: envelope check rejected something and it never deployed.
+    attempts: int = 1
+    #: The rejections, in the words the model was given back.
+    rejections: list[str] = Field(default_factory=list)
+    #: True when this strategy matched one this archetype already deployed and
+    #: the attempts ran out. Inside its bounds, just not new.
+    collided: bool = False
+
+
+class ArchetypeSummary(Strict):
+    """One card's worth of an envelope, flattened for the dApp.
+
+    Bounds are passed through as they are declared rather than prose-described
+    here: Lane E has the same JSON and a describer generated from it, so a
+    sentence written in this lane would be a second place for the card's promise
+    to drift from the rule that enforces it.
+    """
+
+    key: str
+    name: str
+    headline: str
+    tradeoff: str
+    base_asset: str
+    allowed_assets: list[str]
+    permitted_venues: list[str]
+    risk_postures: list[str]
+    constraint_ranges: dict[str, dict[str, float]]
+    #: How many vaults this archetype has already produced in this deployment.
+    deployed: int = 0
 
 
 class HealthResponse(Strict):

@@ -43,7 +43,9 @@ class StubVaultClient:
             hashes.append("0x" + digest)
         return hashes
 
-    async def deploy(self, mandate: Mandate, mandate_hash: str) -> tuple[str, str]:
+    async def deploy(
+        self, mandate: Mandate, mandate_hash: str, deployer: str | None = None
+    ) -> tuple[str, str]:
         # Deterministic pseudo-address derived from the mandate hash, so the same
         # mandate always "deploys" to the same place during development.
         vault = "0x" + keccak(text=f"vault:{mandate_hash}").hex()[:40]
