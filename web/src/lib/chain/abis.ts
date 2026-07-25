@@ -96,6 +96,34 @@ export const erc4626Abi = [
   },
 ] as const
 
+/**
+ * Lane A's additions to the standard surface — deliberately a *separate* ABI.
+ *
+ * Everything in `erc4626Abi` above is guaranteed by the standard, so a read
+ * against it either works or the address is not a vault. These are not: they
+ * exist only once Lane A ships Wave 3 §A2, and until then `paused()` reverts
+ * with "function does not exist" against the deployed bytecode.
+ *
+ * Keeping them apart is what makes that distinguishable. A failed read here
+ * means *this vault predates the pause*, which is a fact worth rendering
+ * differently from a broken RPC — so callers catch narrowly rather than letting
+ * one missing selector degrade a whole `VaultState` read.
+ */
+export const pausableVaultAbi = [
+  { type: 'function', name: 'paused', stateMutability: 'view', inputs: [], outputs: [{ type: 'bool' }] },
+  {
+    type: 'function',
+    name: 'redeemInKind',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'shares', type: 'uint256' },
+      { name: 'receiver', type: 'address' },
+      { name: 'owner', type: 'address' },
+    ],
+    outputs: [],
+  },
+] as const
+
 export const erc20Abi = [
   { type: 'function', name: 'decimals', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint8' }] },
   { type: 'function', name: 'symbol', stateMutability: 'view', inputs: [], outputs: [{ type: 'string' }] },

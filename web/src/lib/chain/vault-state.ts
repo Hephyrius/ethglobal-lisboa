@@ -1,6 +1,6 @@
 import type { VaultState } from '@curator/schema'
 import { readContract } from '@wagmi/core'
-import { erc20Abi, erc4626Abi } from './abis'
+import { erc20Abi, erc4626Abi, pausableVaultAbi } from './abis'
 import { KNOWN_TOKENS, asAddress } from './deployments'
 import { wagmiConfig } from './wagmi'
 
@@ -19,6 +19,34 @@ import { wagmiConfig } from './wagmi'
  * because part of it is.
  */
 
+/**
+ * Is the vault paused? Reads Lane A's `paused()`, and treats its absence as
+ * "not paused" rather than as a failure.
+ *
+ * The distinction is the whole point. A vault deployed before Wave 3 §A2 has no
+ * `paused()` selector, so the call reverts — and that revert means *this
+ * contract cannot be paused*, which is materially different from *the node is
+ * unreachable*. Returning `false` is therefore the true answer for an old
+ * vault, not a convenient default.
+ *
+ * ⚠️ The failure mode this guards against runs the other way, and it is the one
+ * that matters: reporting `false` for a vault that IS paused would tell a
+ * depositor trading is live when it is halted. That cannot happen here, because
+ * a deployed `paused()` answers honestly and only its *absence* falls through —
+ * and a contract without the function has no pause to be in.
+ */
+async function readPaused(vault: `0x${string}`): Promise<boolean> {
+  try {
+    return await readContract(wagmiConfig, {
+      address: vault,
+      abi: pausableVaultAbi,
+      functionName: 'paused',
+    })
+  } catch {
+    return false
+  }
+}
+
 /** Tokens to check balances for. The vault is sole custodian, so `balanceOf` is the whole picture. */
 function candidateTokens(assetAddress: `0x${string}`): `0x${string}`[] {
   const known = [asAddress(KNOWN_TOKENS.USDC), asAddress(KNOWN_TOKENS.WETH)].filter(
@@ -30,11 +58,12 @@ function candidateTokens(assetAddress: `0x${string}`): `0x${string}`[] {
 }
 
 export async function readChainVaultState(vault: `0x${string}`): Promise<VaultState> {
-  const [assetAddress, shareDecimals, totalAssets, totalSupply] = await Promise.all([
+  const [assetAddress, shareDecimals, totalAssets, totalSupply, paused] = await Promise.all([
     readContract(wagmiConfig, { address: vault, abi: erc4626Abi, functionName: 'asset' }),
     readContract(wagmiConfig, { address: vault, abi: erc4626Abi, functionName: 'decimals' }),
     readContract(wagmiConfig, { address: vault, abi: erc4626Abi, functionName: 'totalAssets' }),
     readContract(wagmiConfig, { address: vault, abi: erc4626Abi, functionName: 'totalSupply' }),
+    readPaused(vault),
   ])
 
   const assetDecimals = Number(
@@ -105,7 +134,7 @@ export async function readChainVaultState(vault: `0x${string}`): Promise<VaultSt
           ).toString(),
     holdings: holdings.filter((holding): holding is NonNullable<typeof holding> => holding !== null),
     aqua_strategies: [],
-    paused: false,
+    paused,
   }
 }
 

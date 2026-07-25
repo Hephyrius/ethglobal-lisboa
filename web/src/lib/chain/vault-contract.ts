@@ -1,9 +1,15 @@
 'use client'
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { getBytecode, readContract, waitForTransactionReceipt, writeContract } from '@wagmi/core'
+import {
+  getBytecode,
+  readContract,
+  simulateContract,
+  waitForTransactionReceipt,
+  writeContract,
+} from '@wagmi/core'
 import { maxUint256 } from 'viem'
-import { erc20Abi, erc4626Abi } from './abis'
+import { erc20Abi, erc4626Abi, pausableVaultAbi } from './abis'
 import { readShareDecimals } from './vault-state'
 import { wagmiConfig } from './wagmi'
 
@@ -73,6 +79,25 @@ export type VaultPosition = {
   allowance: bigint
   shares: bigint
   sharesInAssets: bigint
+  /** Base asset actually sitting in the vault — what a redemption can be paid from. */
+  vaultLiquid: bigint
+  /**
+   * Shares the vault can pay *right now*, which is not the same as the shares
+   * the holder owns.
+   *
+   * Lane A's request #76, measured on their side: `totalAssets()` 15,000 against
+   * 9,000 liquid after the agent rotates USDC→WETH, so a holder whose shares are
+   * worth 10,000 cannot redeem them. `maxWithdraw()` and `previewRedeem()` both
+   * report the **claim**, not what is payable, and the revert surfaces from the
+   * ERC-20 rather than the vault — so on screen an illiquid vault is
+   * indistinguishable from a broken one.
+   *
+   * The value is therefore `min(shares, convertToShares(vaultLiquid))`, and it is
+   * asked of the chain rather than derived from a share-price ratio: the two
+   * share scales differ by 1e12 in this deployment (#81), and this is exactly
+   * the kind of arithmetic where that silently produces a plausible number.
+   */
+  payableShares: bigint
 }
 
 export function useVaultPosition(vault: `0x${string}`, account?: `0x${string}`) {
@@ -95,28 +120,48 @@ export function useVaultPosition(vault: `0x${string}`, account?: `0x${string}`) 
         }),
       ])
 
-      const [assetSymbol, assetDecimals, walletAssets, allowance, sharesInAssets] = await Promise.all([
-        readContract(wagmiConfig, { address: assetAddress, abi: erc20Abi, functionName: 'symbol' }),
-        readContract(wagmiConfig, { address: assetAddress, abi: erc20Abi, functionName: 'decimals' }),
-        readContract(wagmiConfig, {
-          address: assetAddress,
-          abi: erc20Abi,
-          functionName: 'balanceOf',
-          args: [account],
-        }),
-        readContract(wagmiConfig, {
-          address: assetAddress,
-          abi: erc20Abi,
-          functionName: 'allowance',
-          args: [account, vault],
-        }),
-        readContract(wagmiConfig, {
-          address: vault,
-          abi: erc4626Abi,
-          functionName: 'convertToAssets',
-          args: [shares],
-        }),
-      ])
+      const [assetSymbol, assetDecimals, walletAssets, allowance, sharesInAssets, vaultLiquid] =
+        await Promise.all([
+          readContract(wagmiConfig, { address: assetAddress, abi: erc20Abi, functionName: 'symbol' }),
+          readContract(wagmiConfig, { address: assetAddress, abi: erc20Abi, functionName: 'decimals' }),
+          readContract(wagmiConfig, {
+            address: assetAddress,
+            abi: erc20Abi,
+            functionName: 'balanceOf',
+            args: [account],
+          }),
+          readContract(wagmiConfig, {
+            address: assetAddress,
+            abi: erc20Abi,
+            functionName: 'allowance',
+            args: [account, vault],
+          }),
+          readContract(wagmiConfig, {
+            address: vault,
+            abi: erc4626Abi,
+            functionName: 'convertToAssets',
+            args: [shares],
+          }),
+          // The vault's own base-asset balance — #76. This is the number a
+          // redemption is actually paid out of.
+          readContract(wagmiConfig, {
+            address: assetAddress,
+            abi: erc20Abi,
+            functionName: 'balanceOf',
+            args: [vault],
+          }),
+        ])
+
+      // One extra call rather than dividing locally, deliberately. Converting
+      // liquidity to shares by hand means picking a share scale, and the two in
+      // this deployment differ by 1e12 — the vault's own `convertToShares` is
+      // the only source that cannot be wrong about its own offset.
+      const liquidInShares = await readContract(wagmiConfig, {
+        address: vault,
+        abi: erc4626Abi,
+        functionName: 'convertToShares',
+        args: [vaultLiquid],
+      })
 
       return {
         assetAddress,
@@ -127,6 +172,8 @@ export function useVaultPosition(vault: `0x${string}`, account?: `0x${string}`) 
         allowance,
         shares,
         sharesInAssets,
+        vaultLiquid,
+        payableShares: shares < liquidInShares ? shares : liquidInShares,
       }
     },
   })
@@ -190,7 +237,39 @@ export function useVaultActions(vault: `0x${string}`, account?: `0x${string}`) {
     onSuccess: refresh,
   })
 
-  return { approve, deposit, redeem }
+  /**
+   * The in-kind exit — Lane A's §A2b, and the only redemption that is
+   * unconditionally payable.
+   *
+   * Ordinary `redeem` pays in the base asset, so it is capped by what the vault
+   * holds in that asset (#76). `redeemInKind` pays a pro-rata slice of *every*
+   * token instead: no oracle, no venue, no unwind to wait for. Worse UX, and a
+   * strictly better guarantee — which is the right trade for an emergency exit
+   * and the reason the paused banner can honestly say nobody is trapped.
+   *
+   * Simulated before it is signed. Two different things can make this revert —
+   * the vault is not paused, or it predates §A2b and has no such selector — and
+   * simulating tells the holder which without spending gas to find out. A UI
+   * that offers an exit and then reverts is worse than one that never offered
+   * it, because it looks like the exit is broken rather than unavailable.
+   */
+  const redeemInKind = useMutation({
+    mutationFn: async (shares: bigint) => {
+      if (!account) throw new Error('Connect a wallet first')
+      const { request } = await simulateContract(wagmiConfig, {
+        address: vault,
+        abi: pausableVaultAbi,
+        functionName: 'redeemInKind',
+        args: [shares, account, account],
+        account,
+      })
+      const hash = await writeContract(wagmiConfig, request)
+      return waitForTransactionReceipt(wagmiConfig, { hash })
+    },
+    onSuccess: refresh,
+  })
+
+  return { approve, deposit, redeem, redeemInKind }
 }
 
 export { maxUint256 }

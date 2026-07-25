@@ -12,6 +12,7 @@ import { MandateView } from '@/components/mandate/MandateView'
 import { DepositWithdraw } from './DepositWithdraw'
 import { HoldingsDonut } from './HoldingsDonut'
 import { AquaPositions } from './AquaPositions'
+import { PausedBanner } from './PausedBanner'
 import { VaultHeader } from './VaultHeader'
 import { VaultStats } from './VaultStats'
 import { useVaultDecisions, useVaultState } from '@/lib/api/vault-queries'
@@ -58,6 +59,11 @@ export function VaultDashboard({ address }: { address: `0x${string}` }) {
 
       {vaultExists.data === false ? <MissingVaultNotice address={address} /> : null}
 
+      {/* Above the stats on purpose. A halt changes how every number below it
+          should be read, so it cannot sit further down the page than the
+          figures it qualifies. */}
+      <PausedBanner state={state} />
+
       <ModeNotice />
 
       <Card>
@@ -67,7 +73,7 @@ export function VaultDashboard({ address }: { address: `0x${string}` }) {
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-3">
-        <DepositWithdraw vault={address} />
+        <DepositWithdraw vault={address} paused={state.paused} />
         <div className="lg:col-span-2">
           <HoldingsDonut state={state} />
           <AquaPositions state={state} />
