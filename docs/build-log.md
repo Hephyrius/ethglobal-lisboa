@@ -8,6 +8,60 @@ the hackathon window.
 
 ---
 
+## 2026-07-25 — Wave 3 §A2b: a pause that unwinds, and the objection it steps around
+
+**What changed.** The Wave 3 plan gained §A2b, §B3 and six tests: pausing a vault now also winds it
+down to the base asset, and adds `redeemInKind()`. Operator's proposal.
+
+**Why it is worth recording.** It closes a hole this project had already **measured and written
+off.** `contracts/SECURITY.md` §10: `totalAssets()` 15,000 against 9,000 liquid, and a 10,000
+redemption **reverts** — from the ERC-20 rather than the vault, so it reads as broken rather than
+illiquid. Today the only thing holding it off is the mandate's `min_cash_pct` — a soft, off-chain
+guarantee — and Wave 2 §B1 deliberately pushes idle capital *out* to venues, shrinking exactly that
+buffer. We were making the hole bigger on purpose while it sat documented as unfixable.
+
+**The reason it was declined no longer applies, and the distinction is precise.** §10 says
+honouring a redemption against non-base holdings means unwinding *"during a withdrawal, which needs
+a venue-aware liquidation path inside the vault — exactly the coupling the opaque-calldata seam
+exists to avoid."* That reasoning is right about unwinding **inside `withdraw()`**. It says nothing
+about unwinding **at pause time**, which happens once rather than per redemption, can be
+asynchronous, and reuses the off-chain `ExecutionPlan` — so no venue knowledge enters the contract.
+A rejected design was rejected for a reason that turned out to be narrower than the phrasing.
+
+**Three problems with a literal "pause liquidates everything", each fatal alone.** It is
+self-contradictory (pausing blocks `execute`; unwinding *is* executing). A guardian who can force
+liquidation at a time of its choosing is a worse power than the agent it contains — they pick the
+block and can trade ahead of it. And it cannot be atomic: a Uniswap unwind needs off-chain quotes,
+and an Aqua position needs `dock()` with a strategy hash the contract does not hold.
+
+**Two mechanisms, both built, covering different timescales.**
+
+**Wind-down mode** — `pause()` changes what trading is *for* rather than forbidding it. The agent may
+still `execute`, but only toward the base asset, and the **contract** verifies it: base-asset balance
+strictly up, no non-base balance up, measured at the end of the batch so multi-hop routes still work.
+This is the on-chain twin of the harness's `check_rebalance_direction`, and it yields a property
+worth more than the feature — **a fully compromised agent key in wind-down can do nothing but
+convert holdings to cash.** The guardian gains "stop increasing, start decreasing", never "sell now".
+
+**`redeemInKind()`** — pay the redeemer their pro-rata slice of every token rather than the base
+asset. No oracle, no slippage, no venue, no front-running surface, atomic and exact. Worse UX,
+strictly better guarantee: unconditionally payable, which the base-asset path provably is not. It is
+what covers the window while the unwind is still running.
+
+**Alternatives rejected.** Liquidating inside `withdraw()` — §10's original objection, still correct.
+A guardian-specified liquidation route — hands the guardian the timing and the trade, which is the
+forced-sale primitive the whole design is avoiding. `redeemInKind` alone without the unwind — leaves
+every depositor holding aTokens they did not ask for, when converging the book back to cash restores
+the ordinary exit for everyone who would rather wait.
+
+**The trap Lane B has to avoid, named in §B3 because its shape is already on our record.** Layers 5
+and 6 reject trades that move away from the target allocation, so in wind-down they would reject
+every liquidation. The fix is to teach them the paused case explicitly — *not* to relax the existing
+check. Wave 1's worst validation gap was precisely an exemption added so a golden fixture would pass,
+which then let a 100% liquidation through all six layers.
+
+---
+
 ## 2026-07-25 — Wave 3 plan: three things the code said that the feedback could not know
 
 **What changed.** [plans/2026-07-25-wave-3-archetypes-security-audit.md](../plans/2026-07-25-wave-3-archetypes-security-audit.md)

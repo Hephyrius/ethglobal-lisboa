@@ -132,7 +132,7 @@ Per §0.2, this narrows an existing guardian power rather than adding one.
 
 | Must pause | Must **never** pause |
 |---|---|
-| `execute`, `executeBatch` | `withdraw`, `redeem` |
+| `execute`, `executeBatch` (except as §A2b permits) | `withdraw`, `redeem` |
 | — | `deposit`, `mint` (arguable; default to allowing) |
 
 **A pause that blocks withdrawals is a rug vector**, not a safety feature. A guardian who can freeze
@@ -144,11 +144,77 @@ Also required:
 - An event on pause and unpause, so the dashboard and the decision feed can explain a halt.
 - Update the contract header. It currently says *"no pause"*, which will be false. Say what the guardian can and cannot do, and that withdrawals are outside its reach.
 
+### A2b · Getting depositors their money out — the liquidity hole a pause should close
+
+**Operator's proposal:** pausing should also unwind everything back to the base asset so depositors
+can withdraw.
+
+**The problem it targets is real, measured, and already written off.** `SECURITY.md` §10 records it:
+`totalAssets()` 15,000 against 9,000 liquid, and a 10,000 redemption **reverts** — from the ERC-20,
+not from the vault, so on screen it reads as a broken vault rather than an illiquid one. Today the
+only thing holding it off is the mandate's `min_cash_pct`, i.e. **a soft off-chain guarantee
+enforced by the harness rather than by the contract** — and Wave 2's §B1 pushes idle capital *out*
+to venues, which shrinks exactly that buffer.
+
+§10 declines to fix it because *"honouring a redemption against non-base holdings means unwinding
+positions **during a withdrawal**, which needs a venue-aware liquidation path inside the vault."*
+**That objection does not apply here.** Unwinding at *pause* time is not unwinding *inside*
+`withdraw()`: it happens once rather than per redemption, it can be asynchronous, and it reuses the
+existing off-chain `ExecutionPlan` machinery — so no venue coupling enters the vault.
+
+Three problems with a literal "pause liquidates everything", each fatal on its own:
+
+1. **It is self-contradictory.** Pausing blocks `execute`, and unwinding *is* executing.
+2. **A guardian who can force liquidation at a moment of its choosing is more dangerous than the
+   agent.** They pick the timing; they can trade ahead of it. That is a worse power than the one the
+   pause exists to contain.
+3. **It cannot be atomic on-chain.** A Uniswap unwind needs quotes and calldata built off-chain, and
+   an Aqua position needs `dock()` with a strategy hash the contract does not hold. `pause()` cannot
+   synchronously sell anything.
+
+**Two mechanisms that keep the benefit and drop all three. Build both — they cover different
+timescales.**
+
+**(a) Wind-down mode — `pause()` changes what trading is *for*, rather than forbidding it.**
+While paused the agent may still `execute`, but **only in the direction of the base asset**, and the
+contract checks it: after the batch, the base-asset balance must have strictly increased and no
+non-base balance may have increased. That is the on-chain twin of the harness's existing
+`check_rebalance_direction`, and it is a strong property — **even a fully compromised agent key can
+do nothing in wind-down but convert holdings to cash.** The guardian gains "stop increasing, start
+decreasing", not "sell everything now at my chosen block". Balances are measured only at the end of
+`executeBatch`, so a multi-hop route that transiently holds an intermediate token is fine.
+
+**(b) `redeemInKind()` — available while paused, and the one that needs no market at all.**
+Pay the redeemer their pro-rata slice of **every** token the vault holds, rather than the base asset.
+No oracle, no slippage, no venue, no waiting for an unwind, no front-running surface — atomic and
+exact. The depositor receives WETH and aUSDC alongside USDC, which is a worse user experience and a
+strictly better guarantee: it is unconditionally payable, which the base-asset path provably is not.
+For an emergency exit that is the right trade, and it is a far smaller contract change than a
+liquidation path.
+
+Together: **(b)** means nobody is ever trapped, from the instant of the pause; **(a)** means the book
+converges to cash so ordinary `redeem` starts working again for everyone who would rather wait.
+
+⚠️ **Do not let (a) become a forced-sale primitive.** The guardian pauses; the *agent* still chooses
+the route and the size, under the same allowlist and the same off-chain plan. If the guardian can
+name the trade, this section has been implemented wrongly.
+
 ### A3 · Tests
 
-Withdrawal-while-paused (above) · pause blocks `execute` for every target · only `GUARDIAN_ROLE` can
-pause · a paused vault still prices correctly (`totalAssets`, `convertToAssets`) · `deployer` survives
-in logs and `vaultsOf` agrees with the events.
+Withdrawal-while-paused · only `GUARDIAN_ROLE` can pause · a paused vault still prices correctly
+(`totalAssets`, `convertToAssets`) · `deployer` survives in logs and `vaultsOf` agrees with the
+events.
+
+For §A2b, the assertions **are** the security properties, so write them as such:
+
+| Test | What it proves |
+|---|---|
+| A wind-down batch that *increases* a non-base balance **reverts** | (a) cannot be used to trade, only to unwind |
+| A wind-down batch that raises the base-asset balance succeeds | The unwind path actually works |
+| A multi-hop route holding an intermediate token mid-batch succeeds | Balances are measured at the end, not per step |
+| `redeemInKind` pays a correct pro-rata slice of **every** holding | The unconditional exit is exact |
+| `redeemInKind` succeeds against the §10 book — 15,000 total, 9,000 liquid, 10,000 claim | **Directly closes the case §10 measured and could not pay** |
+| Ordinary `redeem` still reverts on that book while unpaused | The hole is real, and this is what fixed it |
 
 <details>
 <summary><b>Continuation prompt — Lane A</b></summary>
@@ -189,6 +255,32 @@ Two deliverables.
    Also: make `paused` readable on-chain (the schema field exists and is hardcoded
    false on the chain-read path), emit events on both transitions, and REWRITE the
    header — it will otherwise state something false about your own contract.
+
+3. GETTING DEPOSITORS OUT — §A2b, and this one closes YOUR OWN SECURITY.md §10.
+   You measured it: totalAssets 15,000 against 9,000 liquid, a 10,000 redemption
+   reverts from the ERC-20 so it reads as a broken vault. You declined to fix it
+   because honouring a redemption against non-base holdings means unwinding positions
+   DURING A WITHDRAWAL — a venue-aware liquidation path inside the vault. That
+   reasoning was right and it does NOT apply here: this unwinds at PAUSE time, once,
+   asynchronously, through the existing off-chain ExecutionPlan. No venue coupling
+   enters the vault.
+   Build both mechanisms; they cover different timescales.
+   (a) WIND-DOWN MODE. While paused the agent may still execute, but ONLY toward the
+       base asset, and the CONTRACT checks it: after the batch, base-asset balance
+       strictly increased and no non-base balance increased. This is the on-chain twin
+       of the harness's check_rebalance_direction, and it is a strong property — even
+       a fully compromised agent key can do nothing in wind-down but convert to cash.
+       Measure balances at the END of executeBatch so a multi-hop route holding an
+       intermediate token still works.
+   (b) `redeemInKind()`, callable while paused: pay the redeemer their pro-rata slice
+       of EVERY token held, not the base asset. No oracle, no slippage, no venue, no
+       front-running surface, atomic and exact. Worse UX, strictly better guarantee —
+       it is unconditionally payable, which the base-asset path provably is not.
+   ⚠️ DO NOT let (a) become a forced-sale primitive. The guardian pauses; the AGENT
+   still chooses route and size under the same allowlist and the same off-chain plan.
+   A guardian who can name the trade picks the timing and can trade ahead of it —
+   a worse power than the one the pause exists to contain. If the guardian can name
+   the trade, this is implemented wrongly.
 
 Boundaries: do not touch `agent/`, `venues/`, `web/`, `data/`. Lane D writes Solidity
 in its own Foundry project; never open it. Do not edit `packages/schema/` — file a
@@ -247,6 +339,30 @@ Three layers, in order of how much they actually buy:
 
 Record what was detected on the `AgentAction` so Lane E can render it and the reflection can see it.
 
+### B3 · Wind-down — while paused, the objective changes
+
+Lane A's §A2b makes the *contract* refuse anything that does not move toward the base asset. That is
+the backstop. The harness has to actually **drive** the unwind, or a paused vault simply stops.
+
+While `paused`:
+
+- The mandate's target allocations are suspended and the objective becomes **convert holdings to the
+  base asset, at good execution.** Not "hold" — a paused vault that holds is a vault whose depositors
+  still cannot leave.
+- Aqua positions must `dock()` **before** their tokens can be sold — they are encumbered, not absent,
+  and the strategy hash and token list live in `aqua_strategies[]` on the vault state. Aave and
+  Morpho positions withdraw first. Get the ordering wrong and the swap simply reverts.
+- Size sensibly. Dumping the whole book in one batch maximises slippage, and the cost falls on the
+  depositors who have not left yet. Several bounded batches beat one large one.
+- The direction rule that normally forbids trading away from target must not fight the unwind: in
+  wind-down, moving to 100% base asset **is** the correct direction. Layers 5 and 6 need to know
+  the vault is paused, or they will reject every liquidation as a breach of the target allocation —
+  which is exactly the shape of the bug Wave 1 found when a golden-fixture exemption let a bad
+  liquidation through.
+
+The decision feed should say plainly that the vault is winding down and why, rather than showing a
+run of unexplained sells.
+
 <details>
 <summary><b>Continuation prompt — Lane B</b></summary>
 
@@ -295,6 +411,23 @@ deliverables below assume that speed; neither was practical on the 3B.
        A prompt-injection filter TREATED as the security boundary is itself the
        vulnerability.
    Record detections on the AgentAction so Lane E can render them.
+
+3. WIND-DOWN. Lane A is making the CONTRACT refuse any paused-mode batch that does not
+   move toward the base asset. That is the backstop; you have to DRIVE the unwind, or a
+   paused vault just stops and its depositors still cannot leave.
+   While paused: the mandate's target allocations are suspended and the objective
+   becomes convert holdings to the base asset at good execution — NOT "hold".
+   - Aqua positions must dock() BEFORE their tokens can be sold: they are encumbered,
+     not absent, and the strategy hash and token list are in aqua_strategies[]. Aave
+     and Morpho positions withdraw first. Wrong order and the swap simply reverts.
+   - Size sensibly. Dumping the whole book in one batch maximises slippage and the cost
+     falls on the depositors who have NOT left yet. Several bounded batches beat one.
+   - ⚠️ Layers 5 and 6 must know the vault is paused, or they will reject every
+     liquidation as a breach of the target allocation. In wind-down, going to 100% base
+     asset IS the correct direction. Note the shape of this bug is the one Wave 1
+     found, where a golden-fixture exemption let a bad liquidation through — so add the
+     paused case explicitly rather than by relaxing an existing check.
+   The feed should say the vault is winding down and why, not show unexplained sells.
 
 Boundaries: do not touch `venues/`, `data/`, `web/`, `contracts/`. Do not edit
 `packages/schema/` — file a request for Lane F.
@@ -637,7 +770,10 @@ Three dependencies, all short: **everyone → F's envelope**, **E's My-vaults �
 - [ ] A generated mandate that escapes its envelope is **rejected and regenerated**, with a test proving it never deploys
 - [ ] A vault named with an injection payload is read by the agent and **does not change its behaviour** — as an e2e test, not a demo anecdote
 - [ ] The docs state plainly that the validation layers, not the injection filter, are the security boundary
-- [ ] `pause()` halts trading; **a withdrawal from a paused vault succeeds**, pinned by a test
+- [ ] `pause()` halts ordinary trading; **a withdrawal from a paused vault succeeds**, pinned by a test
+- [ ] **A paused vault unwinds to its base asset and its depositors can all get out.** Concretely, against the book `SECURITY.md` §10 measured — 15,000 total, 9,000 liquid, a 10,000 claim — the redemption that reverts today succeeds
+- [ ] A paused-mode batch that increases a non-base balance **reverts on-chain**; even a compromised agent key can only convert to cash
+- [ ] The guardian can pause but **cannot name the trade** — the agent still chooses route and size
 - [ ] The contract header no longer claims "no pause", and explains what the guardian can and cannot do
 - [ ] `docs/submission-audit.md` carries a verdict per criterion per track, re-verified against this build, with at least one honest "no"
 - [ ] Every lane green, `preflight.sh` 6/6, one timed rehearsal
