@@ -4,9 +4,33 @@ The MCP server is a submission deliverable for The Graph's Track 1, whose stated
 **Reusability & completeness (25%)** and whose defining requirement is *"reusable tooling or
 infrastructure … not a single end-user app."* A server only we can run does not meet that.
 
-**Published 2026-07-25.** `curator-schema` 0.1.0, `curator-data` 0.2.0, `curator-mcp` 0.2.0 are live
-on PyPI and `uvx curator-mcp` was verified from a clean machine. What follows is the release
-process for the next version.
+**Current release: `curator-data` 0.4.0, `curator-mcp` 0.4.0, on `curator-schema` 0.2.0.** Verified
+from a clean Python 3.10 machine with no clone: 10 sources, 4 tools, and the Wave 3 sanitiser live.
+What follows is the release process for the next version.
+
+> ### `curator-schema` is no longer built or published by default — and that makes the check stronger
+>
+> `./data/publish.sh` used to build and upload all three. It now builds only the two Lane C owns,
+> and `--include-schema` opts into the third. Two reasons, the second of which is the one that
+> actually caught a bug:
+>
+> 1. **It is Lane F's release decision, not ours.** Mid-wave the repo's schema version routinely runs
+>    ahead of what its owner has chosen to publish — at the time of the 0.4.0 release the repo said
+>    `0.3.0` while PyPI served `0.2.0`. A version number is permanent, so spending one on a state
+>    nobody signed off is not a decision to take on someone's behalf.
+> 2. **With no schema wheel in `dist/`, `--find-links` must resolve `curator-schema` from PyPI.** So
+>    the dry run now proves our floor is satisfiable *by what is actually served*. That is precisely
+>    the blind spot that shipped a broken `0.3.0`: building every sibling locally hid a stale
+>    published version behind a fresh local wheel, and the release looked fine right up until a judge
+>    would have run it.
+>
+> If the floor genuinely cannot be met from the index, the resolve fails with a message saying so and
+> naming `--include-schema` — rather than silently publishing another lane's work.
+
+**Earlier releases.** 0.2.0 (first publish, 2026-07-25) · 0.3.0 (broken: `curator-schema` content
+changed without a version bump, so PyPI served stale bytes) · 0.3.1 (repaired — the missing piece was
+a **version floor**, not the bump; an unpinned dependency is not "always latest", it is "whatever the
+resolver already has a reason to prefer").
 
 ---
 
@@ -42,7 +66,7 @@ clone.
 ./data/publish.sh --publish       # build, verify, confirm, then upload
 ```
 
-The dry run is the default deliberately. It builds all three distributions and proves they install
+The dry run is the default deliberately. It builds the two Lane C distributions and proves they install
 from wheels alone in a clean 3.10 venv — the check that matters, because a PyPI version number can
 never be re-uploaded. `--publish` additionally requires `UV_PUBLISH_TOKEN` and prompts before
 uploading, since `curator-schema` belongs to Wave 0 rather than Lane C.

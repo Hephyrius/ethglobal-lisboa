@@ -27,23 +27,46 @@ DIST="$REPO_ROOT/dist"
 PUBLISH=0
 INDEX=""
 ASSUME_YES=0
+INCLUDE_SCHEMA=0
 
 for arg in "$@"; do
   case "$arg" in
-    --publish)   PUBLISH=1 ;;
-    --test-pypi) INDEX="https://test.pypi.org/legacy/" ;;
-    --yes)       ASSUME_YES=1 ;;   # non-interactive; the caller has confirmed
-    -h|--help)   sed -n '2,25p' "$0"; exit 0 ;;
+    --publish)        PUBLISH=1 ;;
+    --test-pypi)      INDEX="https://test.pypi.org/legacy/" ;;
+    --yes)            ASSUME_YES=1 ;;   # non-interactive; the caller has confirmed
+    --include-schema) INCLUDE_SCHEMA=1 ;;
+    -h|--help)   sed -n '2,30p' "$0"; exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
 
 cd "$REPO_ROOT"
 
-# ── 1. build, bottom of the chain first ──────────────────────────────────
+# ── 1. build ─────────────────────────────────────────────────────────────
+#
+# `curator-schema` is LANE F's package and it is deliberately NOT built or
+# published by default. Two reasons, both learned rather than assumed:
+#
+#   1. Releasing another lane's in-flight work is not ours to do. Mid-wave the
+#      repo's schema version is routinely ahead of what its owner has decided
+#      to publish, and taking that decision for them is how a version number -
+#      which is permanent - gets spent on a state nobody signed off.
+#   2. It makes the verification below STRONGER. With no schema wheel in dist/,
+#      `--find-links` has to resolve `curator-schema` from PyPI, so this run
+#      proves our floor is satisfiable by what is actually served. That is the
+#      exact blind spot that shipped a broken 0.3.0: building every sibling
+#      locally hid a stale published version behind a fresh local wheel.
+#
+# Pass --include-schema when the floor genuinely cannot be met from the index
+# (the check below says so explicitly), and only with its owner's agreement.
 echo "==> Building distributions into dist/"
 rm -rf "$DIST"
-uv build --out-dir "$DIST" packages/schema/python
+if [ "$INCLUDE_SCHEMA" -eq 1 ]; then
+  echo "    --include-schema given: building Lane F's curator-schema too"
+  uv build --out-dir "$DIST" packages/schema/python
+else
+  echo "    (skipping curator-schema - Lane F's package; it will resolve from PyPI)"
+fi
 uv build --out-dir "$DIST" data
 uv build --out-dir "$DIST" data/curator_mcp
 echo
@@ -63,7 +86,15 @@ uv venv --python 3.10 "$VERIFY_VENV" >/dev/null 2>&1
 # CONTENT changed without a VERSION bump looks fine here and is wrong on PyPI,
 # where the old bytes still sit under that version number. Resolving against
 # the real index as well surfaces the mismatch before the upload.
-uv pip install --quiet --python "$VERIFY_VENV" --find-links "$DIST" --no-cache curator-mcp
+if ! uv pip install --quiet --python "$VERIFY_VENV" --find-links "$DIST" --no-cache curator-mcp; then
+  echo "    FAILED to resolve." >&2
+  if [ "$INCLUDE_SCHEMA" -eq 0 ]; then
+    echo "    The likeliest cause is that curator-data's floor on curator-schema" >&2
+    echo "    cannot be met by any version PyPI serves. Ask Lane F to release the" >&2
+    echo "    schema, or re-run with --include-schema once they agree." >&2
+  fi
+  exit 1
+fi
 
 echo "==> Cross-checking against what PyPI actually serves"
 CROSS_VENV=$(mktemp -d)/venv
@@ -121,10 +152,10 @@ if [ -z "${UV_PUBLISH_TOKEN:-}" ]; then
   exit 1
 fi
 
-# curator-schema belongs to Wave 0, not Lane C. It is the bottom of the chain
-# so it cannot be skipped, but whoever runs this should know they are
-# publishing another lane's package.
-echo "==> Uploading. curator-schema is Wave 0's package - publishing it too."
+echo "==> Uploading."
+if [ "$INCLUDE_SCHEMA" -eq 1 ]; then
+  echo "    WARNING: --include-schema means you are releasing LANE F's package."
+fi
 echo "    A version number on PyPI is permanent and cannot be re-uploaded."
 if [ "$ASSUME_YES" -eq 1 ]; then
   echo "    --yes given; proceeding."
@@ -155,7 +186,10 @@ except Exception:
 CHECK
 }
 
+# Bottom of the dependency chain first. Packages not built (see §1) are simply
+# not in dist/ and are skipped by the guard below rather than by a second list.
 for pkg in curator_schema curator_data curator_mcp; do
+  ls "$DIST/$pkg"-*.tar.gz >/dev/null 2>&1 || continue
   version=$(ls "$DIST/$pkg"-*.tar.gz | sed -E "s/.*${pkg}-(.*)\.tar\.gz/\1/" | head -1)
   if already_published "$pkg" "$version"; then
     echo "==> $pkg $version is already on PyPI - skipping (unchanged since last release)"

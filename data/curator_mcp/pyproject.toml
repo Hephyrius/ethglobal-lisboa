@@ -4,7 +4,7 @@ name = "curator-mcp"
 #: wheel cache, not just changelog hygiene.
 # 0.3.1: floors curator-data at 0.3.1 so the whole chain resolves to a
 # combination that actually imports.
-version = "0.3.1"
+version = "0.4.0"
 description = "MCP server exposing DeFi lending yields, TVL, utilization and token prices from The Graph"
 readme = "README.md"
 classifiers = [
@@ -24,7 +24,7 @@ dependencies = [
   # Floored for the same reason curator-data floors curator-schema: an
   # unpinned name lets the resolver choose 0.3.0, whose own metadata does
   # not force a working schema.
-  "curator-data>=0.3.1",
+  "curator-data>=0.4.0",
 ]
 
 [project.optional-dependencies]
