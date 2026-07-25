@@ -32,7 +32,7 @@ reading any venue's state.
 cd contracts
 ./script/install-deps.sh          # vendored, pinned — only needed to change a version
 forge build
-forge test                        # 101 tests, no network required (+7 fork tests skip)
+forge test                        # 142 tests, no network required (+7 fork tests skip)
 ```
 
 Fork deployment (from repo root, two terminals):
@@ -147,9 +147,47 @@ unchanged.
 
 ```solidity
 function setTargetAllowed(address target, bool allowed) external;
+function pause() external;
+function unpause() external;
 ```
 
-The guardian's only power. See [Invariants](#assumptions--invariants).
+The guardian's two powers, and they are narrower than they look.
+
+`pause()` puts the vault in **wind-down**. It does *not* stop the agent trading; it changes what
+trading is allowed to accomplish. While paused the contract reads the balances at the end of every
+`execute`/`executeBatch` and reverts unless the base-asset balance did not fall and no registered
+non-base balance rose. **Selling is permitted, buying is not**, so the book can only converge on
+cash. Intermediate state within a batch is unconstrained, so a multi-hop route holding a third token
+mid-way is fine — only the net effect is judged.
+
+**Withdrawals are never affected.** `withdraw`, `redeem` and `redeemInKind` work identically paused
+or not, and nothing any role can do changes that. If you are surfacing this state in a UI, say
+*"trading is halted, withdrawals are not"* — a depositor who reads "paused" alone assumes their money
+is stuck, which is the exact opposite of the truth.
+
+`approveVenue` also keeps working while paused, because selling through a router means approving it
+first. Full boundary, including the residual that implies: [SECURITY.md §12](SECURITY.md).
+
+### Exits — permissionless, never pausable
+
+```solidity
+function redeemInKind(uint256 shares, address receiver, address owner)
+    external returns (InKindPayout[] memory payouts);
+
+struct InKindPayout { address token; uint256 amount; }
+```
+
+Burns `shares` and pays a pro-rata slice of **every** registered token — index 0 is the base asset,
+matching `holdings()`. No oracle read, no venue call, no liquidity requirement.
+
+**Use it when `redeem` reverts.** `redeem` pays in one asset, so once the agent has rotated into
+WETH a holder whose claim exceeds the vault's USDC balance cannot exit through it — the revert comes
+from the ERC-20, so it reads as a broken vault rather than an illiquid one ([SECURITY.md §10]
+(SECURITY.md)). `redeemInKind` cannot hit that: it hands over a fraction of what is already there.
+The receiver gets WETH alongside USDC, which is a worse experience and a strictly better guarantee.
+
+Priced with the same virtual-share denominator as `previewRedeem`, so it is never the more generous
+of the two exits. Callable whether or not the vault is paused.
 
 ### Views
 
@@ -158,6 +196,7 @@ function agent()          external view returns (address);
 function guardian()       external view returns (address);
 function mandateHash()    external view returns (bytes32);
 function priceMaxAge()    external view returns (uint256);
+function paused()         external view returns (bool);
 
 function isAllowedTarget(address target) external view returns (bool);
 function allowedTargets() external view returns (address[] memory);
@@ -176,10 +215,30 @@ Plus the full ERC-4626 and ERC-20 surface: `deposit`, `mint`, `withdraw`, `redee
 ```solidity
 function createVault(CreateParams calldata params) external returns (address vault);
 struct CreateParams { address asset; string name; string symbol;
-                      address agent; address guardian; bytes32 mandateHash; }
+                      address agent; address guardian; bytes32 mandateHash;
+                      address deployer; }
 
-event VaultCreated(address indexed vault, address indexed asset, address indexed agent, bytes32 mandateHash);
+event VaultCreated(address indexed vault, address indexed asset, address agent,
+                   bytes32 mandateHash, address indexed deployer);
+
+function vaultsOf(address who) external view returns (address[] memory);
+function deployerOf(address vault) external view returns (address);
 ```
+
+**`deployer` is who *asked* for the vault, and it is a label rather than a permission.** The agent
+submits `createVault`, so `msg.sender` records the agent and nothing else on-chain links a human to a
+vault they requested — which makes a vault someone deployed and never deposited into invisible to any
+ownership check based on `balanceOf`. Passing `address(0)` records `msg.sender`, so the answer is
+never null.
+
+It is **asserted by the submitter, not proven by a signature**: anyone may call `createVault` with
+any `deployer`. Safe for "show me my vaults"; never gate anything on it. Nothing in the contracts
+reads it, and it lives on the factory rather than the vault so it cannot quietly become a permission.
+[SECURITY.md §11](SECURITY.md).
+
+`vaultsOf` answers "my vaults" in one `eth_call` with no block range and no topic filter. The event
+stays the source of truth for indexers; the view is a cache of it written in the same statement, so
+they cannot disagree.
 
 Owner-only: `setDefaultTarget`, `setDefaultValuation`, `setDefaultPriceMaxAge`.
 Views: `implementation()`, `vaults()`, `vaultCount()`, `isVault()`, `defaultTargets()`,
@@ -189,17 +248,20 @@ Views: `implementation()`, `vaults()`, `vaultCount()`, `isVault()`, `defaultTarg
 
 | Event | Use |
 |---|---|
-| `VaultCreated(vault, asset, agent, mandateHash)` | index new vaults |
+| `VaultCreated(vault indexed, asset indexed, agent, mandateHash, deployer indexed)` | index new vaults, and "my vaults" by `deployer` topic. **`agent` is no longer indexed** — an event has three topic slots and at genesis every vault shares one agent key, so it was an index that indexed nothing |
 | `VaultInitialized(asset, agent, guardian, mandateHash)` | genesis record |
 | `Executed(target indexed, selector indexed, value)` | decision feed — filter by call type without decoding calldata |
 | `VenueApproved(token, spender, amount)` | approval trail |
 | `TargetAllowed(target, allowed)` | allowlist changes |
+| `TradingPaused(guardian indexed)` / `TradingUnpaused(guardian indexed)` | wind-down begins and ends. **Named for what they do**: a log reading `Paused` invites "my money is stuck", which is false |
+| `RedeemedInKind(caller indexed, receiver indexed, owner indexed, shares, payouts[])` | an in-kind exit and exactly what it paid |
 | ERC-4626 `Deposit` / `Withdraw`, ERC-20 `Transfer` | TVL and share movements |
 
 ### Errors
 
 `TargetNotAllowed(address)` · `SpenderNotAllowed(address)` · `EmptyBatch()` · `ZeroAddress()` ·
-`DuplicateValuation(address)` · `RolesAreFrozen()` ·
+`DuplicateValuation(address)` · `RolesAreFrozen()` · `AlreadyPaused()` · `NotPaused()` ·
+`WindDownWouldSpendBaseAsset(before, after)` · `WindDownWouldIncreaseHolding(token, before, after)` ·
 `StalePrice(feed, updatedAt, maxAge)` · `InvalidPrice(feed, answer)` · `IncompleteRound(feed)` ·
 plus OpenZeppelin's `AccessControlUnauthorizedAccount(account, role)` and
 `OwnableUnauthorizedAccount(account)`.
@@ -239,7 +301,7 @@ It does **not** return `1e18`. Verified on the fork: 5,000 USDC deposited into a
 | `share_price` | `convertToAssets(1e18)` — 6-decimal, see above |
 | `holdings[]` | **`holdings()` in one call.** Index 0 is always the base asset. `symbol` is not returned — read it from the token, or hardcode for USDC/WETH |
 | `agent`, `mandate_hash` | `agent()`, `mandateHash()` |
-| `paused` | always `false` — there is no pause at MVP |
+| `paused` | **`paused()` — real since Wave 3.** `true` means *the agent may only sell*; it does **not** mean withdrawals are suspended, and nothing can make it mean that |
 | `aqua_strategies[]` | **not on-chain here.** The vault does not track Aqua positions; the harness records them when it ships one |
 
 ### `ExecutionPlan` → chain
@@ -281,7 +343,7 @@ balance would double-count.
 `revokeRole` and `renounceRole` all revert. No human can replace the agent, award themselves its
 powers, or brick the vault by renouncing. This is the locked trust model stated in code.
 
-**There is no human override, no pause, and no emergency withdrawal.** Deliberate
+**There is no human override and no way for anyone to seize funds.** Deliberate
 ([initiate_plan.md](../plans/initiate_plan.md) §2). What *is* enforced on-chain is blast radius: the
 agent may only reach allowlisted contracts.
 
@@ -289,10 +351,22 @@ agent may only reach allowlisted contracts.
 allowlisted target the agent has full latitude — consistent with a trust model that already grants it
 the key. It is a blast-radius limiter, not a mandate enforcer.
 
-**The guardian can only edit the allowlist.** It cannot move funds, replace the agent, or touch
-valuation. Widening the list grants it nothing it could exploit alone, because only `AGENT_ROLE` can
-call `execute`. Accepted residual risk, stated rather than hidden: a guardian *narrowing* the list can
-grief a rebalance. That is liveness, not custody.
+**The guardian can edit the allowlist and start a wind-down. That is all.** It cannot move funds,
+name a trade, choose when a position is sold, replace the agent, or touch valuation. Widening the
+list grants it nothing it could exploit alone, because only `AGENT_ROLE` can call `execute`. Accepted
+residual risk, stated rather than hidden: a guardian *narrowing* the list, or pausing, can grief a
+rebalance. That is liveness, not custody.
+
+**No state of this vault can trap a depositor.** `withdraw`, `redeem` and `redeemInKind` are
+permissionless and unpausable in every state the contract can be in, and `redeemInKind` needs no
+oracle, venue or liquidity to pay. A guardian able to freeze exits would hold strictly more power
+than the agent it exists to contain, so that boundary is a test rather than a promise —
+`test_withdrawalSucceedsWhilePaused` and `invariant_theInKindExitIsNeverRefused`.
+
+**While paused, the agent can only move the book toward cash.** The contract checks the balances at
+the end of every agent call: base non-decreasing, every registered holding non-increasing. It
+constrains **direction, not price** — a sale at a terrible price satisfies it, and `minOut` is what
+bounds execution quality, paused or not.
 
 **Valuation is immutable, for everyone.** This is where a mutable setting would be genuinely
 exploitable — registering a bogus feed reprices every share — so there is no setter at all.
@@ -348,7 +422,7 @@ script/
 ## Verification
 
 ```bash
-forge test                                    # 101 tests, no network
+forge test                                    # 142 tests, no network
 forge test --match-path "test/fork/*"         # real Base state, needs an RPC
 ./script/check-deployment.sh                  # deployed code == this source?
 ```
