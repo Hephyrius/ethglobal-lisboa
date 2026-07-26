@@ -63,3 +63,11 @@ secrets.*
 # this to a directory or a glob — the pattern above exists because the last leak had a name nobody
 # had thought of.
 !docs/secrets.md
+
+# Production configuration, real values. `.env*` does not cover a name that puts
+# the suffix first — the same blind spot that let `env.txt` through — so it is
+# matched explicitly here rather than assumed. The committed template is
+# `production.env.example`, which carries placeholders and no secrets.
+production.env
+*.production.env
+production.env.local

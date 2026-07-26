@@ -25,6 +25,7 @@ import pathlib
 import httpx
 import pytest
 from agent.mandate.constraints import banded_warnings, check_decision
+from .conftest import rpc
 from curator_schema import (
     AgentAction,
     AllocationDecision,
@@ -50,18 +51,50 @@ def _preset(key: str) -> Mandate:
     return Mandate.model_validate(json.loads((PRESETS / f"{key}.json").read_text(encoding="utf-8")))
 
 
+def _factory_vaults(factory_address: str) -> list[str]:
+    """Every vault the factory has created, from `vaults()`.
+
+    The deployments file is not enough and cannot be made enough: it records what
+    `Deploy.s.sol` wrote, and genesis and one-click archetypes both mint through the factory
+    without touching it. Those are the vaults that actually tick, so a fixture reading only the
+    JSON looks at the one vault in the deployment that *cannot* — see below.
+    """
+    from eth_abi import decode as abi_decode  # type: ignore[import-untyped]
+    from eth_utils import keccak  # type: ignore[import-untyped]
+
+    selector = "0x" + keccak(text="vaults()")[:4].hex()
+    raw = rpc("eth_call", [{"to": factory_address, "data": selector}, "latest"])
+    if raw in ("0x", "0x0", None):
+        return []
+    (addresses,) = abi_decode(["address[]"], bytes.fromhex(raw[2:]))
+    return [str(a) for a in addresses]
+
+
 @pytest.fixture(scope="module")
 def actions(api: str, deployments: dict) -> list[AgentAction]:
-    """Every journalled action across every vault the API knows about.
+    """Every journalled action across every vault on this deployment.
 
     Deliberately not just the demo vault: a deployment that happened on a vault created during
     genesis still proves the capability, and pinning this to one address is how a passing
     capability gets reported as missing.
+
+    ⚠️ **The demo vault in `deployments/base-fork.json` can never contribute an action.** It is
+    created by `Deploy.s.sol`, and mandates are written only by `POST /genesis/finalize`, so it
+    has none — every tick against it fails with "no mandate stored". Its on-chain `mandateHash`
+    matches no mandate that exists anywhere, including the golden fixture, so one cannot be
+    supplied after the fact either. It is a deployment smoke test, not a curated vault.
+
+    That is why the factory is the source of truth here. Reading only the JSON meant this test
+    watched the single vault in the deployment guaranteed to have an empty feed, and reported a
+    working capability as missing on every fresh fork.
     """
     vaults = [deployments["demoVault"]]
     for extra in deployments.get("vaults", []) or []:
         addr = extra if isinstance(extra, str) else extra.get("address")
         if addr and addr not in vaults:
+            vaults.append(addr)
+    for addr in _factory_vaults(deployments["contracts"]["VaultFactory"]):
+        if addr not in vaults:
             vaults.append(addr)
 
     out: list[AgentAction] = []
