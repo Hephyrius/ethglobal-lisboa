@@ -112,7 +112,7 @@ def _uniswap(config: VenueConfig) -> VenueCapability:
         unavailable_reason=(
             None
             if has_key
-            else "UNISWAP_API_KEY is not set — register at developers.uniswap.org/dashboard"
+            else "UNISWAP_API_KEY is not set. Register at developers.uniswap.org/dashboard"
         ),
         contracts={
             "router": addresses.UNIVERSAL_ROUTER,

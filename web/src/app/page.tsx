@@ -26,7 +26,7 @@ export default function HomePage() {
             <p className="mt-5 max-w-2xl text-[0.95rem] leading-relaxed text-muted">
               Build and deploy your Scipio Agent Curated Vault. Your curation agent reads live
               markets, forms a thesis, and signs its own transactions out of an investable ERC-4626
-              vault. Write the mandate, deploy the vault, and watch it work.
+              vault. Write the mandate, deploy the vault, and watch it trade.
             </p>
 
             <div className="mt-8 flex flex-wrap items-center gap-4">
