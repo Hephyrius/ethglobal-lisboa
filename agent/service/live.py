@@ -308,7 +308,20 @@ class LiveGenesisService:
         except ValueError as exc:
             # The conversation is more valuable than the preview. Drop the bad
             # draft, keep talking; `finalize` validates strictly anyway.
-            log.info("discarding an unparseable mandate draft: %s", exc)
+            #
+            # ⚠️ WARNING, not INFO, and the distinction cost hours. Discarding
+            # the draft does not degrade the flow, it *ends* it: the dApp builds
+            # its draft panel and arms its deploy button purely from
+            # accumulated `mandate_draft`, so a turn that drops one is a turn
+            # the user cannot progress past. Meanwhile the reply still reads
+            # perfectly, the route still answers 200, and `/health` stays green.
+            # Logged at INFO — a level uvicorn does not emit here — that left
+            # exactly zero evidence anywhere that the genesis flow was dead.
+            log.warning(
+                "discarding an unparseable mandate draft — the dApp cannot advance "
+                "without one, check genesis_schema() matches MandateDraft: %s",
+                exc,
+            )
             return GenesisChatResponse(reply=reply)
 
         return GenesisChatResponse(reply=reply, mandate_draft=draft)

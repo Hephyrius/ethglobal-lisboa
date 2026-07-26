@@ -19,7 +19,7 @@ because the trust model is different on either side of genesis.
 
 from __future__ import annotations
 
-from ...api.schemas import ChatMessage
+from ...api.schemas import ChatMessage, MandateDraft
 
 __all__ = ["SYSTEM_PROMPT", "genesis_messages", "genesis_schema"]
 
@@ -90,12 +90,59 @@ have established every field, not before."""
 
 
 def genesis_schema() -> dict:
-    """Loose schema hint. The draft is partial by nature, so this only pins the envelope."""
-    return {
+    """The turn envelope, with `mandate_draft` described from the model it must parse into.
+
+    **This was `{"type": "object"}` and that silently broke the entire genesis
+    flow.** Worth the length, because the failure is invisible from every angle
+    an operator would look at.
+
+    An empty object schema tells a backend the field exists and nothing about
+    its shape, so the model invents plausible names — measured against
+    `grok-4.20-0309-non-reasoning`, one turn produced:
+
+        vault_type, platforms, max_drawdown, slippage_tolerance,
+        asset_cap, cash_buffer
+
+    Not one is a `MandateDraft` field. `MandateDraft` is `Strict`
+    (`extra="forbid"`, mirroring zod's `.strict()`), so `model_validate` raises
+    on every turn, `live.chat` drops the draft and returns prose only. The dApp
+    accumulates `mandate_draft` across turns to fill the draft panel and to
+    decide when a mandate can be deployed, so the panel stays empty forever and
+    the deploy button never arms — while the conversation itself reads
+    perfectly. Eight turns measured: 8/8 HTTP 200, ~1.8s each, zero drafts.
+
+    Deriving the schema from the model fixes it at the source. Same turn, same
+    model, with the properties declared:
+
+        version, name, objective, base_asset, constraints,
+        permitted_data_sources, permitted_venues, risk_posture
+
+    — validating clean, constraints included.
+
+    Why this went unnoticed: it needs a backend that *honours* the schema. On
+    Ollama the hint was advisory, the model answered in its own words, and
+    `extract_json_object` recovered whatever it could. `GrokBackend` sends
+    `strict: true` genuine guided decoding, so the empty envelope became a
+    binding instruction to say nothing useful. A schema written as a hint is a
+    liability the moment a backend starts obeying it.
+
+    `$defs` is hoisted to the top level because `model_json_schema()` emits
+    `$ref: "#/$defs/MandateConstraints"`, and those resolve from the document
+    root — left nested one level down they dangle.
+    """
+    draft = MandateDraft.model_json_schema()
+    defs = draft.pop("$defs", None)
+
+    schema: dict = {
         "type": "object",
-        "properties": {"reply": {"type": "string"}, "mandate_draft": {"type": "object"}},
+        "properties": {"reply": {"type": "string"}, "mandate_draft": draft},
+        # Only `reply` is required: an early turn legitimately has nothing
+        # pinned down yet, and forcing a draft would invite an invented one.
         "required": ["reply"],
     }
+    if defs:
+        schema["$defs"] = defs
+    return schema
 
 
 def genesis_messages(
