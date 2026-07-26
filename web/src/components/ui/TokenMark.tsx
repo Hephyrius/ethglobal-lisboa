@@ -33,6 +33,8 @@ const COLOURS: Record<string, string> = {
   ETH: '#454A75',
   WSTETH: '#00A3FF',
   CBETH: '#0052FF',
+  CBBTC: '#F7931A',
+  AERO: '#1F69FF',
   AAVE: '#B6509E',
   MORPHO: '#2470FF',
 }

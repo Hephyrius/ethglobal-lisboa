@@ -5,10 +5,51 @@ import { Disclaimer } from '@/components/layout/Disclaimer'
 import { Header } from '@/components/layout/Header'
 import './globals.css'
 
+/**
+ * Where relative metadata URLs resolve from. Next needs an absolute origin to
+ * emit `og:image`, and without one it warns at build time and falls back to
+ * localhost — which is what a shared link would then try to load the card from.
+ *
+ * The deployment target per `deploy/Caddyfile`, overridable so a preview build
+ * advertises its own origin rather than production's.
+ */
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://scipio.capital'
+
+/**
+ * The description is deliberately one claim rather than a feature list: it is
+ * the line that appears under the title in a link preview, in search results
+ * and in a bookmark, and in each of those it is competing for a glance.
+ *
+ * `opengraph-image.tsx` and `twitter-image.tsx` supply the card art through the
+ * file convention, so `openGraph.images` is not set here — declaring it would
+ * override them.
+ */
 export const metadata: Metadata = {
-  title: 'Scipio: Agentic Vault Curation',
+  metadataBase: new URL(SITE_URL),
+  title: {
+    default: 'Scipio: Agentic Vault Curation',
+    // Subpages set only their own name; this keeps the brand on the tab and in
+    // any preview that reads the title alone.
+    template: '%s · Scipio',
+  },
   description:
-    'An ERC-4626 vault curated by an autonomous LLM agent. Watch it consult live market data, reason under its mandate, and execute on-chain.',
+    'An ERC-4626 vault curated by an autonomous agent. It reads live markets, forms a thesis under a mandate fixed at genesis, and signs its own transactions.',
+  applicationName: 'Scipio',
+  openGraph: {
+    type: 'website',
+    siteName: 'Scipio',
+    url: SITE_URL,
+    title: 'Scipio: Agentic Vault Curation',
+    description:
+      'An ERC-4626 vault curated by an autonomous agent. It reads live markets, forms a thesis under a mandate fixed at genesis, and signs its own transactions.',
+    locale: 'en_GB',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Scipio: Agentic Vault Curation',
+    description:
+      'An ERC-4626 vault curated by an autonomous agent. It reads live markets, forms a thesis under a mandate fixed at genesis, and signs its own transactions.',
+  },
 }
 
 export const viewport = {

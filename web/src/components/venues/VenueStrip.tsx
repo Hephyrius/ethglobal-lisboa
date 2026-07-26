@@ -1,7 +1,9 @@
 'use client'
 
 import { Badge, type BadgeTone } from '@/components/ui/Badge'
+import { TokenMark } from '@/components/ui/TokenMark'
 import { useVenueManifest, type VenueRow } from '@/lib/api/venue-queries'
+import { KNOWN_TOKENS } from '@/lib/chain/deployments'
 import { cn } from '@/lib/cn'
 
 /**
@@ -80,6 +82,23 @@ export function VenueStrip({ className }: { className?: string }) {
   )
 }
 
+/**
+ * The deployment manifest's own spelling of a ticker.
+ *
+ * The venue registry uppercases its symbols and the asset manifest does not, so
+ * the same token appeared twice on one screen as `CBBTC` under a venue and
+ * `cbBTC` under the asset universe — which reads as two different assets. This
+ * matches case-insensitively against the manifest and shows what it says, so
+ * the correction follows a token being renamed rather than needing a casing
+ * table maintained here. An unrecognised symbol is shown exactly as received.
+ */
+function canonicalSymbol(symbol: string): string {
+  const match = Object.keys(KNOWN_TOKENS).find(
+    (known) => known.toLowerCase() === symbol.toLowerCase(),
+  )
+  return match ?? symbol
+}
+
 function Venue({ row }: { row: VenueRow }) {
   const custody = row.custody ? CUSTODY[row.custody] : undefined
 
@@ -109,6 +128,25 @@ function Venue({ row }: { row: VenueRow }) {
         <p className="mt-1.5 text-2xs leading-relaxed text-faint">
           {row.custody_note ?? custody.note}
         </p>
+      ) : null}
+
+      {/* What the venue can actually be traded in. The manifest has carried
+          `tokens` all along and nothing rendered it, which left the reader to
+          assume every venue reaches every asset — morpho takes USDC only, and
+          a mandate that grants it WETH produces intents the venue refuses.
+
+          Marked rather than listed as bare text: the same coloured chips the
+          asset universe uses, so a token is recognisable in both places
+          without reading the ticker. */}
+      {row.tokens.length > 0 ? (
+        <div className="mt-2.5 flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+          {row.tokens.map((token) => (
+            <span key={token} className="inline-flex items-center gap-1">
+              <TokenMark symbol={token} />
+              <span className="text-2xs text-muted">{canonicalSymbol(token)}</span>
+            </span>
+          ))}
+        </div>
       ) : null}
 
       {row.intents.length > 0 ? (
