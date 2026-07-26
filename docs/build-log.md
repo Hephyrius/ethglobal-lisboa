@@ -4888,3 +4888,66 @@ anyone could see.
 
 `VerifyDeployment` exists so that question has an answer that is not "trust me": it is the one check
 that distinguishes a Wave 3 vault from a pre-Wave-3 clone, and it is now a gate rather than a memory.
+
+## Wave 0 — one env file, and the Uniswap key that was never actually broken
+
+Two clean-ups, one of which was correcting my own reporting.
+
+### `production.env` is gone, and the parts worth keeping moved into `.env.example`
+
+The operator's call: **one `.env` serves dev and deploy alike.** So `production.env.example` and
+`agent/tests/test_production_env_isolation.py` are deleted.
+
+That test was guarding a real property — `agent/config.py` calls `load_dotenv` exactly once, naming
+`.env` — but the property only mattered because a *second* config file existed to leak from. With one
+file there is nothing to isolate, and a test that pins a mechanism whose purpose has been removed is
+just a future obstacle to a legitimate change.
+
+What did not deserve to die with it is the handful of facts that file had accumulated, each of which
+had already cost someone an hour. They are now a `.env.example` section rather than a separate
+document, because a variable's warning is only useful next to the variable:
+
+- `ANVIL_RPC_URL` is, despite its name, "the chain to talk to" for most of the harness. Left pointing
+  at :8540 while `BASE_RPC_URL` is real, the agent reads one chain and writes another.
+- `AGENT_CORS_ORIGINS` needs exact origins. A missing one gets a 400 on the preflight, the dApp falls
+  back to reading the chain, and it reports *"the agent API is unreachable"* — which reads as a dead
+  backend when the backend is fine. This is not a deploy-only concern: it cost us an afternoon
+  locally, because under WSL the browser reaches the host by its bridge address, not `localhost`.
+- `AGENT_STATE_DIR` holds the only copy of every open Aqua position. Aqua can confirm a strategy hash
+  you already hold but offers no way to enumerate a maker's positions, so a lost record is a position
+  that can never be displayed or closed — not a cache, an asset.
+- `NEXT_PUBLIC_*` are inlined at build time. Setting them only in the runtime environment silently
+  leaves the previous values compiled into the bundle.
+
+The `.gitignore` patterns stay. There is no production config to protect any more, but the reason
+they were written explicitly — `.env*` does not match a name that puts the suffix first, which is
+exactly how `env.txt` got through with eight live credentials — is unchanged, and the patterns cost
+nothing. `env.txt` and `*.env.txt` are now named there too.
+
+### Correcting the record: `GET /venues` never reported Uniswap unavailable
+
+I reported that the rotated Uniswap key, sitting in `.env` under the legacy lowercase `uniswap_key`,
+would make the capability manifest declare Uniswap unavailable, because `venues/capabilities.py`
+declares `requires=("UNISWAP_API_KEY",)`.
+
+**That was wrong, and it was wrong because I read the declaration instead of the code that decides.**
+`requires` is a display string. Availability is `bool(config.uniswap_api_key)`, and that field is
+populated by `_first_set(_UNISWAP_KEY_NAMES)`, which accepts either name by design. Checked live:
+all four venues report `available=True`.
+
+The key is renamed to `UNISWAP_API_KEY` in `.env` anyway — `docs/secrets.md` §2.2 and `.env.example`
+both name it that way, and one canonical spelling is worth more than the back-compat it exercises.
+The fallback in `venues/config.py` stays for anyone whose `.env` predates the rename.
+
+Confirmed against the live API after the rotation, since a key that resolves is not a key that works:
+
+```
+1,000 USDC -> 0.531929 WETH   routing=CLASSIC   slippage=0.5%   gas=$0.0011
+```
+
+`slippage=0.5` is `UNISWAP_SLIPPAGE_BPS=50` surviving the bps-to-percent conversion at the client
+boundary, which is the one number request #32 turned on.
+
+**The lesson, since it is the second time this session:** a `requires`/`declares`/`expects` field is
+documentation. It is not the branch. When the question is "will this be available", read the
+predicate.

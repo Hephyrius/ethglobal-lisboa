@@ -64,10 +64,14 @@ secrets.*
 # had thought of.
 !docs/secrets.md
 
-# Production configuration, real values. `.env*` does not cover a name that puts
-# the suffix first — the same blind spot that let `env.txt` through — so it is
-# matched explicitly here rather than assumed. The committed template is
-# `production.env.example`, which carries placeholders and no secrets.
+# Any env file whose name puts the suffix first. `.env*` does not cover these —
+# the same blind spot that let `env.txt` through with eight live credentials —
+# so they are matched explicitly rather than assumed. There is no longer a
+# separate production config (one `.env` serves dev and deploy alike), but the
+# patterns stay: they cost nothing and the leak they guard against already
+# happened once.
 production.env
 *.production.env
 production.env.local
+*.env.txt
+env.txt
