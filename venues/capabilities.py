@@ -97,15 +97,15 @@ def _uniswap(config: VenueConfig) -> VenueCapability:
     return VenueCapability(
         key="uniswap",
         role="taker",
-        summary="Rotates what the vault holds — the only venue that changes exposure.",
+        summary="Executes spot swaps. The only venue that changes the vault's exposure.",
         intents=("swap",),
         # The Trading API routes far more than this; these are the tokens this
         # lane can resolve by symbol and the vault can value.
         tokens=tuple(sorted(set(addresses.TOKENS) - {"ETH"})),
         custody="rotational",
         custody_note=(
-            "No position is held. The vault ends the trade holding a different "
-            "token; nothing is owed to or by anyone."
+            "Settles in full at execution. The vault is left holding a different "
+            "token, with no open position and no counterparty claim."
         ),
         requires=("UNISWAP_API_KEY",),
         available=has_key,
@@ -127,14 +127,14 @@ def _aqua(config: VenueConfig) -> VenueCapability:
     return VenueCapability(
         key="aqua",
         role="maker",
-        summary="Earns fees on what the vault already holds, as passive liquidity.",
+        summary="Quotes resting liquidity and earns the spread on inventory the vault already holds.",
         intents=("ship", "dock"),
         tokens=("USDC", "WETH"),
         custody="virtual",
         custody_note=(
-            "Tokens never leave the vault. Aqua records virtual balances and "
-            "pulls from the vault's own wallet only when a taker fills, so "
-            "totalAssets() keeps working off plain balanceOf."
+            "Tokens never leave the vault. Aqua tracks a virtual balance and "
+            "debits the vault only on fill, so totalAssets() still reads from "
+            "balanceOf."
         ),
         # The program builder runs through an eth_call state override, so no
         # deployment and no key — only an endpoint. Public Base works.
@@ -163,14 +163,14 @@ def _aave(config: VenueConfig) -> VenueCapability:
     return VenueCapability(
         key="aave",
         role="lender",
-        summary="Earns interest on what the vault already holds, by supplying to Aave v3.",
+        summary="Lends idle assets to Aave v3 at the variable supply rate.",
         intents=("supply", "withdraw"),
         tokens=tuple(valuable),
         custody="claim",
         custody_note=(
-            "The underlying moves to the Aave pool and the vault holds an "
-            "aToken claim, always with onBehalfOf = the vault. Sole custody is "
-            "intact, but the vault must be able to value the aToken."
+            "Principal moves to the Aave pool and the vault receives an aToken "
+            "claim opened in its own name. Custody is retained, provided the "
+            "aToken carries a registered price feed."
         ),
         available=bool(valuable),
         unavailable_reason=(
@@ -199,18 +199,14 @@ def _morpho(config: VenueConfig) -> VenueCapability:
     return VenueCapability(
         key="morpho",
         role="lender",
-        summary=(
-            "Earns interest on what the vault already holds, by depositing into a "
-            "curated MetaMorpho vault."
-        ),
+        summary="Lends idle assets through a curated MetaMorpho vault.",
         intents=("supply", "withdraw"),
         tokens=tuple(sorted({"USDC"} if usable else set())),
         custody="claim",
         custody_note=(
-            "The underlying moves to a MetaMorpho vault and the curated vault holds "
-            "ERC-4626 shares, with receiver = the vault. Unlike an Aave aToken those "
-            "shares appreciate rather than rebasing, so they need ERC4626PriceFeed "
-            "to be valued correctly."
+            "Principal moves to the MetaMorpho vault and the vault receives "
+            "ERC-4626 shares in its own name. Those shares appreciate rather "
+            "than rebase, so valuing them requires an ERC4626PriceFeed."
         ),
         available=bool(usable),
         unavailable_reason=(

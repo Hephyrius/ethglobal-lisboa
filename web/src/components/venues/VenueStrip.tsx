@@ -34,12 +34,12 @@ const CUSTODY: Record<string, { tone: BadgeTone; label: string; note: string }> 
   claim: {
     tone: 'data',
     label: 'claim',
-    note: 'The underlying moves; the vault holds a receipt token for it.',
+    note: 'Principal moves to the venue. The vault holds a receipt token as its claim.',
   },
   rotational: {
     tone: 'neutral',
     label: 'rotational',
-    note: 'No position is held. It swaps one asset for another.',
+    note: 'No position is opened. One asset is exchanged for another and settles at once.',
   },
 }
 
