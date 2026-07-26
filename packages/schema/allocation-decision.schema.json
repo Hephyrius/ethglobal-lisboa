@@ -127,7 +127,7 @@
           "required": ["venue", "kind", "asset"],
           "additionalProperties": false,
           "properties": {
-            "venue": { "const": "aave" },
+            "venue": { "enum": ["aave", "morpho"], "default": "aave" },
             "kind": { "const": "supply" },
             "asset": { "type": "string" },
             "amount": {
@@ -149,7 +149,7 @@
           "required": ["venue", "kind", "asset"],
           "additionalProperties": false,
           "properties": {
-            "venue": { "const": "aave" },
+            "venue": { "enum": ["aave", "morpho"], "default": "aave" },
             "kind": { "const": "withdraw" },
             "asset": { "type": "string" },
             "amount": {

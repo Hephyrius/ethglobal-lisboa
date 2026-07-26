@@ -33,7 +33,7 @@ INDEX = PRESET_DIR / "index.json"
 #: Venue keys with a built adapter. Mirrors the closed Literal on
 #: `Mandate.permitted_venues` — a preset naming a venue with no adapter produces
 #: a vault whose agent proposes trades the harness can only ever reject.
-VENUES_WITH_ADAPTERS = {"uniswap", "aqua", "aave"}
+VENUES_WITH_ADAPTERS = {"uniswap", "aqua", "aave", "morpho"}
 
 
 def _load(path: Path) -> Any:

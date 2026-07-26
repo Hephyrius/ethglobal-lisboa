@@ -5430,3 +5430,85 @@ WETH.
 The invariant that matters most is the last leg: after a round trip through four
 venues, `convertToAssets(shares) <= deposited`. No sequence of agent actions
 mints value.
+
+## Wave 3 — Morpho enabled: one literal, and the two things behind it
+
+The finding from the integration pass was that Morpho was **advertised and
+unreachable**. Enabling it turned out to be one schema change plus two bugs that
+only existed because nothing had ever supplied to it through the harness.
+
+### The blocker: a Literal in a frozen schema
+
+`SupplyIntent.venue` and `WithdrawIntent.venue` were `Literal["aave"]`, and
+`agent/loop/planning.py` routes on `intent.venue`. `MorphoVenue` was registered,
+tested and reported `available` by `GET /venues` — and no intent the model could
+emit ever arrived at it.
+
+Widened to `Literal["aave", "morpho"]` in all four mirrors of the frozen schema:
+the pydantic model, the Zod mirror, `allocation-decision.schema.json`, and
+`VENUES_WITH_ADAPTERS` in the preset tests. The **default stays `"aave"`**, so
+every existing fixture, preset and journalled action deserialises unchanged.
+
+Two things follow for free, which is the point of deriving rather than
+restating: `decision_schema()` is `AllocationDecision.model_json_schema()`, so
+the guided-decoding schema the model is *constrained* by widened automatically;
+and `permitted_venues` already allowed `"morpho"`, so the mandate gate needed no
+change at all. Verified both — the schema admits it, and a mandate granting only
+Aave still rejects a Morpho intent on `permitted_venues`
+(`test_04b_a_mandate_still_gates_the_new_venue`). Widening the schema must not
+widen what a mandate permits, and that is the test that says so.
+
+### Bug 1: the Morpho share was not recognised as a receipt token
+
+The supply executed on the first try. Then the assertion caught it: `gtUSDCp`
+came back with `represents=None` while `aBasUSDC` correctly carried
+`represents="USDC"`. `agent/chain/receipts.py` built its map from
+`venues.aave.markets.ATOKENS` and nothing else.
+
+Unfolded, a MetaMorpho share counts as an asset of its own — so
+`max_position_pct` fights a position the mandate asked for, which is **exactly
+the failure fixed earlier this session for aTokens**, reached by the other
+lender. The module's own docstring predicted it; the map just never grew.
+
+A MetaMorpho share is an ERC-4626 share rather than a 1:1 rebasing receipt, so
+it is worth more than the underlying and grows. That changes *valuation*, not
+*exposure* — the vault is still long USDC and nothing else, which is all the map
+claims. The share price is the valuation feed's job.
+
+### Bug 2: `committed_to_venue` was the string `"aave"`, hardcoded
+
+At the single call site in `vault_client.py`. True while Aave was the only
+lender; a lie about a Morpho position the moment it was not.
+
+This is worse than a mislabelled row, because the curator prompt renders it to
+the model — *"USDC supplied to aave"*. A wrong venue there tells the agent to
+withdraw from somewhere the position is not, and the withdrawal would fail on a
+venue that has nothing to give back. Now resolved per token by `receipt_venue()`.
+
+### The prompt had to change too, and this is the part a schema cannot do
+
+Widening a Literal makes an intent *representable*. It does not make the model
+*aware*. The intent-shape section named Aave in prose and in both examples, so a
+model reading it had no reason to believe a second lender existed.
+
+It now says there are two, that the same two shapes address both, and — the part
+worth having — that they are **not interchangeable**: Aave is a large shared
+pool, Morpho routes into curated vaults that can pay a different rate on the
+same asset, so compare quoted yields against the depth behind each rather than
+taking the higher number. That is the same argument the DefiLlama note makes
+about `apyReward`, and it is the judgement the peer-comparison data exists to
+support.
+
+Presets now grant `morpho` wherever they already granted `aave`. **Vaults
+created before this keep the mandate they were deployed with** — a mandate is
+stored at genesis and its hash is on chain, so existing vaults will not start
+using Morpho, and should not.
+
+### Proven, not asserted
+
+`tests/e2e/test_slice_full_cycle.py` now runs the *identical two intents*
+against both lenders. That symmetry is the only real test of the venue port: if
+either adapter needed caller-side special-casing, the Morpho function could not
+be a copy of the Aave one. It is.
+
+**10/10 full cycle · 1121 python · 47 e2e · web typecheck clean.**

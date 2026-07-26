@@ -217,7 +217,11 @@ export const AquaDockIntent = z
  *  vault. Closes the gap where the agent read Aave yields it could not act on. */
 export const SupplyIntent = z
   .object({
-    venue: z.literal('aave'),
+    // Widened from z.literal('aave') in Wave 3: MorphoVenue was registered,
+    // tested and reported available, but routing goes through intent.venue, so
+    // the pinned literal made it unreachable from any intent the model could
+    // emit. A mandate must still grant 'morpho' in permitted_venues.
+    venue: z.enum(['aave', 'morpho']),
     kind: z.literal('supply'),
     asset: z.string(),
     amount: Uint256Str.optional(),
@@ -228,7 +232,9 @@ export const SupplyIntent = z
 /** Redeem a supplied asset back into the vault. Omit `amount` for all of it. */
 export const WithdrawIntent = z
   .object({
-    venue: z.literal('aave'),
+    // Widened with SupplyIntent — a venue you can supply to and cannot
+    // withdraw from is a one-way door.
+    venue: z.enum(['aave', 'morpho']),
     kind: z.literal('withdraw'),
     asset: z.string(),
     amount: Uint256Str.optional(),

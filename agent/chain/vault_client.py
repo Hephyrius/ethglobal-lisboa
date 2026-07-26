@@ -60,7 +60,7 @@ from web3.logs import DISCARD
 from ..config import Settings
 from .abi import ERC20_ABI, load_abi
 from .aqua_positions import AquaPositionStore
-from .receipts import underlying_symbol
+from .receipts import receipt_venue, underlying_symbol
 from .rpc import make_async_web3
 
 __all__ = ["Web3VaultClient"]
@@ -295,7 +295,15 @@ class Web3VaultClient:
         # unfolded, a supplied balance reads as an asset the mandate never
         # permitted and every constraint layer fights it. Local, no round trips.
         holdings = [
-            h.model_copy(update={"represents": represented, "committed_to_venue": "aave"})
+            h.model_copy(
+                update={
+                    "represents": represented,
+                    # Was hardcoded "aave". True while Aave was the only lender;
+                    # a lie about a Morpho position, and the prompt shows this
+                    # string to the model as the venue to withdraw from.
+                    "committed_to_venue": receipt_venue(h.token) or "aave",
+                }
+            )
             if (represented := underlying_symbol(h.token, symbols)) is not None
             else h
             for h in holdings

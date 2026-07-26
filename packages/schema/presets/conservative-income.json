@@ -1,10 +1,12 @@
 {
   "version": 1,
   "name": "Conservative Income",
-  "objective": "Earn a steady return on USDC and take no directional risk. Hold no asset other than USDC, and keep the book deployed: USDC sitting unlent above the cash floor is the position of earning nothing, so supply it to whichever permitted lending market pays best for the depth it offers. Prefer the deeper market over the higher headline rate — a rate quoted on a thin market is a rate you cannot exit at. Withdraw back to cash before the floor is threatened, never after.",
+  "objective": "Earn a steady return on USDC and take no directional risk. Hold no asset other than USDC, and keep the book deployed: USDC sitting unlent above the cash floor is the position of earning nothing, so supply it to whichever permitted lending market pays best for the depth it offers. Prefer the deeper market over the higher headline rate \u2014 a rate quoted on a thin market is a rate you cannot exit at. Withdraw back to cash before the floor is threatened, never after.",
   "base_asset": "USDC",
   "constraints": {
-    "allowed_assets": ["USDC"],
+    "allowed_assets": [
+      "USDC"
+    ],
     "max_position_pct": 1,
     "min_cash_pct": 0.25,
     "max_slippage_bps": 10,
@@ -12,8 +14,15 @@
     "max_actions_per_tick": 2,
     "tolerance_band_pct": 0.02
   },
-  "permitted_data_sources": ["messari", "aave", "chainlink"],
-  "permitted_venues": ["aave"],
+  "permitted_data_sources": [
+    "messari",
+    "aave",
+    "chainlink"
+  ],
+  "permitted_venues": [
+    "aave",
+    "morpho"
+  ],
   "risk_posture": "conservative",
   "persona": {
     "name": "The Treasurer",

@@ -262,39 +262,88 @@ def test_03_aave_supply_then_withdraw_round_trips(w3, usdc, cycle_vault, api):
 # ── 4. Morpho — the second lender, proving the venue port is a port ───────
 
 
-def test_04_morpho_is_registered_but_unreachable_from_an_intent(api):
-    """**A finding, pinned as a test rather than written in a doc.**
+def test_04_morpho_supply_then_withdraw(w3, usdc, cycle_vault, api):
+    """The second lender, reached the same way as the first.
 
-    `MorphoVenue` exists, is tested, and `GET /venues` reports it available. But
-    the frozen schema pins `SupplyIntent.venue` and `WithdrawIntent.venue` to
-    `Literal["aave"]`, and `agent/loop/planning.py` routes on `intent.venue`. So
-    there is no intent the model can emit that reaches Morpho — the adapter is
-    unreachable from the decision path.
+    Morpho was registered, tested and reported `available` by `GET /venues` for
+    two waves while being **unreachable**: the frozen schema pinned
+    `SupplyIntent.venue` to `Literal["aave"]` and `agent/loop/planning.py` routes
+    on `intent.venue`, so no intent the model could emit ever arrived. Widening
+    the literal to `Literal["aave", "morpho"]` is the whole fix; this is the test
+    that says so.
 
-    Constructing the intent raises `ValidationError` at the schema, which is why
-    this asserts the constraint instead of exercising the venue: the gap is in
-    what can be *expressed*, not in what Morpho does.
-
-    Asserted rather than fixed because `packages/schema/` is frozen after Wave 0
-    and widening a venue literal days before a mainnet deploy is not a change to
-    make unilaterally. If Morpho is meant to be reachable, that is a Lane F
-    schema change plus a routing test; if it is not, `capabilities.py` should
-    stop advertising it. Either way this test fails the moment someone acts, and
-    that is the point.
+    Running the *identical two intents* against a different venue is also the
+    only real test of the venue port. If either adapter needed caller-side
+    special casing, this function could not be a copy of the Aave one.
     """
-    import httpx
-    from pydantic import ValidationError
-    from curator_schema import SupplyIntent
+    from curator_schema import SupplyIntent, WithdrawIntent
+    from venues.errors import VenueError
 
-    with pytest.raises(ValidationError, match="aave"):
-        SupplyIntent(venue="morpho", asset="USDC", pct_of_holdings=0.3)
+    state = _vault_state(api, cycle_vault)
+    before = _balance(w3, usdc, cycle_vault)
+    if before < 10_000_000:
+        pytest.skip("not enough liquid USDC left to supply")
 
-    with httpx.Client(timeout=30) as client:
-        venues = client.get(f"{api}/venues").json()
-    morpho = next((v for v in venues if v["key"] == "morpho"), None)
-    assert morpho is not None and morpho["available"] is True, (
-        "morpho is no longer advertised — if that was deliberate, delete this test"
+    try:
+        plan = _plan(
+            "morpho", SupplyIntent(venue="morpho", asset="USDC", pct_of_holdings=0.3), state
+        )
+    except VenueError as exc:
+        pytest.skip(f"no Morpho market for USDC on this fork: {exc}")
+
+    _execute(w3, cycle_vault, plan)
+    after = _balance(w3, usdc, cycle_vault)
+    assert after < before, "USDC did not leave the vault for Morpho"
+
+    # The 4626 share token is USDC exposure, not a new asset — same property the
+    # Aave leg asserts, and what keeps max_position_pct from fighting a position
+    # the mandate asked for.
+    shares = [
+        h for h in _vault_state(api, cycle_vault).holdings
+        if (h.represents or "") == "USDC" and h.symbol not in ("USDC",) and int(h.balance) > 0
+    ]
+    assert shares, "no Morpho share holding appeared, or it is not marked as USDC exposure"
+
+    _execute(
+        w3,
+        cycle_vault,
+        _plan("morpho", WithdrawIntent(venue="morpho", asset="USDC"),
+              _vault_state(api, cycle_vault)),
     )
+    assert _balance(w3, usdc, cycle_vault) > after, "Morpho withdraw returned nothing"
+
+
+def test_04b_a_mandate_still_gates_the_new_venue(api):
+    """Widening the schema must not widen what a mandate permits.
+
+    `permitted_venues` is an allowlist and is explicitly never banded, so a
+    mandate that names only Aave must still reject a Morpho intent. Otherwise
+    the fix would have turned a reachability bug into a constraint hole.
+    """
+    import json, pathlib
+    from curator_schema import AllocationDecision, Mandate, SupplyIntent
+    from agent.mandate.constraints import check_decision
+
+    presets = pathlib.Path(__file__).resolve().parents[2] / "packages" / "schema" / "presets"
+    mandate = Mandate.model_validate(
+        json.loads((presets / "conservative-income.json").read_text(encoding="utf-8"))
+    )
+    aave_only = mandate.model_copy(
+        update={"permitted_venues": [v for v in mandate.permitted_venues if v != "morpho"]}
+    )
+    decision = AllocationDecision(
+        action="enter",
+        reasoning="Morpho quotes better than Aave today.",
+        venue_intents=[SupplyIntent(venue="morpho", asset="USDC", pct_of_holdings=0.2)],
+    )
+
+    assert check_decision(decision, aave_only), (
+        "a mandate permitting only aave accepted a morpho intent — widening the "
+        "schema removed a constraint instead of removing a blocker"
+    )
+    assert not [
+        v for v in check_decision(decision, mandate) if v.constraint == "permitted_venues"
+    ], "the shipped preset grants morpho, so it must not be rejected on the venue"
 
 
 # ── 5. Aqua — a maker position that moves nothing ─────────────────────────

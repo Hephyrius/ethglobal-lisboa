@@ -258,7 +258,17 @@ class SupplyIntent(Frozen):
     holds itself — nothing is delegated and `onBehalfOf` is always the vault.
     """
 
-    venue: Literal["aave"] = "aave"
+    #: Widened from `Literal["aave"]` in Wave 3. `MorphoVenue` had existed,
+    #: been tested, and been reported `available` by `GET /venues` the whole
+    #: time — but routing goes through `intent.venue` in
+    #: `agent/loop/planning.py`, so with the literal pinned to "aave" there was
+    #: **no intent the model could emit that reached Morpho**. The adapter was
+    #: advertised and unreachable.
+    #:
+    #: Default stays "aave" so every existing fixture, preset and journalled
+    #: action deserialises unchanged; a mandate still has to grant "morpho" in
+    #: `permitted_venues` before the agent may name it.
+    venue: Literal["aave", "morpho"] = "aave"
     kind: Literal["supply"] = "supply"
     asset: str
     amount: Uint256Str | None = None
@@ -269,7 +279,9 @@ class SupplyIntent(Frozen):
 class WithdrawIntent(Frozen):
     """Redeem a supplied asset from a lending market back into the vault."""
 
-    venue: Literal["aave"] = "aave"
+    #: See `SupplyIntent.venue` — widened together, because a venue you can
+    #: supply to and cannot withdraw from is a one-way door.
+    venue: Literal["aave", "morpho"] = "aave"
     kind: Literal["withdraw"] = "withdraw"
     asset: str
     #: Omit for "all of it" — `type(uint256).max` at the adapter, which is how

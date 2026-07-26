@@ -560,14 +560,21 @@ fraction of the input token's holdings to sell:
 {{"venue": "uniswap", "kind": "swap", "token_in": "A", "token_out": "B", \
 "pct_of_holdings": 0.0}}
 
-To EARN INTEREST on an asset the vault already holds, supply it to Aave. The \
-vault receives an interest-bearing receipt token which it holds itself. This \
-does NOT change your allocation - supplying USDC leaves you just as long USDC, \
-it simply earns the lending rate while you hold it:
+To EARN INTEREST on an asset the vault already holds, supply it to a lending \
+market. The vault receives an interest-bearing receipt token which it holds \
+itself. This does NOT change your allocation - supplying USDC leaves you just \
+as long USDC, it simply earns the lending rate while you hold it:
 {{"venue": "aave", "kind": "supply", "asset": "A", "pct_of_holdings": 0.0}}
 
 To GET IT BACK, withdraw. Omit `amount` to redeem the whole position:
 {{"venue": "aave", "kind": "withdraw", "asset": "A"}}
+
+There are TWO lending venues and the same two shapes address both: set \
+`"venue"` to "aave" or to "morpho". Only use a venue your mandate permits. \
+They are not interchangeable - Aave is a large shared pool, Morpho routes into \
+curated vaults that can pay a different rate on the same asset, so compare \
+their quoted yields against the depth behind each rather than taking the \
+higher number. A withdrawal must name the venue the position is actually in.
 
 To EARN FEES on what the vault already holds, post it as passive liquidity in \
 Aqua. The tokens never leave the vault. Aqua records a claim against them, so \

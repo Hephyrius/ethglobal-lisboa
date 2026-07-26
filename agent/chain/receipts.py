@@ -26,20 +26,72 @@ from __future__ import annotations
 import logging
 from functools import lru_cache
 
-__all__ = ["receipt_map", "underlying_symbol"]
+__all__ = ["receipt_map", "underlying_symbol", "receipt_venue"]
 
 log = logging.getLogger(__name__)
 
 
 @lru_cache(maxsize=1)
 def receipt_map() -> dict[str, str]:
-    """aToken address (lowercase) → underlying token address (lowercase)."""
+    """Receipt token address (lowercase) → underlying token address (lowercase).
+
+    Covers both lending venues. Morpho was missing here for two waves and the
+    consequence was precise: a supplied `gtUSDCp` came back with
+    `represents=None`, so every weight function counted a MetaMorpho share as an
+    asset of its own. `max_position_pct` then fights a position the mandate
+    asked for — the same failure the module docstring describes for aTokens,
+    reached by the other lender.
+
+    A MetaMorpho share is an ERC-4626 share rather than a 1:1 rebasing receipt,
+    so it is worth *more* than the underlying and grows. That changes valuation,
+    not exposure: the vault is still long USDC and nothing else, which is all
+    this map claims. The share price is handled by the valuation feed.
+    """
+    out: dict[str, str] = {}
     try:
         from venues.aave.markets import ATOKENS
+
+        out.update({a.lower(): u.lower() for u, a in ATOKENS.items()})
     except Exception as exc:  # noqa: BLE001 - venues is an optional seam
-        log.debug("no venue package for receipt-token mapping (%s)", exc)
-        return {}
-    return {atoken.lower(): underlying.lower() for underlying, atoken in ATOKENS.items()}
+        log.debug("no aave receipt-token mapping (%s)", exc)
+    try:
+        from venues.morpho.markets import VAULTS
+
+        out.update({v.address.lower(): v.asset.lower() for v in VAULTS.values()})
+    except Exception as exc:  # noqa: BLE001
+        log.debug("no morpho receipt-token mapping (%s)", exc)
+    return out
+
+
+@lru_cache(maxsize=1)
+def _venue_map() -> dict[str, str]:
+    """Receipt token address (lowercase) → the venue holding the position.
+
+    `committed_to_venue` used to be hardcoded to "aave" at the single call site,
+    which was true while Aave was the only lender and became a lie the moment it
+    was not. The prompt renders this string to the model ("USDC supplied to
+    aave"), so a wrong one does not just mislabel a row — it tells the agent to
+    withdraw from somewhere the position is not.
+    """
+    out: dict[str, str] = {}
+    try:
+        from venues.aave.markets import ATOKENS
+
+        out.update({a.lower(): "aave" for a in ATOKENS.values()})
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from venues.morpho.markets import VAULTS
+
+        out.update({v.address.lower(): "morpho" for v in VAULTS.values()})
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
+def receipt_venue(token: str) -> str | None:
+    """Which venue a receipt token's position sits in, or None if not a receipt."""
+    return _venue_map().get(token.lower())
 
 
 def underlying_symbol(token: str, symbols: dict[str, str]) -> str | None:
