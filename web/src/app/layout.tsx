@@ -6,7 +6,7 @@ import { Header } from '@/components/layout/Header'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Curator · agentic vault curation',
+  title: 'Scipio: Agentic Vault Curation',
   description:
     'An ERC-4626 vault curated by an autonomous LLM agent. Watch it consult live market data, reason under its mandate, and execute on-chain.',
 }
