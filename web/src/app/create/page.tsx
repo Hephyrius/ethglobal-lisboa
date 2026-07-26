@@ -187,19 +187,32 @@ export default function CreatePage() {
 
           <VenueStrip />
 
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
-            <ChatPanel
-              messages={messages}
-              pending={chat.isPending}
-              onSend={(text) => void send(text)}
-              suggestions={suggestionsFor(messages, agentDraft)}
-            />
-
-            <div className="space-y-4">
-              <MandateDraft draft={agentDraft} available={available} />
-              <DeployPanel draft={agentDraft} />
+          {/* The three strips above are menus of what exists; this is where the
+              mandate is actually written. It was the only part of the page
+              without a heading, so the conversation read as a continuation of
+              the venue list rather than as the step that consumes all three.
+              Same rule and weight as `AssetUniverse`, `UniverseStrip` and
+              `VenueStrip`, so the four read as one sequence. */}
+          <section>
+            <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-line pb-2">
+              <h2 className="text-sm font-semibold text-ink">Curation Agent Genesis</h2>
+              <span className="text-2xs text-faint">the mandate is written here</span>
             </div>
-          </div>
+
+            <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
+              <ChatPanel
+                messages={messages}
+                pending={chat.isPending}
+                onSend={(text) => void send(text)}
+                suggestions={suggestionsFor(messages, agentDraft)}
+              />
+
+              <div className="space-y-4">
+                <MandateDraft draft={agentDraft} available={available} />
+                <DeployPanel draft={agentDraft} />
+              </div>
+            </div>
+          </section>
         </>
       ) : null}
 

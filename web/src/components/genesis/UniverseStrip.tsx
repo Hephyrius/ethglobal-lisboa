@@ -18,18 +18,28 @@ import type { AvailableGrants } from '@/lib/api/genesis-queries'
  * looks exactly like the feature not existing.
  */
 
+/**
+ * Two or three words each, because they sit on the same line as the key rather
+ * than under it. A note long enough to wrap pushes its row taller than its
+ * neighbours and the grid stops reading as a list.
+ *
+ * These name the *kind* of fact a source supplies, which is all the choice
+ * needs: a reader picking sources is asking "what would this let it see", not
+ * "how is it implemented". The implementation detail each of these used to
+ * carry — Aave's own subgraph schema, Chainlink being the same oracle the vault
+ * values with — belongs in the docs, not in a picker.
+ */
 const SOURCE_NOTES: Record<string, string> = {
-  messari: 'Standardised lending and DEX metrics across protocols, via The Graph',
-  aave: 'Aave V3 Base, on its own subgraph schema rather than the standardised one',
-  chainlink: 'On-chain price feeds, the same oracle the vault values its holdings with',
-  token_api: 'Prices derived from executed DEX swaps',
-  defillama: 'Cross-protocol TVL and yield',
-  peers: 'What comparable vaults are doing',
-  feargreed: 'Market sentiment index',
-  gas: 'Base gas price, what an action costs to take',
-  morpho: "Base's largest lending market by TVL",
-  prediction:
-    'Implied odds from prediction markets, a forward-looking view unlike every rate beside it',
+  messari: 'Cross-protocol metrics',
+  aave: 'Aave V3 rates',
+  chainlink: 'Oracle prices',
+  token_api: 'DEX swap prices',
+  defillama: 'TVL and yields',
+  peers: 'Comparable vaults',
+  feargreed: 'Sentiment index',
+  gas: 'Base gas price',
+  morpho: 'Morpho rates',
+  prediction: 'Market-implied odds',
 }
 
 /**
@@ -50,19 +60,32 @@ export function UniverseStrip({ available }: { available: AvailableGrants }) {
       </div>
 
       <p className="mt-3 text-2xs leading-relaxed text-faint">
-        The agent can only reason about markets it is granted. This list is exhaustive: anything
-        absent from a mandate, it cannot see.
+        The agent may consult only the sources granted to it. This list is exhaustive: anything
+        absent from the mandate is unavailable to it.
       </p>
 
-      {/* One source per row on its own line, the badge above its description
-          rather than beside it. Inline, the longer notes wrapped under the
-          badge and the rows lost their left edge, so the list read as prose. */}
-      <ul className="mt-4 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+      {/* Key and note on one line. This was tried once before and reverted,
+          because the notes were a sentence long and wrapped under the badge
+          until the rows lost their left edge and the list read as prose. It
+          works now because the notes are two words, not because the layout
+          changed — shorten one of these back to a sentence and it breaks again.
+
+          Five across from `xl` (1280) rather than from `2xl`. The page container
+          is capped at 1400px, so the grid is within a few pixels of the same
+          width at 1440 as at 1920 — gating five columns on the viewport instead
+          of the content width meant the widest laptops still saw three. At 1280
+          each cell is about 234px, which a badge and three words clear. */}
+      <ul className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         {available.sources.map((key) => (
-          <li key={key} className="rounded border border-line bg-surface p-3">
+          <li
+            key={key}
+            className="flex min-w-0 items-center gap-2 rounded border border-line bg-surface px-2.5 py-2"
+          >
             <Badge tone="data">{key}</Badge>
             {SOURCE_NOTES[key] ? (
-              <p className="mt-2 text-2xs leading-relaxed text-muted">{SOURCE_NOTES[key]}</p>
+              <span className="truncate text-2xs text-muted" title={SOURCE_NOTES[key]}>
+                {SOURCE_NOTES[key]}
+              </span>
             ) : null}
           </li>
         ))}
