@@ -82,8 +82,27 @@ export const FIXTURES_FORCED = process.env.NEXT_PUBLIC_FIXTURES === '1'
  * The timeout only ever governs how patient we are with an API that *is*
  * answering, and there the right answer is "more patient than the slowest
  * honest response".
+ *
+ * ## Why not higher
+ *
+ * There is a ceiling, and it is set by Caddy rather than by anything here.
+ * `deploy/Caddyfile` gives the API route `lb_try_duration 45s`, so during a
+ * redeploy Caddy *holds* a request for up to 45 seconds waiting for the new
+ * container instead of failing it. Any client timeout above that window turns
+ * every redeploy into a minute of spinner. Below it, the browser gives up
+ * first, renders a fixture, and recovers on the next 12s refetch — a flash
+ * instead of a hang.
+ *
+ * 25s is therefore ~7x the measured worst case and still comfortably inside
+ * Caddy's hold. Raising it further protects only against an API that answers
+ * but takes longer than this, which nothing measured does; and in that case a
+ * fixture is the better outcome than a spinner in front of a judge, which is
+ * the entire reason the fallback exists.
+ *
+ * The genuinely slow routes never used this default: genesis chat is 120s,
+ * deploy 90s and tick 120s, each set at its own call site.
  */
-const DEFAULT_TIMEOUT_MS = 15_000
+const DEFAULT_TIMEOUT_MS = 25_000
 
 export class ApiUnavailable extends Error {}
 
