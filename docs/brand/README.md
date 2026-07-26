@@ -4,8 +4,10 @@
 |---|---|---|
 | `scipio-logo-512.png` | 512×512 | Submission **Logo** field (square icon) |
 | `scipio-cover-640x360.png` | 640×360 (16:9) | Submission **Cover image** field |
+| `scipio-built-with-1200x200.png` | 1200×200 | Partner strip — READMEs, slides, anywhere it cannot animate |
+| `scipio-built-with@2x.png` | 2400×400 | The same strip for retina / print |
 
-Both are generated from the HTML sources beside them, so they can be regenerated
+All are generated from the sources beside them, so they can be regenerated
 rather than re-drawn:
 
 ```sh
@@ -14,6 +16,13 @@ CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
   --screenshot=scipio-logo-512.png --window-size=512,512 file://"$PWD"/logo.html
 "$CHROME" --headless --disable-gpu --hide-scrollbars --force-device-scale-factor=1 \
   --screenshot=scipio-cover-640x360.png --window-size=640,360 file://"$PWD"/cover.html
+
+# The partner strip inlines the four vendored marks, so it is built first.
+python3 build-strip.py strip.html
+"$CHROME" --headless --disable-gpu --hide-scrollbars --force-device-scale-factor=1 \
+  --screenshot=scipio-built-with-1200x200.png --window-size=1200,200 file://"$PWD"/strip.html
+"$CHROME" --headless --disable-gpu --hide-scrollbars --force-device-scale-factor=2 \
+  --screenshot=scipio-built-with@2x.png --window-size=1200,200 file://"$PWD"/strip.html
 ```
 
 ## Why they look like this
@@ -38,3 +47,24 @@ Two deliberate departures from the running site:
 - **The cover's motif sits at 0.62 opacity, not the site's near-invisible wash.**
   On the site it is decoration behind body copy. A cover is judged as a thumbnail
   in a gallery, where that weight disappears altogether.
+
+## The partner strip
+
+`build-strip.py` flattens the landing page's `BuiltWith` marquee. It keeps the
+order, the per-logo optical heights (the four viewBoxes carry different internal
+padding, so one shared height leaves the row visibly uneven) and the colour each
+brand pack ships. It drops only what a still image cannot carry: the scroll, the
+three duplicate passes and the right-edge fade mask.
+
+**Nothing is recoloured.** Every fill in the four vendored files is already
+literal — `#F50DB4`, `#141A1F`, `#0C0A1D`, `#000000` — so they are inlined
+untouched, and inlined rather than referenced so the render cannot depend on a
+file load.
+
+**There is no dark-ground cut, deliberately.** Three of the four marks are
+single-ink because their owners publish them that way, so a dark version would
+mean recolouring other companies' logos — and per
+[`web/public/logos/README.md`](../../web/public/logos/README.md), an inaccurate
+mark misrepresents a brand more visibly than no mark at all. Those marks are the
+trademarks of their respective owners and appear as attribution; they do not
+imply endorsement.
