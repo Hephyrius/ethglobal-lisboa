@@ -28,11 +28,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 
 import pytest
 
 from .conftest import (
     AGENT,
+    REPO_ROOT,
     DEPOSITOR_KEY,
     create_vault_calldata,
     send_calldata,
@@ -57,7 +59,13 @@ GAS_LIMIT = 3_000_000
 #: anvil account #1 — holds AGENT_ROLE. Reads work with any key; writes revert.
 AGENT_KEY = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
 
-DEPOSIT_USDC = 2_000_000_000  # 2,000 USDC, 6dp — enough that every leg is material
+#: Overridable so the cycle can be re-run at the size the mainnet demo will
+#: actually use. The default is generous on purpose — a leg that fails only at
+#: small size is a *finding*, and it cannot be a finding if the suite never runs
+#: large enough to establish the leg works at all.
+#:
+#:     CYCLE_DEPOSIT_USDC=1000000 uv run pytest tests/e2e -k full_cycle
+DEPOSIT_USDC = int(os.environ.get("CYCLE_DEPOSIT_USDC", 2_000_000_000))  # 6dp
 
 pytestmark = pytest.mark.order("last") if hasattr(pytest.mark, "order") else ()
 
@@ -85,6 +93,54 @@ ALLOWANCE_ABI = json.loads("""[
   "inputs":[{"name":"owner","type":"address"},{"name":"spender","type":"address"}],
   "outputs":[{"type":"uint256"}]}
 ]""")
+
+
+#: Chainlink ETH/USD on Base — the feed the vault itself values WETH with.
+ETH_USD_FEED = "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70"
+
+
+def _fork_price_drift_bps(w3) -> float | None:
+    """How far the pinned fork's price has drifted from live Base, in bps.
+
+    **Why a swap test has to know this.** The Uniswap Trading API quotes against
+    *live* mainnet and stamps an `amountOutMinimum` on the calldata. The fork
+    executes that calldata at the price of the block it was pinned to. If ETH has
+    moved further than the mandate's slippage tolerance in the meantime, the pool
+    returns less than the minimum and the router reverts `V3TooLittleReceived()`.
+
+    Measured here at 11,523 blocks of drift: 58 bps against a 50 bps ceiling.
+    Nothing is wrong with the vault, the adapter, the size of the trade or the
+    mandate — the fork is simply old. **This cannot happen on mainnet**, where
+    the quote and the execution see the same chain state.
+
+    Returns None if either price is unreadable, in which case the caller should
+    proceed and let a real failure be a real failure.
+    """
+    import os
+
+    import httpx
+    from dotenv import load_dotenv
+
+    def _price(url: str) -> float | None:
+        try:
+            r = httpx.post(
+                url,
+                json={"jsonrpc": "2.0", "method": "eth_call", "id": 1,
+                      "params": [{"to": ETH_USD_FEED, "data": "0xfeaf968c"}, "latest"]},
+                timeout=20,
+            ).json()["result"]
+            return int(r[2 + 64: 2 + 128], 16) / 1e8
+        except Exception:  # noqa: BLE001 — an unreadable price is not a verdict
+            return None
+
+    load_dotenv(REPO_ROOT / ".env", override=False)
+    live_url = os.environ.get("BASE_RPC_URL")
+    if not live_url:
+        return None
+    fork_price, live_price = _price(w3.provider.endpoint_uri), _price(live_url)
+    if not fork_price or not live_price:
+        return None
+    return abs(live_price - fork_price) / fork_price * 10_000
 
 
 def _erc20(w3, token: str):
@@ -202,6 +258,20 @@ def test_02_uniswap_rotation_moves_real_tokens(w3, usdc, deployments, cycle_vaul
     before_usdc = _balance(w3, usdc, cycle_vault)
     before_weth = _balance(w3, weth, cycle_vault)
 
+    # Checked BEFORE quoting, so a stale fork is reported as a stale fork rather
+    # than as a reverted swap. The mandate ceiling this is measured against is
+    # 50 bps, the value every shipped preset carries.
+    drift = _fork_price_drift_bps(w3)
+    if drift is not None and drift > 50:
+        pytest.skip(
+            f"the fork's price is {drift:.0f} bps from live Base, past the 50 bps "
+            f"slippage ceiling. The Trading API quotes against live mainnet and the "
+            f"fork executes at its pinned block, so the router reverts "
+            f"V3TooLittleReceived() no matter how the trade is sized. Restart the "
+            f"fork (scripts/anvil-fork.sh) to re-pin it. Cannot occur on mainnet, "
+            f"where the quote and the execution see the same chain state."
+        )
+
     try:
         plan = _plan(
             "uniswap",
@@ -281,8 +351,8 @@ def test_04_morpho_supply_then_withdraw(w3, usdc, cycle_vault, api):
 
     state = _vault_state(api, cycle_vault)
     before = _balance(w3, usdc, cycle_vault)
-    if before < 10_000_000:
-        pytest.skip("not enough liquid USDC left to supply")
+    if before < DEPOSIT_USDC // 10:
+        pytest.skip(f"only {before} USDC units liquid; too little of the deposit left to supply")
 
     try:
         plan = _plan(
@@ -373,7 +443,7 @@ def test_05_aqua_ship_holds_a_position_without_moving_tokens(
     usdc_held, weth_held = held.get("USDC", 0), held.get("WETH", 0)
     # XYC is a two-token constant-product curve, so a one-sided ship is not a
     # thing it can represent — the venue rejects it before any calldata is built.
-    if usdc_held < 10_000_000 or weth_held == 0:
+    if usdc_held < DEPOSIT_USDC // 10 or weth_held == 0:
         pytest.skip(
             f"need both legs for a two-token curve; hold {usdc_held} USDC, {weth_held} WETH "
             "(the Uniswap leg must run first)"
@@ -425,8 +495,8 @@ def test_06_multiple_intents_execute_atomically(w3, usdc, cycle_vault, api):
 
     state = _vault_state(api, cycle_vault)
     liquid = next((int(h.balance) for h in state.holdings if h.symbol == "USDC"), 0)
-    if liquid < 10_000_000:
-        pytest.skip("not enough liquid USDC left for a combined batch")
+    if liquid < DEPOSIT_USDC // 10:
+        pytest.skip(f"only {liquid} USDC units liquid; too little left for a combined batch")
 
     aave = _plan("aave", SupplyIntent(asset="USDC", pct_of_holdings=0.2), state)
     combined = aave.model_copy(update={"steps": list(aave.steps)})

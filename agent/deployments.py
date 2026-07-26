@@ -55,3 +55,37 @@ def deployments_path() -> Path:
     if override:
         return Path(override)
     return deployments_dir() / f"{network_name()}.json"
+
+
+def factory_address(configured: str | None = None) -> str | None:
+    """The `VaultFactory` for this network.
+
+    Order: an explicit `VAULT_FACTORY_ADDRESS` first, then the manifest.
+
+    **The explicit override is a liability and this exists to make it optional.**
+    It was added as the fix for #99, when a stale hardcoded value two redeploys
+    old made genesis 500 on every call. It then caused the same class of failure
+    again the other way round: pointed at real Base, the deployed API carried the
+    *fork's* factory in its environment, and that address holds no code on
+    mainnet. Every portfolio read would have queried an empty address and
+    reported "no vaults" — which is indistinguishable from a correct answer.
+
+    Read fresh from disk rather than cached on `Settings`, because a redeploy
+    rewrites the manifest and `settings()` is `lru_cache`d for the life of the
+    process. `agent/api/routes/portfolio.py` already reads it per request for
+    exactly that reason.
+    """
+    if configured:
+        return configured
+
+    import json
+
+    path = deployments_path()
+    if not path.is_file():
+        return None
+    try:
+        return (json.loads(path.read_text(encoding="utf-8")).get("contracts") or {}).get(
+            "VaultFactory"
+        )
+    except (OSError, ValueError):
+        return None

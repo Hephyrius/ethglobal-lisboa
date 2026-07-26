@@ -5512,3 +5512,70 @@ either adapter needed caller-side special-casing, the Morpho function could not
 be a copy of the Aave one. It is.
 
 **10/10 full cycle · 1121 python · 47 e2e · web typecheck clean.**
+
+## Wave 0 — 1 USDC per vault, and a warning of mine that was wrong
+
+The demo will deposit **1 USDC per vault**, not the $0.10–$0.50 the budget was
+first written against. Testing that produced one correction and one diagnosis
+worth keeping.
+
+### The correction: I argued against small deposits on a false premise
+
+`deploy/mainnet-budget.md` warned that a sub-dollar rotation might not route,
+and that gas would eat enough of the trade to breach the mandate's 50 bps
+ceiling and be rejected by validation layer 4. **Both were wrong**, and wrong in
+the expensive direction — they argued for larger deposits than the demo needs.
+
+Measured against the live Trading API instead of reasoned about:
+
+| Trade | WETH out | Implied $/ETH |
+|---:|---:|---:|
+| 0.25 USDC | 0.000132809 | $1,882.40 |
+| 1 USDC | 0.000531235 | $1,882.41 |
+| 500 USDC | 0.265500947 | $1,883.23 |
+
+Every size routes, and the **small trade gets the better price** — 4 bps better
+than the 500 USDC one, because it moves the pool less. The error was treating
+slippage tolerance as absolute when it is a percentage: it does not tighten as
+size falls.
+
+The full cycle then re-ran at exactly 1 USDC. Aave, Morpho, the atomic batch,
+pause with redemption open, `redeemInKind` and the closing accounting invariant
+all pass. 1 USDC is 1,000,000 base units and `_decimalsOffset() = 12` keeps
+share pricing exact, so nothing rounds away.
+
+What *is* true at this size is economic, not mechanical: $0.0011 of gas against
+a 1 USDC position earning ~3.5% is more than a year of yield in one transaction.
+Fine for a demonstration. Not a return, and the performance panel should not be
+read as one.
+
+### The diagnosis: `V3TooLittleReceived()` is fork staleness, not size
+
+The Uniswap leg reverted at 1 USDC, which looked like the small-size problem
+confirming itself. It was not. Re-running at 2,000 USDC — a size that had passed
+an hour earlier — **failed identically**, which is what turned a plausible story
+into a measurable one.
+
+The fork was pinned 11,523 blocks behind live Base, over which ETH moved
+**+0.581% (58 bps)** against a 50 bps ceiling. The Trading API quotes against
+*live* mainnet and stamps an `amountOutMinimum` into the calldata; the fork
+executes it at the price of its pinned block. Past the tolerance, the router
+reverts no matter how the trade is sized.
+
+**This cannot happen on mainnet**, where the quote and the execution see the same
+chain state. So the swap test now measures the drift *before* quoting and skips
+with that explanation, rather than failing. A suite that goes red because the
+fork is old teaches people to ignore it, and the next person to see
+`V3TooLittleReceived()` would reasonably have gone looking in the venue adapter.
+
+`CYCLE_DEPOSIT_USDC` now parameterises the cycle and every threshold in it is a
+fraction of the deposit rather than a fixed 10 USDC, so the same suite exercises
+the same legs at demo size.
+
+### One real consequence of 1 USDC, stated so nobody hunts it
+
+`MIN_PEER_ASSETS = 100.0` in `data/curator_data/sources/peers.py` means a 1 USDC
+vault is **invisible to the peer comparison** — it will not appear as a peer and
+will not see itself ranked. That threshold is deliberate (a fork accumulates
+dozens of unfunded vaults that say nothing about strategy), but at demo size it
+silently removes a data source the mandate may have granted.

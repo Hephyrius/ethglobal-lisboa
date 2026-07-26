@@ -425,15 +425,21 @@ class Web3VaultClient:
         The agent still submits the transaction, so this records *who asked*.
         It is not a signature and Lane A's `SECURITY.md` says so.
         """
-        if not self._settings.factory_address:
+        # Manifest first when nothing is configured. An explicit
+        # VAULT_FACTORY_ADDRESS survives a redeploy and then points at an
+        # address with no code — see `agent.deployments.factory_address`.
+        from ..deployments import deployments_path, factory_address
+
+        address = factory_address(self._settings.factory_address)
+        if not address:
             raise ValueError(
-                "VAULT_FACTORY_ADDRESS is not set; it is written to "
-                "deployments/base-fork.json by Lane A's deploy script"
+                f"no VaultFactory: VAULT_FACTORY_ADDRESS is unset and "
+                f"{deployments_path()} names none. Deploy first."
             )
 
         fields, abi = await self._create_params_fields()
         factory = self._w3.eth.contract(
-            address=self._w3.to_checksum_address(self._settings.factory_address), abi=abi
+            address=self._w3.to_checksum_address(address), abi=abi
         )
         asset = await self._resolve_asset(mandate)
         by_name = {
@@ -502,9 +508,17 @@ class Web3VaultClient:
             return self._LEGACY_FIELDS, _LEGACY_FACTORY_ABI
 
         resolved = (tuple(name for name, _ in declared), self._factory_abi)
+        # Resolved here too: this method is called before `create_vault` has a
+        # local, and the whole point is not to trust a stale env var.
+        from ..deployments import factory_address as _resolve_factory
+
+        address = _resolve_factory(self._settings.factory_address)
+        if not address:
+            log.warning("no factory address to probe; trusting the ABI")
+            return resolved
         try:
             code = (await self._w3.eth.get_code(
-                self._w3.to_checksum_address(self._settings.factory_address)
+                self._w3.to_checksum_address(address)
             )).hex()
         except Exception as exc:  # noqa: BLE001 - trust the ABI if we cannot look
             log.warning("could not read the factory's bytecode (%s); trusting the ABI", exc)
@@ -513,7 +527,7 @@ class Web3VaultClient:
         if _selector(declared) not in code:
             if _selector(_LEGACY_CREATE_PARAMS) not in code:
                 raise RuntimeError(
-                    f"the factory at {self._settings.factory_address} implements neither "
+                    f"the factory at {address} implements neither "
                     f"createVault shape this lane knows. The published ABI and the deployed "
                     f"bytecode disagree in a way that is not the known pre-A1 gap, so this "
                     f"is a wrong VAULT_FACTORY_ADDRESS or an unexpected redeploy rather "
@@ -523,8 +537,8 @@ class Web3VaultClient:
                 "the factory at %s is still the pre-A1 six-field one while "
                 "contracts/out/ declares the seven-field shape; deploying against the "
                 "deployed shape. Deployer attribution is unavailable until Lane A "
-                "redeploys and updates deployments/base-fork.json (#99).",
-                self._settings.factory_address,
+                "redeploys and updates the deployment manifest (#99).",
+                address,
             )
             resolved = (self._LEGACY_FIELDS, _LEGACY_FACTORY_ABI)
 

@@ -90,48 +90,66 @@ transact during exactly the hour that matters.
 The funder holds **zero USDC**. Every mandate's `base_asset` is USDC, so vault
 capital cannot come from the ETH balance directly — some has to be swapped.
 
-At $0.50 × 15 deployments that is **$7.50**, which is 40% of the total budget
-and by far the largest line item. Gas is a rounding error next to it.
+At **1 USDC × 10–15 vaults** that is **$10–15**, which is most of the budget and
+by far the largest line item. Gas is a rounding error next to it.
 
-### ⚠️ $0.10–$0.50 per vault is below the size the demo path actually works at
+### Correction: 1 USDC per vault works. My earlier warning here was wrong.
 
-This is the one place I would push back on the number before you sign it off.
+An earlier version of this file said a sub-dollar rotation might not route, and
+that gas would eat enough of the trade to breach the mandate's 50 bps ceiling
+and be rejected by validation layer 4. **Both claims were wrong, and they were
+wrong in the direction that would have cost money** — they argued for larger
+deposits than the demo needs.
 
-- **A Uniswap rotation of $0.50 is unlikely to price sensibly.** The Trading API
-  may return no route, and if it does, the gas to execute the swap ($0.006 now,
-  $0.06 in a spike) is a meaningful fraction of the trade — which shows up as
-  realised slippage against a mandate ceiling of 50 bps and gets the plan
-  rejected by validation layer 4. The rejection would be *correct*, and it would
-  look like the agent refusing to trade.
-- **An Aave supply of $0.50 earns nothing observable.** The APY panel would read
-  a real rate against a position too small to produce a visible return, and the
-  performance history needs 24h to annualise anyway.
-- **Share-price precision is fine** — `_decimalsOffset() = 12` handles it — so
-  this is an economics problem, not an accounting one.
+Measured against the live Trading API rather than reasoned about:
 
-**Recommendation: fewer, larger vaults.** Four vaults at $1.50 costs the same
-$6.00 and every one of them can actually rotate, supply and show a number. If
-you want fifteen vaults *visible*, deploy fifteen and fund four — an unfunded
-vault still proves genesis, the mandate hash and the factory, which is most of
-what a judge clicks.
+| Trade | WETH out | Implied $/ETH | Gas |
+|---:|---:|---:|---:|
+| 0.25 USDC | 0.000132809 | $1,882.40 | $0.0011 |
+| 1 USDC | 0.000531235 | $1,882.41 | $0.0011 |
+| 5 USDC | 0.002656165 | $1,882.41 | $0.0011 |
+| 500 USDC | 0.265500947 | $1,883.23 | $0.0025 |
 
----
+Every size routes. The **small trade gets the better price** — 4 bps better than
+the 500 USDC one, because it moves the pool less. Slippage tolerance is a
+percentage, so it does not tighten as size falls; that was the error in the
+original reasoning.
+
+The full cycle was then re-run end to end at exactly 1 USDC. Aave supply and
+withdraw, Morpho supply and withdraw, the atomic multi-intent batch, pause with
+redemption open, `redeemInKind`, and the closing accounting invariant **all pass
+at 1 USDC**. Nothing rounds to zero: 1 USDC is 1,000,000 base units, and
+`_decimalsOffset() = 12` keeps share pricing exact.
+
+**What is true at this size is an economics point, not an execution one.** Gas
+of $0.0011 a swap against a 1 USDC position earning ~3.5% is more than a year of
+yield in one transaction. That is entirely fine for a demonstration — the point
+is that the agent reasons, decides and executes, not that it turns a profit on a
+dollar — but do not let the performance panel be read as a return.
+
+One thing genuinely does change below ~100 USDC: `data/curator_data/sources/peers.py`
+sets `MIN_PEER_ASSETS = 100.0`, so a 1 USDC vault is invisible to the peer
+comparison. It will not appear as a peer to other vaults and will not see itself
+ranked. Deliberate — a fork accumulates dozens of unfunded vaults and they say
+nothing about strategy — but worth knowing before someone asks why the peer
+panel is empty.
 
 ## Proposed split of 0.00990919 ETH
 
 | Destination | ETH | USD | Why this much |
 |---|---:|---:|---|
-| **Swap → USDC** (vault capital) | 0.00400 | $7.52 | 15 × $0.50, or 4 × $1.50 with room. The largest line and the one that is actually scarce. |
-| **Deployer** `0x92D4…611b` | 0.00150 | $2.82 | Factory + 15 `createVault` = $0.35 today. This is ~8× headroom, and it must clear the script's own floor. |
-| **Agent** `0x75E5…2b5c` | 0.00250 | $4.70 | Every tick forever. ~$0.25 for 45 ticks today, so ~19× headroom. The account that must never run dry mid-demo. |
-| **Funder retains** | 0.00191 | $3.58 | Swap gas, three transfers, and a top-up reserve. |
+| **Swap → USDC** (vault capital) | 0.00560 | $10.52 | 10 vaults × 1 USDC with room to spare, or 15 at a squeeze. The largest line and the only genuinely scarce one. |
+| **Deployer** `0x92D4…611b` | 0.00120 | $2.26 | Factory + 15 `createVault` = $0.35 today, so ~6× headroom, and it clears the script's own 0.001 ETH floor. |
+| **Agent** `0x75E5…2b5c` | 0.00200 | $3.76 | Every tick forever. ~$0.25 for 45 ticks today, so ~15× headroom. The account that must never run dry mid-demo. |
+| **Funder retains** | 0.00111 | $2.08 | Swap gas, the transfers, the deposit approvals, and a top-up reserve. The funder is also the demo depositor, so the USDC stays here and moves into vaults at deposit time. |
 | | **0.00991** | **$18.62** | |
 
 ### Two hard facts behind those numbers
 
 **The deployer floor is enforced by the contract, not by judgement.**
 `Deploy.s.sol` reverts with `DeployerCannotPayGas(deployer, 0, 1e15)` below
-**0.001 ETH**. I hit this running the dry run. 0.0015 clears it with margin.
+**0.001 ETH**. I hit this running the dry run. 0.0012 clears it, and the gas it
+actually needs is $0.35 of the $2.26 allocated.
 
 **The agent gets the most because it is the one that cannot be topped up
 mid-demo without someone noticing.** An unfunded agent is a failure this repo
@@ -142,11 +160,11 @@ after the fact.
 
 ### Order of operations, when you sign off
 
-1. Swap **0.0040 ETH → USDC** on the funder. Do this first — it is the only step
+1. Swap **0.0056 ETH → USDC** on the funder. Do this first — it is the only step
    with market risk, and if the route is bad you will want to know before the
    ETH is split three ways.
-2. Send **0.0015 ETH** to the deployer.
-3. Send **0.0025 ETH** to the agent.
+2. Send **0.0012 ETH** to the deployer.
+3. Send **0.0020 ETH** to the agent.
 4. `scripts/preflight.sh` against mainnet — it checks the agent key matches the
    vault's agent and holds gas.
 5. Only then `DEPLOY_NETWORK=base-mainnet forge script Deploy.s.sol --broadcast`.
