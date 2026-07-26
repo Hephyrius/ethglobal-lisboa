@@ -128,6 +128,64 @@ def rpc(method: str, params: list[Any]) -> Any:
     return _rpc(method, params)
 
 
+def factory_vaults(factory_address: str) -> list[str]:
+    """Every vault the factory has created, from `vaults()`.
+
+    `deployments/base-fork.json` is not enough and cannot be made enough: it records what
+    `Deploy.s.sol` wrote, while genesis and one-click archetypes both mint through the factory
+    without touching it. Those are the vaults that actually tick.
+    """
+    from eth_abi import decode as abi_decode
+
+    raw = _rpc("eth_call", [{"to": factory_address, "data": "0x" + selector("vaults()")}, "latest"])
+    if raw in ("0x", "0x0", None):
+        return []
+    (addresses,) = abi_decode(["address[]"], bytes.fromhex(raw[2:]))
+    return [str(a) for a in addresses]
+
+
+@pytest.fixture(scope="session")
+def curated_vault(api: str, deployments: dict[str, Any]) -> str:
+    """A vault that can actually be ticked: it has a stored mandate and holds something.
+
+    ⚠️ **`deployments["demoVault"]` is not that vault and never can be.** It is created by
+    `Deploy.s.sol`, and mandates are written only by `POST /genesis/finalize`, so it has none —
+    every tick against it returns `status="failed"`, *"no mandate stored"*, with no snapshot and no
+    decision attached.
+
+    That is a quiet failure mode rather than a loud one, because tests that read the tick then skip
+    on the missing snapshot. R3 reported five skips on every fresh fork and looked like a slow rung
+    rather than an unproven one. `test_slice_wave2` had already learned this and read the factory;
+    the lesson is hoisted here so the next file does not have to learn it a third time.
+
+    Holdings matter as much as the mandate: a tick over an empty book has nothing to compare, so
+    the richest vault is chosen rather than the first.
+    """
+    factory = deployments["contracts"]["VaultFactory"]
+    best: tuple[int, str] | None = None
+    with httpx.Client(timeout=30.0) as client:
+        for vault in factory_vaults(factory):
+            if client.get(f"{api}/vault/{vault}/mandate").status_code != 200:
+                continue
+            state = client.get(f"{api}/vault/{vault}/state")
+            if state.status_code != 200:
+                continue
+            assets = int(state.json().get("total_assets") or 0)
+            if best is None or assets > best[0]:
+                best = (assets, vault)
+
+    if best is None:
+        pytest.skip(
+            "no factory vault has a stored mandate — run genesis, or POST /archetypes/{key}/deploy"
+        )
+    if best[0] == 0:
+        pytest.skip(
+            f"the only mandated vaults are empty (richest is {best[1]}) — "
+            "deposit into one, or run scripts/seed-fork.sh and deposit"
+        )
+    return best[1]
+
+
 # ── createVault, across the version boundary Wave 3 opened ────────────────────
 #
 # `CreateParams` gained a 7th `deployer` field (Lane A's #94), so the published

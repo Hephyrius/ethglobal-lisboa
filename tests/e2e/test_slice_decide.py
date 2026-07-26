@@ -19,26 +19,23 @@ import httpx
 import pytest
 from curator_schema import AgentAction
 
-from .conftest import DEPLOYMENTS
-
 TICK_TIMEOUT = 420.0  # generous: cold model load can exceed 120s
 
 
 @pytest.fixture(scope="module")
-def demo_vault(deployments) -> str:
-    """The shared demo vault — read and tick only, never mutated by this module.
+def demo_vault(curated_vault: str) -> str:
+    """The shared curated vault — read and tick only, never mutated by this module.
 
-    Uses the shared vault deliberately: a tick needs holdings worth reasoning about, and R2's fresh
+    Uses a shared vault deliberately: a tick needs holdings worth reasoning about, and R2's fresh
     vault holds a single asset with nothing to compare. A tick may execute, so this is the one place
     the suite can touch shared state — which is why nothing here asserts on balances.
+
+    It used to read `deployments["demoVault"]`, which is the one vault on the deployment that can
+    never be ticked — see `curated_vault` in conftest for why. Every assertion below then skipped on
+    the missing snapshot, so this rung reported *"the agent reasons over live data"* as five skips
+    rather than as a failure, on every fresh fork.
     """
-    demo = (
-        deployments.get("demoVault", {}).get("address")
-        or (deployments.get("vaults") or [None])[0]
-    )
-    if not demo:
-        pytest.skip(f"no vault recorded in {DEPLOYMENTS.name}")
-    return demo
+    return curated_vault
 
 
 @pytest.fixture(scope="module")

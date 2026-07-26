@@ -269,9 +269,13 @@ def test_the_cash_floor_is_checked_against_the_result_not_the_declaration():
     problems = check_projected_outcome(decision, _mandate_5030(), SEVENTY_NINE)
     message = " ".join(str(p) for p in problems)
 
-    assert "0.0% in USDC" in message and "30% cash floor" in message
+    # The floor's wording now says "free USDC" rather than "in USDC", because the
+    # two are no longer the same quantity: a supplied aBasUSDC is USDC exposure
+    # and is not free. Asserted on the numbers and the constraint, with only
+    # enough prose to confirm the message still tells the model what to do.
+    assert "0.0% of the vault in free USDC" in message and "30% floor" in message
     assert "100.0%" in message and "60% single-position ceiling" in message
-    assert "Sell less" in message
+    assert "Deploy less" in message and "Buy less" in message
 
 
 def test_an_overshoot_within_the_limits_is_still_caught():

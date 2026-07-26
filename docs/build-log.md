@@ -4951,3 +4951,87 @@ boundary, which is the one number request #32 turned on.
 **The lesson, since it is the second time this session:** a `requires`/`declares`/`expects` field is
 documentation. It is not the branch. When the question is "will this be available", read the
 predicate.
+
+## Wave 0 — two weight functions that disagreed, and a rotation that unplugged the agent
+
+An end-to-end pass on the running stack, prompted by `tests/e2e -k slice_decide` reporting five
+skips rather than five passes. Three defects, each of which was invisible from inside the lane that
+owned it.
+
+### R3 was never actually proving anything
+
+`test_slice_decide` ticked `deployments["demoVault"]` — the vault created by `Deploy.s.sol`. That
+vault can never be ticked: mandates are written only by `POST /genesis/finalize`, so it has none,
+and every tick returns `status="failed"`, *"no mandate stored"*, carrying neither snapshot nor
+decision. Each assertion then skipped on the missing snapshot, so *"the agent reasons over live
+data"* reported as five skips on every fresh fork.
+
+`test_slice_wave2` had already learned this and read the factory instead. The lesson is now a
+`curated_vault` fixture in `conftest.py` — mandate present, book non-empty, richest wins — so the
+next file does not have to learn it a third time. R3 went from 1 passing to 4.
+
+### The cash floor and the position ceiling were reading the same number two different ways
+
+With R3 actually running, the demo vault rejected every tick: *"this trade would take aBasUSDC to
+80.0%, above the 60% single-position ceiling"*, three attempts, identical each time.
+
+`_current_weights` folds a receipt token into what it represents — an aBasUSDC is USDC that happens
+to be earning, not a new exposure. `_projected_weights` keyed by `Holding.symbol` and did not. So a
+vault with four fifths of its book supplied to Aave projected an 80% position in an asset its
+mandate never named.
+
+**The breach was in the book, not in the trade, so no trade could cure it.** A decision that
+*unwound* the position was rejected by the same arithmetic as one that grew it. And the state was
+reached by doing exactly what Wave 2 asked for: deploying idle capital into a lending market. Every
+vault that took that advice would eventually freeze.
+
+`_exposure_symbol`'s own docstring called this shot — *"every layer below fights a position that is
+exactly what the mandate asked for"* — but it was written for the current-weight path, and nothing
+in `agent/tests` referenced `represents` at all.
+
+**Folding alone would have been a worse bug.** Once receipts fold, a USDC vault reads as 100% USDC
+however much is locked in Aave, so `min_cash_pct` could never bind again. The frozen schema settles
+what it means: *"Floor on unencumbered base_asset… Protects withdrawal liquidity."* That is the
+liquidity half of the solvency/liquidity split in `SECURITY.md` §10, and it is a different quantity
+from exposure. So the two constraints now read two different projections, deliberately:
+
+| Constraint | Reads | Because |
+|---|---|---|
+| `max_position_pct` | exposure, receipts folded | a receipt token is not a new exposure |
+| `min_cash_pct` | unencumbered base asset only | supplied USDC cannot pay a redemption today |
+
+The unencumbered definition is `agent.loop.idle.idle_fraction`'s, not a new one. A third definition
+of the same word is how this bug happened.
+
+One draft in between was wrong in an instructive way: it declined to credit a swap *into* the base
+asset, on the reasoning that understating cash is conservative. It is not — it rejects the
+cash-raising trade for not having raised the cash yet, which is the same unescapable rejection,
+pointed at the floor. `value_in_asset` is already denominated in the base asset, so the credit is
+knowable and is applied. `test_the_correctly_sized_half_is_accepted` caught it.
+
+After the fix the same vault holds, and says why: *"Current allocation already sits at the exact 20%
+free USDC / 80% Aave-supplied USDC permitted by the mandate."* That is the correct answer, and it
+was unreachable before.
+
+### The credential rotation quietly unplugged the agent
+
+With validation passing, execution failed on `-32003 Insufficient funds for gas`. The rotation had
+swept `AGENT_PRIVATE_KEY` in with the real secrets and replaced anvil account #1 with a fresh
+mainnet key — which on the fork holds **no ETH and no `AGENT_ROLE`**. That key was never a secret;
+`.env` says so two lines above it.
+
+Nothing upstream looked wrong. `/health` was green on all three seams, the model reasoned correctly
+over live data, the decision passed all six validation layers, and only the final broadcast failed —
+as a gas error, or (had it been funded) as a bare `AccessControl` revert. This is failure mode #11
+in the runbook, and it had no gate.
+
+`preflight.sh` now has one: it derives the address from `AGENT_PRIVATE_KEY` with `cast`, compares it
+to the vault's agent in the deployment manifest, and checks that address for gas. Verified in both
+directions — green with the right key, and blocking with anvil #0 substituted. `cast` missing
+degrades to the gas check alone rather than to a false pass, and `lower()` is `tr` rather than
+`${x,,}` because the latter is a bash 4 construct that macOS's bash 3.2 rejects at *parse* time,
+which would break the whole script on the handoff machine.
+
+`AGENT_CORS_ORIGINS` moved into `.env` in the same pass. It had been living only in the shell that
+launched uvicorn, so the first restart would have narrowed it to the two defaults in `config.py` and
+the dApp would have reported *"the agent API is unreachable"* from every address but localhost.

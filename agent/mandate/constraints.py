@@ -569,17 +569,40 @@ def _projected_weights(
     in the *input token*, which this module cannot convert without a price, so a
     swap using it is not projected rather than guessed at.
 
+    **Two different symbol spaces meet here, and conflating them cost a vault its
+    ability to act at all.** The arithmetic runs on *literal* token symbols
+    because that is what the venue does — `UniswapVenue._resolve_amount` sizes
+    `pct_of_holdings` against the balance of the token itself, so a vault holding
+    5,000 USDC and 20,000 aBasUSDC swapping "50% of USDC" moves 2,500, not
+    12,500. But the *result* is reported in exposure symbols, the same space
+    `_current_weights` uses, because that is the space the mandate's limits are
+    written in.
+
+    Folding only at the end was the missing half. Keyed by raw symbol, the
+    20,000 aBasUSDC above reads as an 80% position in an asset the mandate never
+    named, `check_projected_outcome` measures it against `max_position_pct`, and
+    **every decision is rejected — including the ones that would unwind it.** A
+    vault that Wave 2's "deploy idle capital" work pushed past the cap could
+    never trade again. `_exposure_symbol`'s own docstring predicted this exactly:
+    *"every layer below fights a position that is exactly what the mandate asked
+    for."* It was written for the current-weight path and the projected path
+    never got it.
+
     Returns None when the projection cannot be made honestly.
     """
     total = int(vault.total_assets or 0)
     if total <= 0:
         return None
 
-    values = {
-        h.symbol: float(int(h.value_in_asset))
-        for h in vault.holdings
-        if h.value_in_asset is not None
-    }
+    values: dict[str, float] = {}
+    #: literal symbol -> the exposure it represents. A token the vault does not
+    #: hold (a swap's `token_out`) stands for itself.
+    exposure: dict[str, str] = {}
+    for h in vault.holdings:
+        if h.value_in_asset is None:
+            continue
+        values[h.symbol] = values.get(h.symbol, 0.0) + float(int(h.value_in_asset))
+        exposure[h.symbol] = _exposure_symbol(h)
     if not values:
         return None
 
@@ -593,8 +616,117 @@ def _projected_weights(
         moved = values[intent.token_in] * intent.pct_of_holdings
         values[intent.token_in] -= moved
         values[intent.token_out] = values.get(intent.token_out, 0.0) + moved
+        exposure.setdefault(intent.token_out, intent.token_out)
 
-    return {asset: value / total for asset, value in values.items()}
+    folded: dict[str, float] = {}
+    for symbol, value in values.items():
+        asset = exposure.get(symbol, symbol)
+        folded[asset] = folded.get(asset, 0.0) + value / total
+    return folded
+
+
+def _projected_cash_fraction(
+    decision: AllocationDecision, mandate: Mandate, vault: VaultState
+) -> float | None:
+    """Where the *unencumbered* base asset lands, as a share of `totalAssets`.
+
+    Deliberately not `_projected_weights(...)[base_asset]`, and the distinction is
+    the whole point of the constraint. The frozen schema defines `min_cash_pct` as
+    a *"Floor on unencumbered base_asset… Protects withdrawal liquidity"*, and
+    `_projected_weights` reports **exposure**, in which a supplied aBasUSDC counts
+    as USDC — correctly, for a position ceiling. Read the floor off that and a
+    USDC vault is at 100% cash no matter how much of it is locked in a lending
+    market, so the floor can never bind and the promise it encodes is not kept.
+
+    This is the solvency/liquidity split `SECURITY.md` §10 draws: a vault can be
+    perfectly solvent and unable to pay a redemption today. `min_cash_pct` is the
+    liquidity half.
+
+    The definition of unencumbered is `agent.loop.idle.idle_fraction`'s, not a
+    second one invented here — base-asset holdings with no `committed_to_venue`.
+    Two functions disagreeing about what a weight means is the bug this whole
+    change exists to fix; adding a third definition would repeat it.
+
+    Returns None when the projection cannot be made honestly, which is the same
+    contract `_projected_weights` keeps.
+    """
+    total = int(vault.total_assets or 0)
+    if total <= 0:
+        return None
+
+    base = mandate.base_asset
+    liquid = 0.0
+    #: What a `withdraw` could pull back: base-asset exposure that is currently
+    #: committed somewhere. Receipt tokens carry `represents`.
+    encumbered_base = 0.0
+    #: Every holding by literal symbol, so a swap's *input* leg can be valued.
+    #: `value_in_asset` is already denominated in the base asset, so moving value
+    #: between legs needs no price of its own.
+    values: dict[str, float] = {}
+    for h in vault.holdings:
+        if h.value_in_asset is None:
+            continue
+        values[h.symbol] = values.get(h.symbol, 0.0) + float(int(h.value_in_asset))
+        if _exposure_symbol(h) != base:
+            continue
+        if h.symbol == base and not h.committed_to_venue:
+            liquid += float(int(h.value_in_asset))
+        else:
+            encumbered_base += float(int(h.value_in_asset))
+
+    for intent in decision.venue_intents or []:
+        kind = intent.kind
+        if kind == "swap":
+            # Only a leg in the base asset moves cash. A WETH->cbBTC swap
+            # changes exposure without changing what can pay a redemption.
+            if intent.pct_of_holdings is None:
+                if base in (intent.token_in, intent.token_out):
+                    return None  # sized in token units; no price to convert with
+                continue
+            moved = values.get(intent.token_in, 0.0) * intent.pct_of_holdings
+            values[intent.token_in] = values.get(intent.token_in, 0.0) - moved
+            values[intent.token_out] = values.get(intent.token_out, 0.0) + moved
+            if intent.token_in == base:
+                liquid -= moved
+            elif intent.token_out == base:
+                # Selling into the base asset RAISES cash, and the amount is
+                # knowable — `value_in_asset` is already in base units. An
+                # earlier draft declined to credit it, calling that conservative.
+                # It is not: it rejects the cash-raising trade for not having
+                # raised the cash yet, which is precisely the unescapable
+                # rejection this whole change exists to remove.
+                liquid += moved
+        elif kind == "supply":
+            if intent.asset != base:
+                continue
+            if intent.pct_of_holdings is None:
+                if intent.amount is None:
+                    return None
+                liquid -= float(int(intent.amount))
+            else:
+                liquid -= liquid * intent.pct_of_holdings
+        elif kind == "withdraw":
+            if intent.asset != base:
+                continue
+            # `amount` omitted means all of it — that is the schema's own
+            # convention, expressed at the adapter as type(uint256).max.
+            freed = (
+                encumbered_base if intent.amount is None else float(int(intent.amount))
+            )
+            liquid += min(freed, encumbered_base)
+            encumbered_base -= min(freed, encumbered_base)
+        elif kind == "ship":
+            for token, amount in zip(intent.tokens, intent.amounts, strict=False):
+                if token == base:
+                    liquid -= float(int(amount))
+        elif kind == "dock":
+            # A dock names a strategy hash, not amounts, so how much it frees is
+            # not knowable from the intent. It can only ever *raise* cash, so
+            # declining to judge is safe — and judging it on pre-dock cash would
+            # reject the very trades that cure a shortfall.
+            return None
+
+    return max(0.0, liquid) / total
 
 
 def check_projected_outcome(
@@ -627,13 +759,14 @@ def check_projected_outcome(
     limits = mandate.constraints
     problems: list[Violation] = []
 
-    cash = projected.get(mandate.base_asset, 0.0)
-    if cash + WEIGHT_SUM_TOLERANCE < limits.min_cash_pct:
+    cash = _projected_cash_fraction(decision, mandate, vault)
+    if cash is not None and cash + WEIGHT_SUM_TOLERANCE < limits.min_cash_pct:
         problems.append(
             Violation(
                 "venue_intents",
-                f"this trade would leave {cash:.1%} in {mandate.base_asset}, below the "
-                f"{limits.min_cash_pct:.0%} cash floor. Sell less",
+                f"this trade would leave {cash:.1%} of the vault in free "
+                f"{mandate.base_asset}, below the {limits.min_cash_pct:.0%} floor that "
+                f"keeps redemptions payable. Deploy less, or withdraw from a venue first",
                 constraint="min_cash_pct",
                 subject=mandate.base_asset,
                 limit=limits.min_cash_pct,

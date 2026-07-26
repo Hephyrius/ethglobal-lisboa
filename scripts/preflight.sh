@@ -68,6 +68,10 @@ rpc() {
 }
 json_str() { echo "$1" | sed -n "s/.*\"$2\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -1; }
 json_addr() { sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\(0x[0-9a-fA-F]\{40\}\)\".*/\1/p" "$DEPLOYMENTS" | head -1; }
+# `${x,,}` is bash 4. macOS ships bash 3.2, where it is a syntax error at PARSE
+# time — the whole script would refuse to run, on the one machine that takes over
+# at the handoff. tr is portable and this is not a hot path.
+lower() { echo "$1" | tr 'A-Z' 'a-z'; }
 
 # ── localhost is not one place on this machine ────────────────────────────────────────────────
 #
@@ -183,6 +187,41 @@ if [ -n "$CHAIN" ]; then
     ok "demo account funded — $((16#${BAL#0x} / 1000000)) USDC"
   else
     bad "demo account $ACC holds no USDC" "./scripts/seed-fork.sh"
+  fi
+fi
+
+# ── 4b. the agent key can actually write ──────────────────────────────────
+# Reads work with any key. Writes need AGENT_ROLE on the vault and gas, and when
+# either is missing NOTHING upstream looks wrong: /health is green, the model
+# reasons correctly, a decision passes all six validation layers, and only the
+# final broadcast fails — as "Insufficient funds for gas" or as a bare revert on
+# an AccessControl check, neither of which names the cause.
+#
+# It happened here: a credential rotation swept AGENT_PRIVATE_KEY along with the
+# real secrets, replacing anvil account #1 with a fresh mainnet key that holds
+# neither role nor gas on the fork. Every execution failed and the whole stack
+# reported healthy. This is failure mode #11 in docs/runbook.md, and it costs
+# nothing to catch here instead.
+EXPECTED_AGENT="$(json_addr agent)"
+if [ -n "$CHAIN" ] && [ -n "$EXPECTED_AGENT" ]; then
+  GAS="$(json_str "$(rpc eth_getBalance "[\"$EXPECTED_AGENT\",\"latest\"]")" result)"
+  if [ "$GAS" = "0x0" ] || [ -z "$GAS" ]; then
+    bad "the vault's agent $EXPECTED_AGENT holds no ETH — every execution fails on gas" \
+        "./scripts/seed-fork.sh"
+  # `cast` is how the configured key is turned into an address; without Foundry on
+  # PATH the gas check above still runs and only the identity half is skipped.
+  elif command -v cast >/dev/null 2>&1 && [ -n "${AGENT_PRIVATE_KEY:-}" ]; then
+    CONFIGURED="$(cast wallet address --private-key "$AGENT_PRIVATE_KEY" 2>/dev/null || echo "")"
+    if [ -z "$CONFIGURED" ]; then
+      warn "AGENT_PRIVATE_KEY is set but cast could not read it" "check it is a 0x-prefixed 32-byte key"
+    elif [ "$(lower "$CONFIGURED")" = "$(lower "$EXPECTED_AGENT")" ]; then
+      ok "agent key matches the vault's agent ($EXPECTED_AGENT) and holds gas"
+    else
+      bad "AGENT_PRIVATE_KEY is $CONFIGURED but the vault's agent is $EXPECTED_AGENT — every write will revert" \
+          "on a fork this should be anvil account #1; see .env.example"
+    fi
+  else
+    ok "vault agent $EXPECTED_AGENT funded for gas (key identity unchecked — cast not on PATH)"
   fi
 fi
 
