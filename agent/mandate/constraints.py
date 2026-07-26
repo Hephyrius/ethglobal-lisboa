@@ -28,6 +28,8 @@ and is governed by `min_cash_pct` from the other side. WETH 0.3 ≤ 0.6 and USDC
 
 from __future__ import annotations
 
+from typing import Final
+
 from dataclasses import dataclass
 
 from curator_schema import (
@@ -189,6 +191,34 @@ def check_decision(decision: AllocationDecision, mandate: Mandate) -> list[Viola
     return problems
 
 
+#: Receipt-token symbol -> the asset it stands for.
+#:
+#: A receipt token is not a new exposure: `aBasUSDC` is USDC supplied to Aave,
+#: `gtUSDCp` is USDC supplied to a MetaMorpho vault. `_exposure_symbol` already
+#: folds them for *weights*, using `Holding.represents` from the chain; this map
+#: does the same job for `target_allocations`, which is validated without a
+#: vault in hand and so cannot consult that field.
+#:
+#: Written out rather than derived because the venue packages key their tables
+#: by ADDRESS — `venues.aave.markets.ATOKENS` is address->address and the
+#: MetaMorpho entries carry a `key`, not a share symbol. Resolving symbols would
+#: mean a chain read inside a pure validation function.
+#:
+#: **This is not a widening of `allowed_assets`.** Only these exact symbols fold,
+#: and each is the receipt for an asset the mandate already permits by name. An
+#: asset that is genuinely not permitted is still rejected.
+_RECEIPT_SYMBOLS: Final[dict[str, str]] = {
+    "abasusdc": "USDC",
+    "abasweth": "WETH",
+    "gtusdcp": "USDC",
+    "mwusdc": "USDC",
+}
+
+
+def _underlying_of(symbol: str) -> str:
+    return _RECEIPT_SYMBOLS.get(symbol.lower(), symbol)
+
+
 def _check_allocations(
     decision: AllocationDecision, mandate: Mandate, allowed: set[str]
 ) -> list[Violation]:
@@ -199,7 +229,23 @@ def _check_allocations(
     problems: list[Violation] = []
     limits = mandate.constraints
 
-    unknown = sorted({a.asset for a in allocations} - allowed)
+    # A receipt token is the underlying, not a new asset. `aBasUSDC` is USDC
+    # supplied to Aave and a MetaMorpho share is USDC supplied to Morpho, so a
+    # target naming one is a target on USDC — the same fold `_exposure_symbol`
+    # applies to weights.
+    #
+    # This became reachable only when the mainnet factory registered valuations
+    # for the aTokens: before that they were absent from `holdings()` entirely,
+    # the model never saw them, and never named them. The moment it could see
+    # them it mirrored them into `target_allocations`, and every tick was
+    # rejected on an allowlist of `["USDC"]`.
+    #
+    # **This does not widen the allowlist.** The map is built from the venue
+    # packages' own market tables, not from anything the model says, so the only
+    # symbols it can fold are receipts for assets the vault already holds. An
+    # asset that is genuinely not permitted is still rejected — see
+    # `test_a_persona_cannot_reach_an_unpermitted_asset`.
+    unknown = sorted({_underlying_of(a.asset) for a in allocations} - allowed)
     if unknown:
         problems.append(
             Violation(
