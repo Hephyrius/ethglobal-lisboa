@@ -35,7 +35,7 @@ export function suggestionsFor(messages: ChatMessage[], draft: Partial<Mandate>)
   }
 
   if (!draft.permitted_data_sources?.length) {
-    return ['Grant every data source you have.', 'Lending data and prices only — no sentiment.']
+    return ['Grant every data source you have.', 'Lending data and prices only, no sentiment.']
   }
 
   if (!draft.permitted_venues?.length) {

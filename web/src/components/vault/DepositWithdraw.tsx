@@ -49,7 +49,7 @@ export function DepositWithdraw({ vault }: { vault: `0x${string}` }) {
         <CardBody>
           <p className="text-xs leading-relaxed text-warn/90">
             No ERC-4626 vault responded at this address on the configured RPC. That is expected
-            before the factory has deployed one — the rest of this page still renders from the agent
+            before the factory has deployed one. The rest of this page still renders from the agent
             API.
           </p>
           <p className="mt-2 text-2xs text-faint">

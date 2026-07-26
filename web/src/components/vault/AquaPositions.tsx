@@ -96,7 +96,7 @@ export function AquaPositions({ state }: { state: VaultState }) {
         <p className="text-2xs leading-relaxed text-muted">
           These balances still appear in holdings because they have not moved. Aqua tracks a virtual
           balance against tokens the vault continues to custody, and a transfer happens only when a
-          taker fills — which is what lets the vault post a quote without{' '}
+          taker fills, which is what lets the vault post a quote without{' '}
           <span className="font-mono">totalAssets()</span> ever misstating what it holds.
         </p>
       </CardBody>

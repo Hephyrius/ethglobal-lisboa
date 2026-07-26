@@ -13,7 +13,7 @@ import Link from 'next/link'
  * from every page.
  */
 export const metadata = {
-  title: 'How this works — Curator',
+  title: 'How this works · Curator',
 }
 
 export default function DocsPage() {
@@ -44,7 +44,7 @@ export default function DocsPage() {
           That is a deliberate scope choice rather than an oversight. The thesis being tested is
           whether an agent can do the job a human vault curator does, and a system with a human
           veto is not testing that. The cost is that the trust model rests entirely on the agent
-          and its harness — which is why every decision it makes is shown in full rather than
+          and its harness, which is why every decision it makes is shown in full rather than
           summarised.
         </p>
       </Section>
@@ -57,8 +57,8 @@ export default function DocsPage() {
         <dl className="grid gap-4 sm:grid-cols-2">
           <Fact term="Off-chain" detail="The mandate itself">
             One JSON file per vault, held by the agent harness under{' '}
-            <code className="font-mono text-2xs">AGENT_STATE_DIR</code>. The full text — objective,
-            constraints, permitted sources and venues — never goes on-chain.
+            <code className="font-mono text-2xs">AGENT_STATE_DIR</code>. The full text (objective,
+            constraints, permitted sources and venues) never goes on-chain.
           </Fact>
           <Fact term="On-chain" detail="Its keccak hash only">
             <code className="font-mono text-2xs">mandateHash</code>, bound at deploy time and
@@ -68,12 +68,12 @@ export default function DocsPage() {
         <p>
           <strong>That hash is the depositor&apos;s entire verification handle.</strong> It is what
           lets you check that the mandate you were shown at genesis is the one the vault was
-          actually deployed with — compare the hash on the vault page against the keccak of the
+          actually deployed with. Compare the hash on the vault page against the keccak of the
           mandate text. Nothing else binds the two together.
         </p>
         <p className="text-muted">
           The honest consequence: a mandate is only as available as the harness holding it. Losing
-          that state does not put the vault at risk — custody is on-chain — but it does lose the
+          that state does not put the vault at risk, since custody is on-chain, but it does lose the
           human-readable rules behind the hash.
         </p>
       </Section>
@@ -81,7 +81,7 @@ export default function DocsPage() {
       <Section title="Custody: the vault never lets go">
         <p>
           The vault is the <strong>sole custodian</strong> of everything it holds. Capital does not
-          move to a strategy contract, a router, or a venue — it stays put, and{' '}
+          move to a strategy contract, a router, or a venue. It stays put, and{' '}
           <code className="font-mono text-2xs">totalAssets()</code> is always the truth about what
           is there.
         </p>
@@ -102,7 +102,7 @@ export default function DocsPage() {
       <Section title="Where the numbers come from">
         <p>
           The badge in the header reports the <em>worst</em> source feeding the page, and it is
-          there because the failure that matters is not a crash — it is a page that looks fine
+          there because the failure that matters is not a crash. It is a page that looks fine
           while showing invented data.
         </p>
         <ul className="space-y-2">
@@ -111,7 +111,7 @@ export default function DocsPage() {
           </Provenance>
           <Provenance tone="text-data" label="ON-CHAIN">
             The agent API is unreachable, so the vault&apos;s own numbers were read straight from
-            the ERC-4626 contract. Still real — the API only reads the same chain.
+            the ERC-4626 contract. Still real: the API only reads the same chain.
           </Provenance>
           <Provenance tone="text-warn" label="FIXTURES">
             Something on the page is sample data. That includes the case where the API is up and

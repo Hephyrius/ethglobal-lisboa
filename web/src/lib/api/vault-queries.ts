@@ -78,7 +78,7 @@ export function useVaultState(address: string) {
         return {
           data: onChain,
           mode: 'chain',
-          note: `${apiFailure} — vault state read directly from the contract instead`,
+          note: `${apiFailure}, vault state read directly from the contract instead`,
         }
       } catch {
         return { data: fixtureVaultState(address), mode: 'fixture', note: apiFailure }

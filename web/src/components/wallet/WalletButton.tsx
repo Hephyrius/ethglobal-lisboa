@@ -35,7 +35,7 @@ export function WalletButton() {
         variant="secondary"
         loading={pending}
         onClick={() => void run(disconnectWallet)}
-        title={`${address} — click to disconnect`}
+        title={`${address} · click to disconnect`}
       >
         <span className="h-1.5 w-1.5 rounded-full bg-ok" />
         <span className="font-mono">{shortAddress(address)}</span>
@@ -60,7 +60,7 @@ export function WalletButton() {
         error ??
         (hasConnector
           ? undefined
-          : 'No injected wallet detected — install MetaMask, Rabby or a Coinbase Wallet extension')
+          : 'No injected wallet detected. Install MetaMask, Rabby or a Coinbase Wallet extension')
       }
     >
       {/* The header is the tightest row in the app at 375px: logo, nav, network

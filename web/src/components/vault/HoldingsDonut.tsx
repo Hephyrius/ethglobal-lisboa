@@ -92,7 +92,7 @@ export function HoldingsDonut({ state }: { state: VaultState }) {
     <Card>
       <CardHeader
         title="Holdings"
-        subtitle="The vault is sole custodian — committed balances are encumbered by a venue, not held by it."
+        subtitle="The vault is sole custodian. Committed balances are encumbered by a venue, not held by it."
       />
       <CardBody>
         {held.length === 0 ? (
@@ -125,7 +125,7 @@ export function HoldingsDonut({ state }: { state: VaultState }) {
                     {slice.committedTo ? (
                       <Badge
                         tone="agent"
-                        title={`Backing an open position on ${slice.committedTo}. The tokens remain in the vault — this flags encumbrance, not location.`}
+                        title={`Backing an open position on ${slice.committedTo}. The tokens remain in the vault. This flags encumbrance, not location.`}
                       >
                         {slice.committedTo}
                       </Badge>

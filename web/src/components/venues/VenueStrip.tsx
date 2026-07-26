@@ -29,7 +29,7 @@ const CUSTODY: Record<string, { tone: BadgeTone; label: string; note: string }> 
   virtual: {
     tone: 'agent',
     label: 'virtual',
-    note: 'Tokens never leave the vault — only a virtual balance is tracked.',
+    note: 'Tokens never leave the vault. Only a virtual balance is tracked.',
   },
   claim: {
     tone: 'data',
@@ -39,7 +39,7 @@ const CUSTODY: Record<string, { tone: BadgeTone; label: string; note: string }> 
   rotational: {
     tone: 'neutral',
     label: 'rotational',
-    note: 'No position is held — it swaps one asset for another.',
+    note: 'No position is held. It swaps one asset for another.',
   },
 }
 
@@ -59,8 +59,8 @@ export function VenueStrip({ className }: { className?: string }) {
 
       {!enriched ? (
         <p className="mt-2 text-2xs leading-relaxed text-faint">
-          These are the venues the registry reports. What each one does to the tokens — whether a
-          position is held in the vault, as a receipt, or not at all — comes from the venue
+          These are the venues the registry reports. What each one does to the tokens, whether a
+          position is held in the vault, as a receipt, or not at all, comes from the venue
           capability manifest, which is not yet served over HTTP (note #68). Deliberately not
           guessed here: a description written in the UI cannot know what the registry actually
           holds.

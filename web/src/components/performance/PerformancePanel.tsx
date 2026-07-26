@@ -66,7 +66,7 @@ export function PerformancePanel({
             <>
               {summary.observations} observation{summary.observations === 1 ? '' : 's'} since{' '}
               {summary.first_at ? fullTimestamp(summary.first_at) : 'inception'}. Points are
-              observations, not a smoothed line — a flat stretch is a period with no transactions.
+              observations, not a smoothed line. A flat stretch is a period with no transactions.
             </>
           ) : (
             'No history recorded yet.'

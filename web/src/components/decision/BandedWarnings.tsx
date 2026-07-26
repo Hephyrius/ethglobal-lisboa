@@ -38,7 +38,7 @@ export function BandedWarnings({ warnings }: { warnings: AgentAction['warnings']
             <p className="text-2xs leading-relaxed text-warn/90">{warning.message}</p>
             <p className="tabular mt-0.5 font-mono text-2xs text-warn/70">
               {warning.constraint}
-              {warning.subject ? ` · ${warning.subject}` : ''} — limit {format(warning.limit)}, actual{' '}
+              {warning.subject ? ` · ${warning.subject}` : ''}, limit {format(warning.limit)}, actual{' '}
               {format(warning.actual)}, band ±{Math.round(warning.band_pct * 100)}%
             </p>
           </li>
