@@ -47,7 +47,7 @@ it do not announce what they are for. This zone also carries:
 | MX Record | `@` | `eforward1.registrar-servers.com` (priority 10) | **keep** |
 | MX Record | `@` | `eforward2.registrar-servers.com` (10) | **keep** |
 | MX Record | `@` | `eforward3.registrar-servers.com` (10) | **keep** |
-| MX Record | `@` | `eforward4.registrar-servers.com` (20) | **keep** |
+| MX Record | `@` | `eforward4.registrar-servers.com` (15) | **keep** |
 | MX Record | `@` | `eforward5.registrar-servers.com` (20) | **keep** |
 | TXT Record | `@` | `v=spf1 include:spf.efwd.registrar-servers.com ~all` | **keep** |
 
@@ -103,22 +103,54 @@ dig +short www.scipio.capital    # → cname.vercel-dns.com. then an IP
 dig +short api.scipio.capital    # → 138.68.159.44
 ```
 
-**Measured 2026-07-26 — none of section 3 has been applied yet.** The
-nameservers are already `dns1/dns2.registrar-servers.com` (Namecheap BasicDNS),
-so section 1 is satisfied and the Advanced DNS tab is live. But the host records
-are still the shipped defaults:
+**✅ Section 3 is applied and globally propagated (verified 2026-07-26).** All
+three names agree on Google, Cloudflare and Quad9, and the email-forwarding
+records survived the edit:
 
 | Name | Resolves to | |
 |---|---|---|
-| `scipio.capital` | `192.64.119.212` | Namecheap parking, not Vercel |
-| `www.scipio.capital` | `216.227.142.170` | Namecheap parking, not Vercel |
-| `api.scipio.capital` | `NXDOMAIN` | no record exists |
+| `scipio.capital` | `76.76.21.21` | Vercel |
+| `www.scipio.capital` | `cname.vercel-dns.com.` → Vercel edge | Vercel |
+| `api.scipio.capital` | `138.68.159.44` + the AAAA | the droplet |
+| `@` MX ×5 / SPF TXT | `eforward*.registrar-servers.com` | intact |
 
-The droplet itself is up and answering on both 80 and 443 at `138.68.159.44`, so
-the API is running and simply has no name pointing at it. Until the `api.` A
-record exists, Caddy cannot complete an ACME challenge, `https://api.scipio.capital`
-is unresolvable, and the dApp — wherever it is hosted — will report the agent as
-unreachable. This is the first blocking step, ahead of anything on Vercel.
+⚠️ **A resolver that still shows `192.64.119.212` is caching, not broken.** The
+old parking record and the old `api.` NXDOMAIN both persist in local and ISP
+caches after the authoritative zone is correct — negative caching is the reason
+`api.` in particular can stay dead on one machine long after it works
+everywhere. `Clear-DnsClientCache` (Windows) or `resolvectl flush-caches`
+(Linux) fixes the local half; the ISP's is a matter of waiting out the TTL.
+Query `8.8.8.8` directly to see the truth, or use `curl --resolve` to bypass
+resolution entirely — it sets SNI as well as the address, which
+`--header 'Host: …'` does not, and a wrong SNI is indistinguishable from a
+missing certificate.
+
+### DNS resolving is not the same as TLS working
+
+Both halves of this deployment were still failing their handshake immediately
+after propagation, for two unrelated reasons worth telling apart:
+
+**`api.` — Caddy holds no certificate.** Port 80 is healthy and proves the
+config is loaded: `curl --resolve api.scipio.capital:80:138.68.159.44` returns
+Caddy's own `308` to HTTPS for that exact hostname, so the site block is
+matching. Port 443 answers `no peer certificate available` and a TLS internal
+error. That is the signature of a Caddy that exhausted its ACME attempts while
+the name was NXDOMAIN and has backed off — the backoff is exponential and can
+run for hours, so it does **not** heal itself on a useful timescale once DNS
+lands. Restart the container to force an immediate retry:
+
+```sh
+uv run --with paramiko python scripts/vps.py deploy   # or: docker compose restart caddy
+curl -s https://api.scipio.capital/health
+```
+
+**The apex — the domain is not attached to a Vercel project.** `76.76.21.21`
+accepts TCP and serves a valid `*.vercel.com` certificate for a name it knows,
+and refuses the handshake for `scipio.capital`. Vercel terminates TLS only for
+hostnames configured on a project, so this is not a DNS fault and no amount of
+waiting changes it. Pointing the record at Vercel is one half; adding the domain
+under Project → Settings → Domains is the other, and §5 below is what makes the
+resulting build correct.
 
 Namecheap is usually live within a few minutes but says up to 30. **Do not start
 Caddy before `api.scipio.capital` resolves.** Caddy requests a certificate on
