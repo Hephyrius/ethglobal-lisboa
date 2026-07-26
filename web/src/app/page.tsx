@@ -42,12 +42,17 @@ export default function HomePage() {
         </div>
       </section>
 
-      <BuiltWith />
+      {/* The logo strip is a thin band of chrome, not a section in its own
+          right, so the page's 56px rhythm leaves it marooned in white space.
+          Both sides are pulled in to 32px — `!` because `space-y-14` on the
+          parent sets these margins via `> * + *`, which outranks a plain
+          utility. */}
+      <BuiltWith className="!mt-8" />
 
       {/* The rule sits above the heading rather than under it: it closes the
           "Built with" strip off and the title then opens the section beneath
           it, instead of the title carrying an underline of its own. */}
-      <section className="border-t border-line pt-6">
+      <section className="!mt-8 border-t border-line pt-6">
         <h2 className="text-xl font-semibold tracking-tight text-ink">Featured Vaults</h2>
         <div className="mt-6">
           <VaultList />

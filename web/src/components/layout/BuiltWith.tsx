@@ -80,9 +80,9 @@ const CSS = `
 }
 `
 
-export function BuiltWith() {
+export function BuiltWith({ className }: { className?: string }) {
   return (
-    <section aria-label="Built with">
+    <section aria-label="Built with" className={className}>
       <style>{CSS}</style>
 
       <p className="label">Built with</p>
