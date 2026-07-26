@@ -121,6 +121,35 @@ IFS="$OLDIFS"
 
 cast rpc anvil_stopImpersonatingAccount "$WHALE" --rpc-url "$RPC" >/dev/null
 
+# ── Gas for the accounts the agent API actually signs with ───────────────────
+#
+# Separate from the list above, and ETH only, for two reasons.
+#
+# These are derived from .env rather than being anvil's well-known accounts, so
+# a key rotation silently changes them. After one, the new addresses have never
+# held gas on this fork and `POST /genesis/finalize` fails with an opaque HTTP
+# 500 whose only cause line, several frames down a web3 traceback, is
+# "Insufficient funds for gas * price + value". Nothing before that point says
+# which account is short, and the dApp shows "Deployment failed" with no reason.
+# The default ACCOUNTS list cannot cover it: those are anvil 0-2 by design.
+#
+# No USDC. The agent is an executor, not a depositor, and a balance sitting on
+# it reads as depositor funds held outside a vault — the exact confusion the
+# whole Pattern 1 custody story exists to avoid.
+fund_gas() {
+  [ -n "${1:-}" ] || return 0
+  GAS_ADDR="$(cast wallet address --private-key "$1" 2>/dev/null)" || {
+    printf "  ! %s: not a valid private key in .env, skipped\n" "$2" >&2
+    return 0
+  }
+  cast rpc anvil_setBalance "$GAS_ADDR" "$ETH_TARGET_HEX" --rpc-url "$RPC" >/dev/null
+  printf "  %s  %s, gas only\n" "$GAS_ADDR" "$2"
+}
+
+echo
+fund_gas "${DEPLOYER_PRIVATE_KEY:-}" deployer
+fund_gas "${AGENT_PRIVATE_KEY:-}" agent
+
 echo
 if [ "$seeded" -eq 0 ]; then
   echo "Already seeded — nothing to do."
