@@ -31,7 +31,32 @@ actively fight this setup:
 
 The URL Redirect is the nastier one: it makes the apex answer with a redirect
 rather than an address, so the site appears to load and then bounces, and no A
-record you add will take effect while it is there.
+record you add will take effect while it is there. Namecheap implements it as an
+address record under the hood, so depending on how the domain was set up the apex
+entry may show in the UI as **URL Redirect Record** *or* as a plain **A Record**
+pointing at a `192.64.119.x` parking address. Delete whichever one is there —
+queried authoritatively on 2026-07-26, this zone has it as `A @ 192.64.119.212`.
+
+### Do not delete the other six — they are email forwarding
+
+"Delete the defaults" is too broad a rule, and the records it would take out with
+it do not announce what they are for. This zone also carries:
+
+| Type | Host | Value | |
+|---|---|---|---|
+| MX Record | `@` | `eforward1.registrar-servers.com` (priority 10) | **keep** |
+| MX Record | `@` | `eforward2.registrar-servers.com` (10) | **keep** |
+| MX Record | `@` | `eforward3.registrar-servers.com` (10) | **keep** |
+| MX Record | `@` | `eforward4.registrar-servers.com` (20) | **keep** |
+| MX Record | `@` | `eforward5.registrar-servers.com` (20) | **keep** |
+| TXT Record | `@` | `v=spf1 include:spf.efwd.registrar-servers.com ~all` | **keep** |
+
+These are Namecheap's free email forwarding and its SPF record. They share the
+apex with the A record but never conflict with it — MX and TXT answer different
+query types than A, so hosting the site on Vercel and forwarding mail through
+Namecheap coexist with no interaction at all. Removing them silently stops
+delivery to any `@scipio.capital` address, and mail failures are not visible from
+the site being up. Leave them alone.
 
 ## 3. Add these
 
@@ -46,7 +71,8 @@ record you add will take effect while it is there.
 
 Notes on each, because three of the four have a trap:
 
-- **`@` → 76.76.21.21** is Vercel's shared apex address. ⚠️ **Confirm it against
+- **`@` → 76.76.21.21** is Vercel's *legacy* shared apex address, and newer
+  projects are issued `216.198.79.1` instead. ⚠️ **Confirm it against
   your own Vercel dashboard** (Project → Settings → Domains → add
   `scipio.capital`). Vercel shows the exact record for *your* project there and
   occasionally issues a different one; the dashboard is authoritative and this
