@@ -116,21 +116,34 @@ what it holds. Uniswap is the taker-side path that lets the agent actually rotat
 
 | Contract | Source | Base fork address |
 |---|---|---|
-| `CuratedVault` | [`contracts/src/CuratedVault.sol`](contracts/src/CuratedVault.sol) | impl `0xd5a7373214426f7eF18666a65c66dC614E1767ce` |
-| `VaultFactory` | [`contracts/src/VaultFactory.sol`](contracts/src/VaultFactory.sol) | `0x02827a276587B906a4DDb2C4863C9EbD6Abf302D` |
-| Demo vault (cUSDC) | — | `0x0E2c0e50E67B96C9C401C94e111a3DBD00DEB5d1` |
+| `CuratedVault` | [`contracts/src/CuratedVault.sol`](contracts/src/CuratedVault.sol) | implementation, cloned per vault |
+| `VaultFactory` | [`contracts/src/VaultFactory.sol`](contracts/src/VaultFactory.sol) | one per deployment |
+| Demo vault (cUSDC) | — | created by `Deploy.s.sol` |
+
+**Addresses are deliberately not written here.** They live in
+[`deployments/base-fork.json`](deployments/base-fork.json), which `Deploy.s.sol` regenerates, and
+every lane reads them from that file rather than hardcoding them. A table of literals in a README
+survives exactly until the next redeploy and then quietly points a reader at empty addresses — which
+is what the previous three did.
 
 Key functions:
 
-- [`execute(address,uint256,bytes)`](contracts/src/CuratedVault.sol#L124) and
-  [`executeBatch(Call[])`](contracts/src/CuratedVault.sol#L134) — the agent's only write surface.
+- [`execute(address,uint256,bytes)`](contracts/src/CuratedVault.sol#L158) and
+  [`executeBatch(Call[])`](contracts/src/CuratedVault.sol#L169) — the agent's only write surface.
   `AGENT_ROLE` plus a **target allowlist**. This single generic entry point is what lets venue
   adapters build arbitrary calldata off-chain while the vault stays venue-agnostic; a new venue is a
   new adapter, never a contract change.
-- [`totalAssets()`](contracts/src/CuratedVault.sol#L189) — base-asset balance plus non-base holdings
+- [`totalAssets()`](contracts/src/CuratedVault.sol#L289) — base-asset balance plus non-base holdings
   valued through Chainlink. **Reverts rather than returning a wrong number** if a feed for a token
   the vault actually holds is stale.
-- [`holdings()`](contracts/src/CuratedVault.sol#L303) — the whole position in one call, no N+1.
+- [`holdings()`](contracts/src/CuratedVault.sol#L408) — the whole position in one call, no N+1.
+- [`pause()`](contracts/src/CuratedVault.sol#L221) / [`unpause()`](contracts/src/CuratedVault.sol#L228)
+  — `GUARDIAN_ROLE`. Pausing does not freeze depositors' money: withdrawals stay open, and the agent
+  may still trade *toward the base asset only*, contract-enforced. A compromised agent key can do
+  nothing in wind-down but convert holdings to cash.
+- [`redeemInKind(uint256,address,address)`](contracts/src/CuratedVault.sol#L239) — a pro-rata slice
+  of every token the vault holds, unconditionally payable. It needs no market, no oracle and no
+  liquidity, which is what makes it an exit that cannot be blocked.
 
 Addresses are read from [`deployments/base-fork.json`](deployments/base-fork.json) — never hardcoded.
 
