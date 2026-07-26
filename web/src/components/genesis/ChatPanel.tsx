@@ -122,7 +122,7 @@ function Message({ message }: { message: ChatMessage }) {
             : 'bg-agent font-serif font-semibold text-white',
         )}
       >
-        {isUser ? 'You' : 'C'}
+        {isUser ? 'You' : 'S'}
       </div>
       <div
         className={cn(

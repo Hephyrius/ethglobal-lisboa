@@ -21,9 +21,6 @@ export function Header() {
           <span className="font-serif text-sm font-semibold tracking-tight text-ink sm:text-base">
             Scipio
           </span>
-          <span className="hidden border-l border-line pl-2.5 text-2xs uppercase tracking-[0.09em] text-faint lg:inline">
-            Agentic vault curation
-          </span>
         </Link>
 
         {/* Kept at every width. Hiding it below `sm` — as it was — made the
@@ -34,7 +31,7 @@ export function Header() {
             <span className="sm:hidden">Create</span>
             <span className="hidden sm:inline">Create a vault</span>
           </NavLink>
-          <NavLink href="/" active={pathname === '/'}>
+          <NavLink href="/vaults" active={pathname === '/vaults'}>
             <span className="sm:hidden">Explore</span>
             <span className="hidden sm:inline">Explore vaults</span>
           </NavLink>
@@ -81,7 +78,7 @@ function NavLink({
 function Mark() {
   return (
     <span className="flex h-6 w-6 items-center justify-center rounded-sm bg-agent font-serif text-xs font-semibold text-white">
-      C
+      S
     </span>
   )
 }
