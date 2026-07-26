@@ -43,7 +43,25 @@ services:
       # Despite the name, most of the harness reads ANVIL_RPC_URL as "the chain
       # to talk to". Left pointing at a laptop's :8540 it resolves to nothing
       # here, and the agent would read one chain and write another.
-      ANVIL_RPC_URL: ${BASE_RPC_URL:?BASE_RPC_URL must be an archive-capable Base endpoint}
+      #
+      # ⚠️ NOT ${BASE_RPC_URL}, and the difference is measured. One
+      # `GET /vault/{addr}/state` fires ~15 concurrent eth_calls — a symbol()
+      # per holding plus balances and valuation. Burst-tested from this droplet:
+      #
+      #   mainnet.base.org             0/15   429 Too Many Requests
+      #   base.gateway.tenderly.co    13/15   429
+      #   base.drpc.org               14/15   one timeout
+      #   base-rpc.publicnode.com     15/15   ✅
+      #
+      # And the failure is silent: `vault_client` degrades a failed `symbol()`
+      # to a truncated-address placeholder and a failed read to a default, so
+      # the API returns 200 with plausible zeros. The deployed vault read showed
+      # `0x8335...2913` where it should have said USDC, and `total_assets: 0`
+      # that was a failed call rather than an empty vault.
+      #
+      # BASE_RPC_URL stays whatever the laptop needs for `anvil --fork-url`
+      # (which does need archive); this is the endpoint the server reads with.
+      ANVIL_RPC_URL: ${PROD_RPC_URL:-https://base-rpc.publicnode.com}
       AGENT_STATE_DIR: /var/lib/scipio/state
       # EXACT origins. A missing one gets a 400 on the preflight, the dApp falls
       # back to reading the chain, and it reports "the agent API is

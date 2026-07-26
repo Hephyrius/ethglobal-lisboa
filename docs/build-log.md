@@ -5651,3 +5651,71 @@ Note that `check-deployment.sh` takes its network and RPC **positionally**, not
 from the environment. Passing `NETWORK=… RPC_URL=…` runs it silently against
 the fork and compares mainnet addresses to a local chain, which reports a
 mismatch that is not real.
+
+## Wave 0 — the deployed API was reading nothing, and answering 200
+
+Immediately after the mainnet deploy, `GET /vault/{addr}/state` through
+`api.scipio.capital` returned a 500, and fixing that uncovered a second, quieter
+problem underneath it.
+
+### 1. The ABIs were never shipped, and the fallback hid it
+
+`ABIFunctionNotFound: 'paused'`. `contracts/abis/` was in neither `SYNC_PATHS`
+nor `Dockerfile.api`, so the container had no flat ABIs at all.
+
+That does **not** fail loudly. `agent/chain/abi.py` falls back to a bundled
+minimal ABI and logs a warning nobody reads, so the API started, `/health` was
+green on all three seams, `/venues` answered — and only a call reaching a
+function the fallback lacks failed. The 500 read like a contract problem and was
+a packaging one. Both the sync list and the image now carry `contracts/abis/`.
+
+### 2. The RPC returned 200s made of failed calls
+
+With the ABIs in place the route answered, and the answer was wrong in a way
+that is worth studying:
+
+```
+holdings: [('0x8335...2913', '0'), ('0x4200...0006', '0')]
+total_assets: 0
+```
+
+Truncated addresses where `USDC` and `WETH` should be. That placeholder is
+`vault_client._placeholder`, the graceful degradation for a token whose
+`symbol()` call fails — so every symbol lookup had failed, and `total_assets: 0`
+was a failed read defaulting rather than an empty vault. **The API was reporting
+plausible zeros and a 200.**
+
+`https://mainnet.base.org` was the cause, and the numbers are stark. One state
+read fires ~15 concurrent `eth_call`s — a `symbol()` per holding plus balances
+and valuation. Burst-tested from the droplet:
+
+| Endpoint | 15 rapid calls | Archive |
+|---|---|---|
+| `mainnet.base.org` | **0/15** — 429 | yes |
+| `base.gateway.tenderly.co` | 13/15 — 429 | yes |
+| `base.drpc.org` | 14/15 — one timeout | yes |
+| `base-rpc.publicnode.com` | **15/15** | no |
+
+The first single call had returned 403, which read as a datacenter IP block. It
+was not — it was the tail of a burst. Worth recording because "403 Forbidden"
+and "you are being throttled" look nothing alike and are the same thing here.
+
+So the two roles are now split, because they want different things:
+
+* `BASE_RPC_URL` → `base.drpc.org`. Archive-capable, which `anvil --fork-url`
+  genuinely needs and the deploy used.
+* `PROD_RPC_URL` → `base-rpc.publicnode.com`, read only by the deployed API via
+  `docker-compose.yml`. No archive needed for live reads; burst reliability is
+  what matters, and it is the only endpoint that did not drop a call.
+
+A name the dev `.env` never sets, the same pattern as `PROD_CORS_ORIGINS` — and
+for the same reason, that compose interpolates against the laptop's file.
+
+After the change the same route returns `USDC` and `WETH` with real values and a
+`total_assets: 0` that is genuinely zero.
+
+**The pattern behind all three of today's silent failures is one thing:
+graceful degradation without a signal.** A placeholder symbol, a minimal ABI
+fallback, a default on a failed read — each is the right behaviour in isolation
+and each turns an outage into a plausible answer. `/health` cannot see any of
+them, which is why the useful check is always the artefact, never the status.

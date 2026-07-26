@@ -188,6 +188,13 @@ def cmd_push_env(client) -> int:
 SYNC_PATHS = (
     "pyproject.toml", "uv.lock", ".dockerignore",
     "agent", "venues", "data", "packages", "deployments", "deploy",
+    # The flat ABIs the harness reads (`agent/chain/abi.py`). Omitting these does
+    # NOT fail loudly: `load_abi` falls back to a bundled minimal ABI and logs a
+    # warning nobody reads, so the API starts, /health is green, /venues answers,
+    # and only a call touching a newer function fails — the deployed API returned
+    # 500 on every vault read with `ABIFunctionNotFound: 'paused'`, which reads
+    # like a contract problem and is a packaging one.
+    "contracts/abis",
 )
 
 

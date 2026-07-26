@@ -59,6 +59,10 @@ COPY data/ data/
 COPY agent/ agent/
 COPY venues/ venues/
 COPY deployments/ deployments/
+# Flat ABIs, read by `agent/chain/abi.py`. Without them `load_abi` silently
+# degrades to a minimal bundled fallback — the API starts and answers /health,
+# then 500s on any call reaching a function the fallback lacks.
+COPY contracts/abis/ contracts/abis/
 
 RUN uv sync --frozen --extra agent --extra venues --extra data
 
