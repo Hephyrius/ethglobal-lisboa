@@ -20,7 +20,7 @@ type Track = 'agent' | 'archetype'
 /** The chooser's label for each track, in one place so the card and the
  *  `ChosenTrack` banner cannot drift apart. */
 const TRACK_TITLES: Record<Track, string> = {
-  agent: 'Deploy a Scipio Agent',
+  agent: 'Deploy a Scipio Agent Created Vault',
   archetype: 'Deploy from an archetype',
 }
 
@@ -91,7 +91,26 @@ export default function CreatePage() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-xl font-semibold tracking-tight text-ink sm:text-2xl">Create a vault</h1>
+        {/* The chosen route becomes the page title rather than sitting under a
+            generic one. "Create a vault" is what the chooser is for, and once a
+            route is picked it is answered — leaving it above the route name put
+            two headings on the page competing to say where the reader is, and
+            the more specific one was the smaller of the two. The nav still says
+            "Create a vault", which is where that label belongs. */}
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
+          <h1 className="text-xl font-semibold tracking-tight text-ink sm:text-2xl">
+            {track === null ? 'Create a vault' : TRACK_TITLES[track]}
+          </h1>
+          {track !== null ? (
+            <button
+              type="button"
+              onClick={() => setTrack(null)}
+              className="text-xs text-muted underline-offset-4 transition-colors hover:text-ink hover:underline"
+            >
+              ← Choose a different route
+            </button>
+          ) : null}
+        </div>
 
         {/* Two routes, not three. The standard-mandate track loaded a preset
             for you to read and then deploy, which is the archetype track with
@@ -118,9 +137,7 @@ export default function CreatePage() {
               Two selections of the same card produce two genuinely different vaults.
             </TrackCard>
           </ol>
-        ) : (
-          <ChosenTrack title={TRACK_TITLES[track]} onClear={() => setTrack(null)} />
-        )}
+        ) : null}
       </header>
 
       {track !== null ? <ModeNotice /> : null}
@@ -293,22 +310,3 @@ function TrackCard({
   )
 }
 
-/**
- * What stands in for the pair once a track is chosen. It names the route the
- * reader is on and offers the way back — without restating the other option,
- * which is the whole reason the cards were replaced rather than dimmed.
- */
-function ChosenTrack({ title, onClear }: { title: string; onClear: () => void }) {
-  return (
-    <div className="mt-5 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line pb-2">
-      <h2 className="text-sm font-semibold text-ink">{title}</h2>
-      <button
-        type="button"
-        onClick={onClear}
-        className="text-xs text-muted underline-offset-4 transition-colors hover:text-ink hover:underline"
-      >
-        ← Choose a different route
-      </button>
-    </div>
-  )
-}
