@@ -36,6 +36,7 @@ from curator_schema import (
     Mandate,
     MarketSnapshot,
     ModelProvenance,
+    VaultState,
 )
 
 from ..chain.aqua_positions import strategies_from_plan
@@ -142,6 +143,26 @@ class DecisionCycle:
         record.snapshot = snapshot
 
         if reason := self._cooldown_reason(vault, mandate):
+            return record.held(_cooldown_decision(mandate, reason), model=None)
+
+        # An empty book is a hold, decided here rather than by the model.
+        #
+        # Same argument as the cooldown above: if no allocation is possible
+        # there is nothing to spend a model call on. Left to the model it does
+        # not merely waste the call, it produces a *wrong-looking* one — asked
+        # to allocate a vault holding nothing, it reaches for the only tool that
+        # needs no capital and proposes shipping a single asset into Aqua, which
+        # is a two-token constant-product curve and refuses:
+        #
+        #     venue 'aqua' could not build a plan: the XYC strategy is a
+        #     two-token curve; got 1 tokens
+        #
+        # Observed on six of eleven mainnet vaults every single round. The
+        # refusal is correct and the feed entry it writes is not: a judge
+        # reading the decision log sees the agent failing repeatedly, when in
+        # fact it was asked to allocate an empty vault. Holding with the actual
+        # reason is both cheaper and more honest.
+        if reason := _empty_book_reason(state):
             return record.held(_cooldown_decision(mandate, reason), model=None)
 
         # ── the model ─────────────────────────────────────────────────────
@@ -364,6 +385,23 @@ def _cooldown_decision(mandate: Mandate, reason: str) -> AllocationDecision:
         reasoning=reason,
         facts_used=[],
         confidence=1.0,
+    )
+
+
+def _empty_book_reason(state: VaultState) -> str | None:
+    """Why an allocation is impossible, or None if the vault has something to work with.
+
+    `total_assets` rather than the sum of holdings: it is the vault's own
+    valuation, the same number every constraint is measured against, and it
+    already folds in whatever is committed to a venue. A vault can hold a
+    receipt token worth something while its base-asset balance is zero, and
+    that is emphatically not an empty book.
+    """
+    if int(state.total_assets) > 0:
+        return None
+    return (
+        "The vault holds no assets, so there is nothing to allocate. Holding "
+        "until a deposit arrives."
     )
 
 

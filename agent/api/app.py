@@ -15,6 +15,7 @@ import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from ..config import Settings, settings
 from .deps import data_resolution, get_settings, venue_resolution
@@ -44,6 +45,40 @@ def create_app(config: Settings | None = None) -> FastAPI:
         version="0.1.0",
         description=DESCRIPTION,
     )
+
+    # ⚠️ ORDER IS LOAD-BEARING. Starlette wraps each `add_middleware` around the
+    # previous one, so the LAST registered is the OUTERMOST. This catcher must be
+    # registered *before* CORSMiddleware so that CORS ends up wrapping it and its
+    # responses carry the CORS headers.
+    #
+    # Without it, an unhandled exception is turned into a 500 by Starlette's
+    # `ServerErrorMiddleware`, which sits outside every middleware we add — so
+    # the response has **no `Access-Control-Allow-Origin`**. A browser will not
+    # expose a cross-origin response it cannot validate, so `fetch` *rejects*
+    # rather than resolving with a 500, and the dApp's client reports
+    # "cannot reach agent API" — the whole backend, not the one bad route.
+    #
+    # Measured: a single vault whose `totalAssets()` reverts on a stale oracle
+    # made every page polling it announce that the API was unreachable, every
+    # twelve seconds, while `/health` stayed green and every other route
+    # answered 200. One unreadable vault libelled the entire service.
+    @app.middleware("http")
+    async def cors_visible_errors(request, call_next):
+        try:
+            return await call_next(request)
+        except Exception:  # noqa: BLE001 — deliberately total; see above
+            # `exception()` not `error()`: the traceback is the only record,
+            # since we are converting the crash into an ordinary response.
+            log.exception("unhandled error on %s %s", request.method, request.url.path)
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "detail": (
+                        "the agent API failed to serve this route; other routes are "
+                        "unaffected. See the server log for the traceback."
+                    )
+                },
+            )
 
     # The dApp calls this API from the browser, so without CORS every frozen
     # route fails preflight with an error that names none of the real cause

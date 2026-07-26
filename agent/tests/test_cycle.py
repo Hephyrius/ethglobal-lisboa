@@ -349,6 +349,53 @@ async def test_the_cooldown_holds_without_calling_the_model(tmp_path):
     assert second.snapshot is not None, "the feed still shows what was observed"
 
 
+# ── the empty book ────────────────────────────────────────────────────────
+
+
+class _EmptyVaultClient(StubVaultClient):
+    """A deployed, correctly configured vault that nobody has funded yet."""
+
+    async def state(self, vault: str):
+        state = await super().state(vault)
+        return state.model_copy(
+            update={
+                "total_assets": "0",
+                "total_supply": "0",
+                "holdings": [h.model_copy(update={"balance": "0"}) for h in state.holdings],
+            }
+        )
+
+
+async def test_an_empty_vault_holds_without_calling_the_model(tmp_path):
+    """Nothing to allocate is a hold, and it must not cost a model call.
+
+    Eleven mainnet vaults sat at zero because deploying one and funding one are
+    separate acts. Asked to allocate them, the model reached for the only venue
+    that needs no capital and proposed shipping a single asset into Aqua — a
+    two-token curve, which refused. Six of eleven wrote a `rejected` into the
+    judge-facing feed every round, for a question that should never have been
+    put to a model.
+    """
+    cycle, _, backend, _ = _build(tmp_path, [_good_decision()], chain=_EmptyVaultClient())
+
+    action = await cycle.run(VAULT)
+
+    assert action.status == "held"
+    assert "no assets" in action.decision.reasoning
+    assert backend.calls == [], "an empty book must not reach the model"
+    assert action.snapshot is not None, "the feed still shows what was observed"
+
+
+async def test_a_funded_vault_still_reaches_the_model(tmp_path):
+    """The guard above must not swallow the ordinary path."""
+    cycle, _, backend, _ = _build(tmp_path, [_good_decision()])
+
+    action = await cycle.run(VAULT)
+
+    assert action.status == "executed"
+    assert backend.calls, "a funded vault is still the model's decision to make"
+
+
 async def test_only_executed_cycles_start_a_cooldown(tmp_path):
     """A hold did not move capital, so it must not block the next tick."""
     mandate = fixtures.mandate()

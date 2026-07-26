@@ -24,7 +24,7 @@ from typing import Any, Literal
 
 from curator_schema import Mandate, MandateConstraints
 from curator_schema.models import Address, Bytes32
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 __all__ = [
     "ArchetypeDeployRequest",
@@ -73,6 +73,26 @@ class MandateDraft(Strict):
     created_at: datetime | None = None
     risk_posture: Literal["conservative", "balanced", "aggressive"] | None = None
     update_rules: str | None = Field(default=None, max_length=1000)
+
+    @field_validator("permitted_data_sources", "permitted_venues")
+    @classmethod
+    def _unique(cls, value: list[str] | None) -> list[str] | None:
+        """Drop repeats, keep order.
+
+        A grant list is a set wearing a list's clothes: naming a venue twice
+        grants nothing extra. The model does repeat itself — an observed draft
+        came back with `permitted_venues: ["aqua", "aqua"]`, which the mandate
+        panel dutifully rendered as two identical rows under EXECUTION VENUES.
+        That reads as a rendering bug in the one document a depositor is asked
+        to check before their money is locked to it, which is the worst possible
+        place to look careless.
+
+        Order is preserved rather than sorted: the model lists the venue it
+        considers primary first, and that ordering survives into the panel.
+        """
+        if value is None:
+            return None
+        return list(dict.fromkeys(value))
 
 
 class GenesisChatResponse(Strict):
