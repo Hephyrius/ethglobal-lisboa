@@ -1,0 +1,34 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+  html,body{margin:0;padding:0;width:512px;height:512px;overflow:hidden}
+</style></head>
+<body>
+<!--
+  The Scipio mark at 512. Same 24-unit geometry as web/src/app/icon.svg and
+  ScipioMark.tsx — one wall, four heads pressing in at the midpoints, a solid
+  town — so the submission logo, the tab icon and the in-app mark are the same
+  drawing rather than three cousins.
+
+  Stroke weight is taken from the app mark (1.3/24), not the favicon's heavier
+  2/24: that weight exists to survive 16px, and at 512 it reads clumsy.
+  Corner radius keeps the favicon's 4.5/24 ratio.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="512" height="512">
+  <rect width="24" height="24" rx="4.5" fill="#005BCC"/>
+
+  <!-- The wall. -->
+  <rect x="4.4" y="4.4" width="15.2" height="15.2"
+        fill="none" stroke="#fff" stroke-width="1.3"/>
+
+  <!-- Four heads on the wall's midpoints, pointing in. -->
+  <g fill="#fff">
+    <polygon points="10.6,5.6 13.4,5.6 12,7.9"/>
+    <polygon points="18.4,10.6 18.4,13.4 16.1,12"/>
+    <polygon points="13.4,18.4 10.6,18.4 12,16.1"/>
+    <polygon points="5.6,13.4 5.6,10.6 7.9,12"/>
+  </g>
+
+  <!-- The town. -->
+  <rect x="10.4" y="10.4" width="3.2" height="3.2" fill="#fff"/>
+</svg>
+</body></html>

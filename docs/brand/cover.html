@@ -1,0 +1,111 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+  /*
+    640x360 cover. Same visual language as the site: white ground, hairline
+    rules, one sober accent, no gradient and no neon. The Alesia figure is the
+    hero motif at cover scale.
+  */
+  :root{
+    --ink:#141A1F; --muted:#5E676E; --faint:#939A9F;
+    --line:#E6E9EC; --agent:#005BCC;
+  }
+  html,body{margin:0;padding:0;width:640px;height:360px;overflow:hidden}
+  body{
+    background:#fff; color:var(--ink);
+    font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    display:flex; flex-direction:column;
+  }
+  .page{flex:1; display:flex; align-items:center; gap:24px; padding:0 40px}
+  .copy{flex:1; min-width:0}
+
+  .label{
+    font-size:10px; letter-spacing:.16em; text-transform:uppercase;
+    color:var(--faint); font-weight:500;
+  }
+  .lockup{display:flex; align-items:center; gap:9px; margin-top:26px}
+  .lockup svg{width:24px; height:24px; display:block}
+  .word{font-size:19px; font-weight:600; letter-spacing:-.015em}
+
+  h1{
+    margin:14px 0 0; font-size:35px; line-height:1.12;
+    letter-spacing:-.025em; font-weight:600;
+  }
+  .standfirst{
+    margin:14px 0 0; max-width:355px;
+    font-size:12.5px; line-height:1.55; color:var(--muted);
+  }
+  .rule{width:34px; height:2px; background:var(--agent); margin-top:18px}
+
+  /* On the site the figure is decoration behind body copy and sits at very low
+     opacity. A cover is read at thumbnail size in a submission gallery, where
+     that weight disappears entirely — so it carries more here. */
+  .motif{flex:0 0 auto; color:var(--agent); opacity:.62}
+  .motif svg{display:block; width:224px; height:224px}
+
+  footer{
+    border-top:1px solid var(--line);
+    padding:11px 40px 14px;
+    display:flex; justify-content:space-between; align-items:baseline;
+    font-size:10px; letter-spacing:.05em; color:var(--faint);
+  }
+  footer .venues{color:var(--muted); letter-spacing:.04em}
+</style></head>
+<body>
+  <div class="page">
+    <div class="copy">
+      <div class="label">ETHGlobal Lisbon 2026</div>
+
+      <div class="lockup">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <rect width="24" height="24" rx="4.5" fill="#005BCC"/>
+          <rect x="4.4" y="4.4" width="15.2" height="15.2" fill="none" stroke="#fff" stroke-width="1.3"/>
+          <g fill="#fff">
+            <polygon points="10.6,5.6 13.4,5.6 12,7.9"/>
+            <polygon points="18.4,10.6 18.4,13.4 16.1,12"/>
+            <polygon points="13.4,18.4 10.6,18.4 12,16.1"/>
+            <polygon points="5.6,13.4 5.6,10.6 7.9,12"/>
+          </g>
+          <rect x="10.4" y="10.4" width="3.2" height="3.2" fill="#fff"/>
+        </svg>
+        <span class="word">Scipio</span>
+      </div>
+
+      <h1>Agent Curated<br>Vaults</h1>
+      <p class="standfirst">
+        An ERC-4626 vault whose curator is an autonomous LLM agent. It reads live
+        markets, forms a thesis, and signs its own transactions. No human override
+        after genesis.
+      </p>
+      <div class="rule"></div>
+    </div>
+
+    <!-- Alesia, 52 BC: the town, the two concentric walls, and arrowheads
+         pressing in from the outer perimeter and out from the town. Same figure
+         as components/hero/SiegeMotif.tsx. -->
+    <div class="motif">
+      <svg viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor">
+        <rect x="140" y="140" width="120" height="120" stroke-width="1.6"/>
+        <rect x="90" y="90" width="220" height="220" stroke-width="1.2"/>
+        <rect x="40" y="40" width="320" height="320" stroke-width="1"/>
+        <g fill="currentColor" stroke="none">
+          <polygon points="188,48 212,48 200,70"/>
+          <polygon points="352,188 352,212 330,200"/>
+          <polygon points="212,352 188,352 200,330"/>
+          <polygon points="48,212 48,188 70,200"/>
+        </g>
+        <g fill="currentColor" stroke="none">
+          <polygon points="188,140 212,140 200,118"/>
+          <polygon points="260,188 260,212 282,200"/>
+          <polygon points="212,260 188,260 200,282"/>
+          <polygon points="140,212 140,188 118,200"/>
+        </g>
+      </svg>
+    </div>
+  </div>
+
+  <footer>
+    <span>scipio.capital</span>
+    <span class="venues">The Graph &nbsp;·&nbsp; Uniswap &nbsp;·&nbsp; 1inch Aqua / SwapVM</span>
+  </footer>
+</body></html>
