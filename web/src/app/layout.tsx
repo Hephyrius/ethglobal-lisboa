@@ -3,7 +3,6 @@ import type { ReactNode } from 'react'
 import { Providers } from './providers'
 import { Disclaimer } from '@/components/layout/Disclaimer'
 import { Header } from '@/components/layout/Header'
-import { ForkNetworkNotice } from '@/components/wallet/ForkNetworkNotice'
 import './globals.css'
 
 /**
@@ -69,11 +68,6 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <Disclaimer />
           <Header />
           <main className="mx-auto max-w-[1400px] px-4 pb-20 pt-6 sm:px-6 sm:pb-24 sm:pt-8">
-            {/* Above the page rather than inside one surface: signing against
-                the wrong chain is a mistake available from every route, not
-                only the deposit form. Renders nothing unless the configured RPC
-                is loopback, so it cannot reach a deployed build. */}
-            <ForkNetworkNotice className="mb-6" />
             {children}
           </main>
         </Providers>
