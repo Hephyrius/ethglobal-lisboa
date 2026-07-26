@@ -19,8 +19,8 @@ export default function VaultsPage() {
           Explore All Vaults
         </h1>
         <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted">
-          Every vault this browser can see. Search by name, address, mandate hash or objective, or
-          narrow by the parameters a vault was deployed with.
+          Search by name, address, mandate hash or objective, or narrow by the parameters a vault
+          was deployed with.
         </p>
       </header>
 
