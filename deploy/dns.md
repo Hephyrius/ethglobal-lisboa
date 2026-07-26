@@ -181,7 +181,7 @@ it and restarting does nothing.
 | `NEXT_PUBLIC_API_URL` | `https://api.scipio.capital` |
 | `NEXT_PUBLIC_CHAIN_ID` | `8453` |
 | `NEXT_PUBLIC_DEPLOY_NETWORK` | `base-mainnet` |
-| `NEXT_PUBLIC_RPC_URL` | the same archive-capable URL as `BASE_RPC_URL` |
+| `NEXT_PUBLIC_RPC_URL` | a Base RPC — **archive not required**, see below |
 
 ⚠️ **`NEXT_PUBLIC_RPC_URL` is the row that gets forgotten, and it fails quietly.**
 It is the browser's own read RPC — every `totalAssets()`, share balance and
@@ -195,6 +195,39 @@ reads under rate limiting.
 Do **not** paste a localhost URL here. `src/lib/chain/explorer.ts` treats a
 local hostname as proof it is on the anvil fork and suppresses every BaseScan
 link on the site, because the fork also reports chain id 8453.
+
+### This one does not need an archive node, and should not reuse the key
+
+`BASE_RPC_URL` is documented repo-wide as archive-capable, and it is easy to
+carry that requirement across to the browser. It does not apply. The dApp reads
+only the head: ERC-4626 views, wallet balances, and the chunked `eth_getLogs`
+factory scan in `src/lib/chain/all-vaults.ts` — which is log indexing, not
+historical state, and is already range-chunked for free tiers. There is no
+`eth_call` at a past block anywhere in `web/src`.
+
+That matters for more than cost, because **anything named `NEXT_PUBLIC_*` is
+inlined into the JavaScript bundle**. A provider URL with the key in its path is
+readable by every visitor and stays readable in cached bundles. Since the
+browser needs strictly less than the agent does, give it its own low-limit key
+rather than the agent's — a scraped frontend key then cannot exhaust the quota
+the agent needs to tick, which is the failure that actually ends a demo. Add a
+domain allowlist for `scipio.capital` at the provider while you are there.
+
+**Where archive genuinely is required**, so the requirement stays attached to
+the right thing:
+
+| Consumer | Archive? | |
+|---|---|---|
+| `anvil --fork-url` (local dev) | **yes** | pins a block and calls state at it long after a full node has pruned it. This is where the repo-wide requirement comes from. |
+| `agent/performance/backfill.py` | **yes** | `_point_at()` does `eth_call` at historical block numbers to rebuild the share-price curve. |
+| Everything else on the droplet | no | ticks, `totalAssets()`, broadcasts — all head. |
+| The dApp | no | head only. |
+
+⚠️ Backfill degrades *silently* without archive. A historical `eth_call` that
+fails returns `None`, and `_point_at` reads that as **"the vault did not exist
+yet at this block"** rather than as an RPC limitation — so the chart renders a
+young vault instead of an error. If performance history looks suspiciously
+short, check the endpoint before checking the vault.
 
 There is no `NEXT_PUBLIC_WALLETCONNECT_ID`. The connector is injected-only and
 nothing reads that variable — see the rationale at the top of
