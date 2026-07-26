@@ -8,6 +8,12 @@ import { useAllVaults } from '@/lib/chain/all-vaults'
 import { isCuratedVault } from '@/lib/chain/deployments'
 import { getStoredMandate, listLocalVaults } from '@/lib/mandate/store'
 
+/**
+ * Whether the placeholder listing may ever be shown. Off on any real network —
+ * see the guards where `sample` is built.
+ */
+const SHOW_SAMPLE = process.env.NEXT_PUBLIC_DEPLOY_NETWORK !== 'base-mainnet'
+
 export type VaultOrigin = 'local' | 'deployed' | 'onchain' | 'sample'
 
 export type KnownVault = {
@@ -102,8 +108,29 @@ export function useKnownVaults(): { vaults: KnownVault[]; ready: boolean } {
       }))
 
     // A way in before anything is deployed, labelled as what it is.
+    //
+    // ## Two guards, both learned the hard way
+    //
+    // **`answered`** — the emptiness test has to distinguish "the factory says
+    // there are none" from "the factory has not replied yet". This effect runs
+    // on mount, when `onchain.data` is still undefined, so on a fresh browser
+    // all three sources read empty for one render and the sample is injected.
+    // Whatever mounted against it immediately fetches
+    // `/vault/0x1111…1111/state` and `/yield` from the live API, which knows
+    // nothing about a fixture address. Caught in production: `0x1111…` was the
+    // *first* vault request on every page load, ahead of the real ones, and its
+    // `/yield` failed every time.
+    //
+    // **`SHOW_SAMPLE`** — never on a network holding real money. If the factory
+    // read fails rather than merely lagging, `onchain.data` settles as
+    // `{supported: false, vaults: []}`, which is legitimately "answered with
+    // nothing" — and the sample would then render *permanently*, putting a
+    // vault that does not exist on a production site next to ones that do. A
+    // visitor cannot tell those apart, and the deposit form is the same form.
+    // On a fork it is a useful affordance; on mainnet it is a fake listing.
+    const answered = onchain.data !== undefined
     const sample: KnownVault[] =
-      local.length > 0 || deployed.length > 0 || chain.length > 0
+      !SHOW_SAMPLE || !answered || local.length > 0 || deployed.length > 0 || chain.length > 0
         ? []
         : [
             {
