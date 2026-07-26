@@ -38,6 +38,7 @@ from curator_schema import (
     ModelProvenance,
 )
 
+from ..chain.aqua_positions import strategies_from_plan
 from ..clock import to_utc, utcnow
 from ..config import Settings
 from ..mandate.amend import AmendmentRejected, apply_amendment
@@ -76,6 +77,7 @@ class DecisionCycle:
         journal: ActionJournal,
         settings: Settings,
         performance=None,
+        aqua_positions=None,
     ) -> None:
         self._engine = engine
         self._registry = registry
@@ -88,6 +90,11 @@ class DecisionCycle:
         # memory of how its past decisions worked out. That is the pre-Wave-1
         # behaviour, and it is the correct degraded state rather than a failure.
         self._performance = performance
+        # Optional for the same reason as `performance`: a cycle without it
+        # still ticks. It just cannot record a maker position, which means the
+        # dApp will not show one and `dock()` cannot later be built for it —
+        # so fixture mode and unit tests pass None and live mode does not.
+        self._aqua_positions = aqua_positions
         # The detector's model pass gets the same backend the decision does, so
         # it is available exactly when the agent is. Its verdict cache lives on
         # the detector, which lives on the cycle, which lives for the process —
@@ -183,7 +190,29 @@ class DecisionCycle:
                 f"execution failed: {exc}", decision=decision, plan=plan, model=provenance
             )
 
+        # An Aqua ship is only half-done when the transaction lands. Aqua offers
+        # no way to enumerate a maker's positions — `safeBalances` can confirm a
+        # hash you already hold but cannot list them — so if the harness does
+        # not record the strategy here, nothing can afterwards. That record is
+        # what `dock()` needs (venues/README.md: "the harness must record the
+        # tokens at ship() time"), and what puts the position on screen at all.
+        #
+        # After the tx, not before: a plan that reverted opened nothing, and a
+        # recorded position that does not exist is worse than a missing one —
+        # it would have the agent build a dock for a strategy Aqua never had.
+        self._record_aqua(vault, plan)
+
         return record.executed(decision, plan, tx_hashes, model=provenance)
+
+    def _record_aqua(self, vault: str, plan: ExecutionPlan) -> None:
+        """Never allowed to turn a landed transaction into a failed tick."""
+        if self._aqua_positions is None:
+            return
+        try:
+            opened, closed = strategies_from_plan(plan)
+            self._aqua_positions.apply(vault, opened, closed)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("could not record Aqua positions for %s: %s", vault, exc)
 
     # ── steps ─────────────────────────────────────────────────────────────
 

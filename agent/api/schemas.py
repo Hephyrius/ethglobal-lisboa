@@ -212,3 +212,44 @@ class HealthResponse(Strict):
     venue_registry: str
     model_backend: str
     model_reachable: bool | None = None
+
+
+class PositionYieldResponse(Strict):
+    """The current rate on one holding, with the fact it came from."""
+
+    token: str
+    symbol: str
+    #: The underlying a receipt token represents (`aBasUSDC` -> `USDC`), or the
+    #: symbol itself when the holding is not a receipt token.
+    represents: str
+    #: Which protocol the position is with. Null means idle in the vault.
+    venue: str | None = None
+    value_in_asset: str
+    #: Fraction: 0.0351 is 3.51%, the `apy_fraction` convention.
+    #: **Null means no rate was found — not that the position earns nothing.**
+    #: Idle capital is 0.0, which is a different and deliberate answer.
+    apy: float | None = None
+    #: Provenance, so a rate on screen can be traced to the source that
+    #: reported it rather than appearing as an unsourced number.
+    source: str | None = None
+    fact_id: str | None = None
+
+
+class VaultYieldResponse(Strict):
+    """What the vault earns now, as opposed to what it has earned.
+
+    See `GET /vault/{addr}/yield` for why this exists alongside
+    `PerformanceSummary.annualized_return_pct`: that one is realised and stays
+    null until the series spans a day, so it is blank for the whole of a fresh
+    deployment while the vault is visibly earning.
+    """
+
+    vault: str
+    positions: list[PositionYieldResponse] = Field(default_factory=list)
+    #: Value-weighted over positions whose rate is known. Idle capital is
+    #: included at 0%, because excluding it would overstate what the vault
+    #: earns by quietly blending only the productive half of the book.
+    weighted_apy: float | None = None
+    #: Share of the book the blended figure actually covers, 0-1. A yield over
+    #: 30% of the book is not the vault's yield, and a reader has to see that.
+    coverage: float = 0.0

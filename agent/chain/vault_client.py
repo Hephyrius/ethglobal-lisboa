@@ -59,6 +59,7 @@ from web3.logs import DISCARD
 
 from ..config import Settings
 from .abi import ERC20_ABI, load_abi
+from .aqua_positions import AquaPositionStore
 from .receipts import underlying_symbol
 from .rpc import make_async_web3
 
@@ -164,6 +165,10 @@ class Web3VaultClient:
                 "transactions, which is the trust model, not an implementation detail"
             )
         self._settings = settings
+        # Read here, written by the decision cycle at ship time. Both sides use
+        # the same `AGENT_STATE_DIR`, so a restart does not lose a live maker
+        # position — which would leave it unshowable and undockable.
+        self._aqua_positions = AquaPositionStore(settings.state_dir)
         self._w3 = make_async_web3(AsyncHTTPProvider(settings.rpc_url))
         self._account = Account.from_key(settings.agent_private_key)
         self._vault_abi = load_abi("CuratedVault")
@@ -312,6 +317,16 @@ class Web3VaultClient:
             # trading normally does nothing at all, and its depositors are the
             # ones waiting for the book to converge on cash.
             paused=bool(paused),
+            # Open maker positions, from the record the cycle writes at ship
+            # time. This cannot be read from the chain: Aqua can confirm a
+            # strategy hash you already hold but offers no way to enumerate a
+            # maker's positions, so a vault whose ships were never recorded has
+            # no way to discover them afterwards.
+            #
+            # Empty was the *only* value this field ever had before Wave 3,
+            # which is why an open Aqua position never appeared in the dApp and
+            # why `dock()` could not be built for one.
+            aqua_strategies=self._aqua_positions.read(vault),
             block_number=block_number,
         )
 

@@ -134,6 +134,20 @@ class VaultService(Protocol):
         """
         ...
 
+    async def vault_yield(self, vault: str):
+        """What the vault earns **now**, position by position.
+
+        The complement to `performance()`, not a duplicate of it: that one is
+        realised and stays null until the series spans a day, so it is blank
+        for the whole of a fresh deployment while the vault is visibly earning.
+        This reads the current rate on what is held, so it is populated from
+        the first tick.
+
+        Idle capital is `0.0`. A position whose rate could not be found is
+        `None` — the two are different claims and must not be collapsed.
+        """
+        ...
+
     async def performance(self, vault: str, window: str = "all") -> VaultPerformance:
         """Share-price history plus the risk figures derived from it.
 

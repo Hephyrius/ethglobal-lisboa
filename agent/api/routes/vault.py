@@ -24,7 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from ...performance.window import WINDOWS
 from ...service.ports import VaultService
 from ..deps import get_vault_service
-from ..schemas import MandateVerificationResponse
+from ..schemas import MandateVerificationResponse, VaultYieldResponse
 
 router = APIRouter(prefix="/vault", tags=["vault"])
 
@@ -107,6 +107,30 @@ async def vault_performance(
             detail=f"unknown window {window!r}; expected one of {sorted(WINDOWS)}",
         )
     return await service.performance(_checked(addr), window.lower())
+
+
+@router.get("/{addr}/yield", response_model=VaultYieldResponse)
+async def vault_yield(addr: VaultAddress, service: Service) -> VaultYieldResponse:
+    """What the vault is earning **now**, position by position.
+
+    Distinct from `/performance`, and the distinction is the point.
+    `annualized_return_pct` there is the *realised* return and is deliberately
+    null until the series spans a day — so on a fresh deployment, and for the
+    whole of a demo, every yield figure on the page is blank while the vault is
+    visibly earning. This is the forward-looking rate on what it holds right
+    now, from the same live yield facts the agent reads to decide, so it is
+    populated from the first tick.
+
+    Two conventions worth knowing before rendering it:
+
+    * **Idle capital is `0.0`, not null.** It genuinely earns nothing, and that
+      is the most decision-relevant number on the page.
+    * **A position with no rate found is `null`, never `0.0`.** "Earns nothing"
+      and "we do not know what this earns" are different claims, and showing
+      the first when we mean the second understates the vault. `coverage` says
+      how much of the book the blended figure actually covers.
+    """
+    return await service.vault_yield(_checked(addr))
 
 
 @router.get("/{addr}/mandate", response_model=Mandate, response_model_exclude_none=True)

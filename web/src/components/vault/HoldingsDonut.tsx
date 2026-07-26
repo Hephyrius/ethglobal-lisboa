@@ -7,6 +7,7 @@ import { Card, CardBody, CardHeader } from '@/components/ui/Card'
 import { AddressChip } from '@/components/ui/AddressChip'
 import { TokenMark } from '@/components/ui/TokenMark'
 import { formatAmount, toBigInt } from '@/lib/format/units'
+import { useVaultYield } from '@/lib/api/yield-queries'
 import { cn } from '@/lib/cn'
 
 /**
@@ -80,19 +81,63 @@ type Slice = {
   value: bigint
   share: number
   committedTo: string | null
+  /** The underlying a receipt token is a claim on, e.g. `aBasUSDC` -> `USDC`. */
+  represents: string | null
+  /**
+   * Current rate as a fraction. Three distinct states, and collapsing any two
+   * of them would misreport the book: `undefined` = not loaded yet, `null` =
+   * no rate found, `0` = idle and genuinely earning nothing.
+   */
+  apy?: number | null
+  apySource?: string | null
   colour: string
 }
 
 export function HoldingsDonut({ state }: { state: VaultState }) {
   const [active, setActive] = useState<string>()
+  const yields = useVaultYield(state.address)
 
-  const { slices, unvalued, held } = useMemo(() => build(state), [state])
+  const { slices: base, unvalued, held } = useMemo(() => build(state), [state])
+
+  // Joined by token address rather than symbol: two holdings can share a
+  // symbol across protocols, and a wrong join here would print one position's
+  // rate against another's balance.
+  const slices = useMemo(() => {
+    const byToken = new Map(
+      (yields.data?.positions ?? []).map((p) => [p.token.toLowerCase(), p]),
+    )
+    return base.map((slice) => {
+      const match = byToken.get(slice.token.toLowerCase())
+      return match
+        ? { ...slice, apy: match.apy ?? null, apySource: match.source ?? null }
+        : slice
+    })
+  }, [base, yields.data])
 
   return (
     <Card>
       <CardHeader
         title="Holdings"
         subtitle="The vault is sole custodian. Committed balances are encumbered by a venue, not held by it."
+        right={
+          /* The blended rate across the whole book, idle capital included at
+             0%. Excluding idle would quietly report only the productive half
+             and overstate what a depositor earns — which is the number they
+             actually care about. Hidden rather than zeroed while loading or
+             when nothing is known. */
+          yields.data?.weighted_apy != null ? (
+            <div className="text-right">
+              <div className="tabular text-sm font-medium text-agent">
+                {(yields.data.weighted_apy * 100).toFixed(2)}% APY
+              </div>
+              <div className="text-2xs text-faint">
+                {yields.data.coverage >= 0.999
+                  ? 'blended, whole book'
+                  : `blended over ${Math.round(yields.data.coverage * 100)}% of the book`}
+              </div>
+            </div>
+          ) : null
+        }
       />
       <CardBody>
         {held.length === 0 ? (
@@ -120,8 +165,48 @@ export function HoldingsDonut({ state }: { state: VaultState }) {
                       className="h-2.5 w-2.5 shrink-0 rounded-sm"
                       style={{ background: slice.colour }}
                     />
-                    <TokenMark symbol={slice.symbol} />
-                    <span className="text-sm font-medium text-ink">{slice.symbol}</span>
+                    {/* Mark and name follow the *underlying* where there is
+                        one: a reader looking for their USDC should find it
+                        under USDC, not under a receipt symbol they have never
+                        seen. The receipt symbol is still shown, small, beside
+                        it — dropping it entirely would hide which protocol
+                        issued the claim, and that is the part a depositor
+                        needs to assess the risk. */}
+                    <TokenMark symbol={slice.represents ?? slice.symbol} />
+                    <span className="text-sm font-medium text-ink">
+                      {slice.represents ?? slice.symbol}
+                    </span>
+                    {slice.represents ? (
+                      <span className="font-mono text-2xs text-faint" title={`Held as ${slice.symbol}, a receipt token representing ${slice.represents}.`}>
+                        {slice.symbol}
+                      </span>
+                    ) : null}
+                    {/* The rate this slice is actually earning. Idle capital
+                        shows 0%, which is the point of showing it at all; a
+                        position whose rate we could not find shows a dash,
+                        because "earns nothing" and "unknown" are different
+                        claims and 0% would state the wrong one. */}
+                    {slice.apy !== undefined ? (
+                      <span
+                        className={cn(
+                          'tabular text-2xs',
+                          slice.apy === null
+                            ? 'text-faint'
+                            : slice.apy > 0
+                              ? 'text-agent'
+                              : 'text-muted',
+                        )}
+                        title={
+                          slice.apy === null
+                            ? 'No rate was found for this position, which is not the same as it earning nothing.'
+                            : slice.apy === 0
+                              ? 'Idle in the vault, earning nothing.'
+                              : `Current rate${slice.apySource ? ` per ${slice.apySource}` : ''}.`
+                        }
+                      >
+                        {slice.apy === null ? '—' : `${(slice.apy * 100).toFixed(2)}% APY`}
+                      </span>
+                    ) : null}
                     {slice.committedTo ? (
                       <Badge
                         tone="agent"
@@ -242,6 +327,14 @@ function build(state: VaultState) {
       // balance. The bigint work is done before the divide.
       share: total > 0n ? Number((value * 10_000n) / total) / 10_000 : 0,
       committedTo: holding.committed_to_venue,
+      // What the receipt token is a claim *on*. `aBasUSDC` is 20,000 USDC
+      // supplied to Aave, and rendering only the receipt symbol makes a
+      // position the agent deliberately opened read as a mystery token —
+      // which is what "the UI does not show protocol positions" looks like
+      // from the outside, even though the balance was on screen all along.
+      // Null means "not known to be a receipt token", so anything without it
+      // still shows as itself.
+      represents: holding.represents ?? null,
       colour: BANDS[index % BANDS.length],
     }
   })

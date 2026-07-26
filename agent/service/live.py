@@ -22,6 +22,8 @@ from curator_schema import (
 )
 
 from ..api.schemas import (
+    PositionYieldResponse,
+    VaultYieldResponse,
     ArchetypeDeployResponse,
     ArchetypeSummary,
     ChatMessage,
@@ -31,6 +33,7 @@ from ..api.schemas import (
     MandateVerificationResponse,
 )
 from ..archetypes import ArchetypeStore, Deployment, generate_mandate, market_context
+from ..chain.aqua_positions import AquaPositionStore
 from ..config import Settings
 from ..loop.cycle import DecisionCycle
 from ..loop.engine import LlmDecisionEngine
@@ -43,6 +46,7 @@ from ..model.extraction import ExtractionError, extract_json_object
 from ..model.openai_compat import ModelUnavailable
 from ..model.prompts.genesis import genesis_messages, genesis_schema
 from ..performance import PerformanceStore, point_from_state, summarize
+from ..yields import compute_vault_yield
 from ..performance.window import window_points
 from .verification import verification_response
 
@@ -80,11 +84,15 @@ class LiveVaultService:
         self._journal = ActionJournal(settings.state_dir)
         self._performance = PerformanceStore(settings.state_dir)
         self._chain = _build_chain_client(settings)
+        # Held as well as passed to the cycle: `/yield` reads the same registry
+        # so the rate on the vault page is the rate the agent decided on, not a
+        # second opinion from a different set of sources.
+        self._registry = get_data_registry()
         self._cycle = DecisionCycle(
             engine=LlmDecisionEngine(
                 build_backend(settings), max_attempts=settings.max_validation_retries
             ),
-            registry=get_data_registry(),
+            registry=self._registry,
             venues=get_venue_registry(),
             vault_client=self._chain,
             mandates=self._mandates,
@@ -93,6 +101,10 @@ class LiveVaultService:
             # The same store the /performance route serves, so the reflection
             # the model reads and the chart a depositor reads are the same data.
             performance=self._performance,
+            # The same store `Web3VaultClient` reads when it builds a
+            # `VaultState`, so a ship recorded by the cycle is on screen at the
+            # next `/state` and available to `dock()` on the next tick.
+            aqua_positions=AquaPositionStore(settings.state_dir),
         )
 
     async def state(self, vault: str) -> VaultState:
@@ -135,6 +147,50 @@ class LiveVaultService:
         except Exception as exc:  # noqa: BLE001 - never turn a good tick into a failure
             log.warning("could not record performance after tick on %s: %s", vault, exc)
         return action
+
+    async def vault_yield(self, vault: str) -> VaultYieldResponse:
+        """Current rate on each holding, from the same sources the agent reads.
+
+        Deliberately uses the *mandate's* granted sources rather than every
+        registered one: a rate the agent is not permitted to consult is not the
+        rate it is acting on, and showing it on the vault page would imply a
+        decision input that does not exist.
+
+        A snapshot failure degrades to "no rates known" rather than a 500 — the
+        holdings and their weights are still worth showing, and `coverage: 0`
+        says plainly that the blend covers nothing.
+        """
+        state = await self._chain.state(vault)
+
+        facts: list = []
+        try:
+            mandate = self._mandates.load(vault)
+            snapshot = await self._registry.snapshot(
+                mandate.permitted_data_sources, mandate.constraints.allowed_assets
+            )
+            facts = list(snapshot.facts)
+        except Exception as exc:  # noqa: BLE001 - a rate is never worth a 500
+            log.warning("could not read yields for %s: %s", vault, exc)
+
+        result = compute_vault_yield(state, facts)
+        return VaultYieldResponse(
+            vault=result.vault,
+            positions=[
+                PositionYieldResponse(
+                    token=p.token,
+                    symbol=p.symbol,
+                    represents=p.represents,
+                    venue=p.venue,
+                    value_in_asset=str(p.value_in_asset),
+                    apy=p.apy,
+                    source=p.source,
+                    fact_id=p.fact_id,
+                )
+                for p in result.positions
+            ],
+            weighted_apy=result.weighted_apy,
+            coverage=result.coverage,
+        )
 
     async def performance(self, vault: str, window: str = "all") -> VaultPerformance:
         points = window_points(self._performance.read(vault), window)

@@ -96,6 +96,38 @@ class FixtureVaultService:
         """A fresh successful cycle, timestamped now."""
         return self._executed(vault, age=timedelta(0), index=0)
 
+    async def vault_yield(self, vault: str):
+        """The same computation live mode runs, over the golden fixtures.
+
+        Not a hand-written response: `compute_vault_yield` is the real function
+        and the fixture state and facts are the real shapes, so a rendering bug
+        Lane E hits here is a bug that would have appeared live. Hand-writing
+        the numbers instead would make fixture mode a demo of itself.
+        """
+        from ..api.schemas import PositionYieldResponse, VaultYieldResponse
+        from ..yields import compute_vault_yield
+
+        state = fixtures.vault_state().model_copy(update={"address": vault})
+        result = compute_vault_yield(state, list(fixtures.market_snapshot().facts))
+        return VaultYieldResponse(
+            vault=result.vault,
+            positions=[
+                PositionYieldResponse(
+                    token=p.token,
+                    symbol=p.symbol,
+                    represents=p.represents,
+                    venue=p.venue,
+                    value_in_asset=str(p.value_in_asset),
+                    apy=p.apy,
+                    source=p.source,
+                    fact_id=p.fact_id,
+                )
+                for p in result.positions
+            ],
+            weighted_apy=result.weighted_apy,
+            coverage=result.coverage,
+        )
+
     async def performance(self, vault: str, window: str = "all") -> VaultPerformance:
         """A synthetic curve, so Lane E can build the chart before real history
         exists.
