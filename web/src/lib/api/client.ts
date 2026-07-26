@@ -54,8 +54,36 @@ export type Sourced<T> = {
 /** Escape hatch for demoing with no backend at all: NEXT_PUBLIC_FIXTURES=1 */
 export const FIXTURES_FORCED = process.env.NEXT_PUBLIC_FIXTURES === '1'
 
-/** Short: a hung backend must not stall a demo. Fixtures render instantly instead. */
-const DEFAULT_TIMEOUT_MS = 4000
+/**
+ * Long enough that a *busy* backend is not mistaken for a *dead* one.
+ *
+ * This was 4000ms, on the reasoning that a hung backend must not stall a demo.
+ * The reasoning is right and the number was wrong, because it was never
+ * measured against the load the browse page actually creates.
+ *
+ * That page renders every vault from the factory and issues one
+ * `GET /vault/{addr}/state` per vault — twelve of them, concurrently, every
+ * `VAULT_STATE_REFETCH_MS` (12s). Each of those reads ~15 `eth_call`s server
+ * side. Timed against the deployed API with all twelve in flight:
+ *
+ *     slowest   3.48s     <- 520ms under the old ceiling
+ *     median    1.72s
+ *     wall      3.56s
+ *
+ * So the old budget cleared the worst case by half a second with nothing else
+ * competing. Anything extra — the browser's own chain reads, a ticker round, a
+ * slower network — pushed the tail over, and headless Chrome confirmed it:
+ * sixteen `net::ERR_ABORTED` on `/state` in a thirty-second session, each one a
+ * panel silently swapping to a golden fixture and back. Twelve seconds later it
+ * would recover, which is what made it read as the API "disconnecting".
+ *
+ * A genuinely dead API does not need this budget: nothing is listening, the
+ * connection is refused in milliseconds, and the fixture renders immediately.
+ * The timeout only ever governs how patient we are with an API that *is*
+ * answering, and there the right answer is "more patient than the slowest
+ * honest response".
+ */
+const DEFAULT_TIMEOUT_MS = 15_000
 
 export class ApiUnavailable extends Error {}
 
