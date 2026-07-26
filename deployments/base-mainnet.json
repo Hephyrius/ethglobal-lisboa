@@ -1,16 +1,32 @@
 {
-  "_comment": "Placeholder. Written for real by contracts/script/Deploy.s.sol with DEPLOY_NETWORK=base-mainnet. It exists before the first deploy because web/src/lib/chain/deployments.ts imports it STATICALLY -- a TypeScript build cannot import a file that is not there, so an absent manifest would fail the build rather than render an undeployed state. Nulls are the documented shape for that state.",
-  "network": "base-mainnet",
+  "_comment": "Written by contracts/script/Deploy.s.sol. Do not hand-edit - re-run the deploy. Every lane reads addresses from here instead of hardcoding them.",
+  "blockNumber": 49128486,
   "chainId": 8453,
-  "rpcUrl": "",
-  "blockNumber": 0,
-  "deployedAt": 0,
   "contracts": {
-    "CuratedVaultImplementation": null,
-    "VaultFactory": null
+    "CuratedVaultImplementation": "0x13581CC414AB8e258bb93918fe108dCa1995928C",
+    "VaultFactory": "0x03eF57ecA740d3e2282afC5Ef8Ee77E307A62E7f"
   },
-  "demoVault": {},
-  "vaults": [],
+  "demoVault": {
+    "address": "0x9bC42304b3Ec3e1561261580b717c5B7059914B4",
+    "agent": "0x75E52146e860d9716E5078cd307Ba62bf7e42b5c",
+    "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "guardian": "0xD82C420F4C5B47C4Ec480DD0BA8f7d7CE7A69bD7",
+    "mandateHash": "0xd00e91f708cf16c2d6e1448f08fe691e0efb134c0247891ff0a886954dc72fcf",
+    "shareDecimals": 18,
+    "symbol": "cUSDC"
+  },
+  "deployedAt": 1785046319,
+  "executeAllowlist": {
+    "targets": [
+      "0x499943E74FB0cE105688beeE8Ef2ABec5D936d31",
+      "0x8fDD04Dbf6111437B44bbca99C28882434e0958f",
+      "0x6fF5693b99212Da76ad316178A184AB56D299b43",
+      "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+      "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "0x4200000000000000000000000000000000000006"
+    ]
+  },
   "external": {
     "Aqua": "0x499943E74FB0cE105688beeE8Ef2ABec5D936d31",
     "ChainlinkEthUsdFeed": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
@@ -21,8 +37,9 @@
     "UniswapUniversalRouter": "0x6fF5693b99212Da76ad316178A184AB56D299b43",
     "WETH": "0x4200000000000000000000000000000000000006"
   },
-  "assets": {},
-  "executeAllowlist": {
-    "targets": []
-  }
+  "network": "base-mainnet",
+  "priceMaxAge": 3600,
+  "vaults": [
+    "0x9bC42304b3Ec3e1561261580b717c5B7059914B4"
+  ]
 }

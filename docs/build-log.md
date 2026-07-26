@@ -5579,3 +5579,75 @@ vault is **invisible to the peer comparison** — it will not appear as a peer a
 will not see itself ranked. That threshold is deliberate (a fork accumulates
 dozens of unfunded vaults that say nothing about strategy), but at demo size it
 silently removes a data source the mandate may have granted.
+
+## Wave 0 — live on Base mainnet
+
+Deployed for real, 2026-07-26. Cost **0.00003188 ETH ($0.06)** against a
+5,881,769-gas estimate — the measured figure in `deploy/mainnet-budget.md` was
+$0.066, so the budget held.
+
+| | Address |
+|---|---|
+| `VaultFactory` | `0x03eF57ecA740d3e2282afC5Ef8Ee77E307A62E7f` |
+| `CuratedVault` implementation | `0x13581CC414AB8e258bb93918fe108dCa1995928C` |
+| Demo vault (cUSDC) | `0x9bC42304b3Ec3e1561261580b717c5B7059914B4` |
+| agent | `0x75E52146e860d9716E5078cd307Ba62bf7e42b5c` |
+| guardian | `0xD82C420F4C5B47C4Ec480DD0BA8f7d7CE7A69bD7` (the funder) |
+| `priceMaxAge` | **3600s — staleness checking ON**, unlike the fork's 0 |
+
+### The check that mattered before spending anything
+
+`Deploy.s.sol` defaults `AGENT_ADDRESS` to `ANVIL_ADDRESS_1`. **`AGENT_ROLE`
+cannot be revoked**, so a vault born with a published test key as its agent can
+only be abandoned. It was set explicitly and echoed before the broadcast rather
+than trusted to a default.
+
+The three accounts were also checked against **twenty** addresses derived from
+the published `test test … junk` mnemonic rather than the three anyone
+remembers — the risk is an account further down the list. All ours.
+
+### Blockscout: `forge verify-contract` reported a false positive
+
+`CuratedVault` verified normally. The factory did not, in two stages, and the
+second is worth writing down.
+
+`verify.sh`'s `--guess-constructor-args` needs an `--rpc-url` it does not pass,
+so that failed first — the script anticipates this and documents the manual
+encoding, which worked.
+
+Then `forge verify-contract` said **"is already verified. Skipping"** — and it
+was wrong. Blockscout had classified the factory as `basic_implementation`
+because its bytecode embeds the CuratedVault address, so the API answered
+`is_verified: null`, `source files: 0`, and served **CuratedVault's source at the
+factory's address**. A judge clicking the factory would have read the wrong
+contract, and every tool in the chain reported success.
+
+`--force` does not get past it, because foundry believes Blockscout. The fix was
+to POST the solc standard JSON input straight to
+`/api/v2/smart-contracts/{addr}/verification/via/standard-input` with
+`autodetect_constructor_args=false`. Now:
+
+| Address | Reported name | Source |
+|---|---|---|
+| `0x03eF…2E7f` | **VaultFactory** | 9,099 chars |
+| `0x1358…928C` | **CuratedVault** | 25,344 chars |
+| `0x9bC4…14B4` | eip1167 clone → resolves to CuratedVault | correct by design |
+
+**The lesson generalises past Blockscout: "already verified" is a claim about a
+lookup, not about the source anyone will read.** Check the artefact, not the
+tool's exit code. The same reasoning caught `requires=("UNISWAP_API_KEY",)`
+earlier today — a declaration is not the branch.
+
+### State verified against the live chain
+
+`VerifyDeployment.s.sol` passes on every claim: code and registration, identity
+and mandate, the role graph frozen on chain, allowlist set equality (7 targets),
+pricing readable, and the Wave 3 surface (`pause` + `redeemInKind` +
+attribution) present. `check-deployment.sh base-mainnet` confirms the deployed
+bytecode is this source — 78 hex chars differ on the factory, which is the
+immutable `implementation` address, exactly as expected.
+
+Note that `check-deployment.sh` takes its network and RPC **positionally**, not
+from the environment. Passing `NETWORK=… RPC_URL=…` runs it silently against
+the fork and compares mainnet addresses to a local chain, which reports a
+mismatch that is not real.
