@@ -307,8 +307,8 @@ function LiquidityNotice({
         <span className="tabular text-ink">
           {liquid} {assetSymbol}
         </span>{' '}
-        in cash — the rest of its value is deployed — so it can redeem{' '}
-        <span className="tabular text-ink">{payable}</span> shares right now. Your claim is intact;
+        in cash, the remainder of its value being deployed, so it can redeem{' '}
+        <span className="tabular text-ink">{payable}</span> shares at present. Your claim is intact;
         only the timing is constrained.
       </p>
       {paused ? (

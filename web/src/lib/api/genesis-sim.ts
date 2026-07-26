@@ -159,6 +159,6 @@ function listPhrase(items: string[]): string {
  * walked through the mandate the same way round.
  */
 export const GENESIS_OPENING =
-  "Describe your strategy. Add the asset universe, data sources and execution venues, as well as any other instructions. Check the mandate draft as you go and we'll workshop it together. When you're finished, click Deploy vault."
+  'Describe your strategy, including the asset universe, data sources and execution venues, together with any further instructions. Review the mandate draft as it assembles and refine it here. Select Deploy vault once it is complete.'
 
 export type { ChatMessage, MandateDraft }

@@ -65,24 +65,24 @@ export function DeployPanel({ draft }: { draft: Partial<MandateT> }) {
 
         {!parsed.success ? (
           <p className="text-2xs leading-relaxed text-faint">
-            Still needed: {missing.join(', ')}. Keep talking to the curator.
+            Still required: {missing.join(', ')}. Continue the conversation to supply them.
           </p>
         ) : (
           <p className="text-2xs leading-relaxed text-muted">
-            Deploying crystallises this mandate at genesis and hands the vault to the agent. You
-            will not be able to change it afterwards.
+            Deployment fixes this mandate at genesis and assigns execution to the agent. It cannot
+            be amended afterwards.
           </p>
         )}
 
         {finalize.isError ? (
           <div className="rounded-lg border border-bad/25 bg-bad/[0.05] px-3 py-2.5">
-            <p className="text-2xs font-medium text-bad">Deploy failed. Nothing was deployed.</p>
+            <p className="text-2xs font-medium text-bad">Deployment failed. No vault was created.</p>
             <p className="mt-1 text-2xs leading-relaxed text-bad/80">
               {finalize.error instanceof Error ? finalize.error.message : 'Unknown error'}
             </p>
             <p className="mt-2 text-2xs leading-relaxed text-muted">
-              The agent API at <span className="font-mono">{API_BASE}</span> has to be running to
-              deploy. We will not invent a vault address for you, but you can{' '}
+              The agent API at <span className="font-mono">{API_BASE}</span> must be running to
+              deploy. No vault address is fabricated in its absence. You may instead{' '}
               <Link
                 href={`/vault/${FIXTURE_VAULT_STATE.address}`}
                 className="text-agent underline-offset-2 hover:underline"

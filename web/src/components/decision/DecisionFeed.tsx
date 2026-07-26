@@ -63,7 +63,7 @@ export function DecisionFeed({
         <Card className="border-dashed px-5 py-10 text-center">
           <p className="text-sm text-muted">The agent has not run a cycle yet.</p>
           <p className="mt-1 text-xs text-faint">
-            Run a tick to have it read its data sources and decide.
+            Run a tick to have it consult its data sources and decide.
           </p>
         </Card>
       ) : (

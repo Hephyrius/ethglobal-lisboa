@@ -21,9 +21,9 @@ export function suggestionsFor(messages: ChatMessage[], draft: Partial<Mandate>)
   // of what a mandate is, so each names an objective *and* a limit.
   if (!draft.objective && !hasSpoken) {
     return [
-      'Earn a steady yield on USDC with as little drawdown as possible. Never hold anything volatile.',
-      'Hold half USDC and half WETH, rebalancing when it drifts. Put the idle half to work.',
-      'Chase the best risk-adjusted return you can find, and tell me when you are taking more risk.',
+      'Earn a steady yield on USDC with minimal drawdown. Hold no volatile assets.',
+      'Hold USDC and WETH in equal weight, rebalancing on drift. Deploy the idle balance into yield.',
+      'Pursue the highest risk-adjusted return available, and report whenever risk is increased.',
     ]
   }
 
@@ -35,7 +35,7 @@ export function suggestionsFor(messages: ChatMessage[], draft: Partial<Mandate>)
   }
 
   if (!draft.permitted_data_sources?.length) {
-    return ['Grant every data source you have.', 'Lending data and prices only, no sentiment.']
+    return ['Grant every available data source.', 'Lending data and prices only, no sentiment.']
   }
 
   if (!draft.permitted_venues?.length) {
@@ -49,6 +49,6 @@ export function suggestionsFor(messages: ChatMessage[], draft: Partial<Mandate>)
   return [
     'Raise the cash floor to 30%.',
     'Tighten the slippage ceiling to 25 bps.',
-    'Explain what this mandate stops you from doing.',
+    'Explain what this mandate prohibits.',
   ]
 }

@@ -89,7 +89,8 @@ export function DeployedVaults() {
           <div>
             <span className="label">Vaults you deployed</span>
             <p className="mt-1 text-2xs text-faint">
-              You asked for these. Holding shares in one is a separate thing, shown above.
+              Vaults deployed from this address. Shares held in a vault are a separate position,
+              shown above.
             </p>
           </div>
           <Badge tone="agent">{vaults.length}</Badge>

@@ -29,7 +29,7 @@ export function MandateDraft({
     <Card>
       <CardHeader
         title={draft.name ?? 'Mandate draft'}
-        subtitle="Crystallised at genesis. After deployment only the agent may amend it. You cannot."
+        subtitle="Fixed at genesis. After deployment, only the agent may amend it."
         right={draft.risk_posture ? <Badge tone="agent">{draft.risk_posture}</Badge> : null}
       />
       <CardBody className="space-y-4">
@@ -39,7 +39,7 @@ export function MandateDraft({
               {draft.objective}
             </p>
           ) : (
-            <Pending>What should this vault try to achieve?</Pending>
+            <Pending>The vault&apos;s stated investment objective.</Pending>
           )}
         </Field>
 
@@ -61,15 +61,15 @@ export function MandateDraft({
         <Field
           label="Data sources granted"
           filled={Boolean(draft.permitted_data_sources?.length)}
-          hint="The agent can only reason about markets it is allowed to see. This list is exhaustive."
+          hint="The agent may consult only the sources granted here. This list is exhaustive."
         >
           <DataSourceGrants
             sources={draft.permitted_data_sources}
-            emptyHint="No sources granted. The agent would be blind."
+            emptyHint="No sources granted. The agent would have no market data."
           />
           {ungranted.length > 0 ? (
             <p className="mt-1.5 text-2xs text-faint">
-              Registered but not granted: {ungranted.join(', ')}. The agent will not see these.
+              Registered but not granted: {ungranted.join(', ')}. The agent has no access to these.
             </p>
           ) : null}
         </Field>

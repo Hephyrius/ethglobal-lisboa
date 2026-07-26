@@ -42,17 +42,19 @@ export function ArchetypeCards() {
       </div>
 
       <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
-        No conversation and no form. Each of these is a set of <em>bounds</em>, not a saved strategy
-        — one click asks the model to write a fresh mandate inside them, checks it against those
-        bounds, and deploys it. Nobody reads it first, which is why a mandate that escapes its
-        envelope is regenerated rather than deployed.{' '}
-        <span className="text-ink">Click the same card twice and you get two different vaults.</span>
+        No conversation and no form. Each of these is a set of <em>bounds</em>, not a saved strategy.
+        One click asks the model to write a fresh mandate inside them, checks it against those
+        bounds, and deploys it. No party reviews it before deployment, which is why a mandate that
+        escapes its envelope is regenerated rather than deployed.{' '}
+        <span className="text-ink">
+          Two selections of the same card produce two different vaults.
+        </span>
       </p>
 
       {!isConnected ? (
         <div className="mt-4 flex flex-wrap items-center gap-3 rounded border border-line bg-raised px-3 py-2.5">
           <span className="text-xs text-muted">
-            Connect a wallet first — the vault is recorded against the address that asked for it.
+            Connect a wallet first. The vault is recorded against the address that asked for it.
           </span>
           <WalletButton />
         </div>
@@ -124,7 +126,7 @@ function ArchetypeTile({
         {/* Required by the schema, and shown for the same reason it is required:
             a menu where every option has only upsides helps nobody choose. */}
         <div className="rounded border border-line bg-raised px-2.5 py-2">
-          <p className="label text-faint">What it gives up</p>
+          <p className="label text-faint">Tradeoff</p>
           <p className="mt-1 text-2xs leading-relaxed text-muted">{archetype.tradeoff}</p>
         </div>
       </div>

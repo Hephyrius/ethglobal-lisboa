@@ -106,7 +106,7 @@ async function describeFailure(response: Response): Promise<string> {
   // before the detail is used, and narrowed to that exact default so a real
   // handler's 404 ("no such archetype") still speaks for itself.
   if (response.status === 404 && (detail === null || detail === 'Not Found')) {
-    return 'The agent API has no archetype deploy route yet — Lane B §B1 has not shipped it.'
+    return 'The agent API has no archetype deploy route yet. Lane B §B1 has not shipped it.'
   }
 
   return detail ?? fallback

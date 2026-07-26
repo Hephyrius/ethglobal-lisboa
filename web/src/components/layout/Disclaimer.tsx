@@ -19,7 +19,7 @@ export function Disclaimer() {
         <span className="hidden sm:inline">
           Unaudited contracts on a local fork, curated by a language model that holds the key.{' '}
         </span>
-        Do not send real money to this.
+        Do not deposit real funds.
       </p>
     </div>
   )

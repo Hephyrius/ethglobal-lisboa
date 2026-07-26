@@ -138,7 +138,7 @@ export default function DocsPage() {
           </li>
         </ul>
         <p className="rounded border border-warn/25 bg-warn/[0.06] px-4 py-3 text-warn">
-          Proof of concept for ETHGlobal Lisbon. Do not send real money to this.
+          Proof of concept for ETHGlobal Lisbon. Do not deposit real funds.
         </p>
       </Section>
 

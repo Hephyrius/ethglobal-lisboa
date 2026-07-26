@@ -119,7 +119,7 @@ export function PerformancePanel({
           )}
           {chartPoints.some((point) => point.marker) ? (
             <p className="mt-1.5 text-2xs text-faint">
-              Ringed points are executed decisions. Click one to jump to the reasoning behind it.
+              Ringed points are executed decisions. Select one to view the reasoning behind it.
             </p>
           ) : null}
         </div>

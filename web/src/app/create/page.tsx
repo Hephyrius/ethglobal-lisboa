@@ -76,7 +76,7 @@ export default function CreatePage() {
         ...next,
         {
           role: 'assistant',
-          content: 'I could not reach the model just now. Say that again and I will retry.',
+          content: 'The model is currently unreachable. Resend that message to retry.',
         },
       ])
       return
@@ -103,7 +103,7 @@ export default function CreatePage() {
         {track === null ? (
           <ol className="mt-5 grid gap-4 sm:grid-cols-2">
             <TrackCard index={1} title={TRACK_TITLES.agent} onSelect={() => setTrack('agent')}>
-              Describe the vault&apos;s objective in plain language. Alesia translates it into an
+              Describe the vault&apos;s objective in plain language. Scipio translates it into an
               operating mandate: hard constraints, permitted data sources, permitted venues.
               Deployment locks the mandate on chain, and the agent executes against it with no
               further instruction.
@@ -115,7 +115,7 @@ export default function CreatePage() {
             >
               Not a template: each archetype is a set of <em>bounds</em>. One click asks the model
               to write a fresh mandate inside them, checks it against those bounds, and deploys.
-              Click the same card twice and you get two genuinely different vaults.
+              Two selections of the same card produce two genuinely different vaults.
             </TrackCard>
           </ol>
         ) : (
@@ -146,7 +146,7 @@ export default function CreatePage() {
             <ul className="mt-1.5 space-y-1 text-xs leading-relaxed text-muted">
               <li>
                 <strong className="text-ink">Asset universe.</strong> Which tokens the vault is
-                allowed to hold at all.
+                permitted to hold.
               </li>
               <li>
                 <strong className="text-ink">Data sources.</strong> What it may consult to form a
@@ -166,15 +166,17 @@ export default function CreatePage() {
             {/* The six are the actual fields of `constraints` on the mandate, so
                 the examples cannot drift from what the schema will accept. */}
             <ul className="mt-1.5 space-y-1 text-xs leading-relaxed text-muted">
-              <li>a cash floor held back in reserve</li>
-              <li>a ceiling on how much may sit in any one position</li>
+              <li>a cash floor held in reserve</li>
+              <li>a ceiling on the share of the book held in any one position</li>
               <li>a slippage limit in basis points</li>
               <li>a cooldown between rebalances</li>
               <li>a cap on actions per cycle</li>
-              <li>the drift band a holding has to breach before it is rebalanced</li>
+              <li>the drift band a holding must breach before it is rebalanced</li>
             </ul>
 
-            <p className="mt-2.5 text-xs leading-relaxed text-muted">Get creative.</p>
+            <p className="mt-2.5 text-xs leading-relaxed text-muted">
+              Any further parameter may be specified in the conversation.
+            </p>
           </section>
 
           {/* The three selection parameters, in the order a mandate is built:
@@ -223,18 +225,18 @@ export default function CreatePage() {
               </li>
               <li>
                 <strong className="text-ink">It is checked against those bounds.</strong> One that
-                escapes them is regenerated, never deployed. Nobody reads it first, so the check is
-                what stands in for review.
+                escapes them is regenerated, never deployed. No party reviews it before deployment,
+                so this check stands in for review.
               </li>
               <li>
                 <strong className="text-ink">It deploys</strong> and is recorded against your
-                address, so it appears under your vaults on the home page straight away.
+                address, so it appears under your vaults on the home page immediately.
               </li>
             </ul>
 
             <p className="mt-2.5 text-xs leading-relaxed text-muted">
-              Two clicks on one card give two different vaults. Once deployed the mandate is locked
-              and only the agent may amend it.
+              Two selections of the same card produce two different vaults. Once deployed the
+              mandate is locked and only the agent may amend it.
             </p>
           </section>
 
