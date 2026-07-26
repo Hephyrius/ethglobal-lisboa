@@ -5346,3 +5346,87 @@ SSH: `vps.py keys` installs an ed25519 key and **stops**. Disabling password aut
 in the same run means a mistake locks the operator out with DigitalOcean's web
 console as the only recovery, so the command is printed to run once a key login
 has actually been seen to work. fail2ban bounds brute force meanwhile.
+
+## Wave 0 — the pre-mainnet integration pass, and the three things it found
+
+Asked for a thorough integrated test before the go-ahead. Every suite was already
+green, so the useful question was not *"do the tests pass"* but *"what is not
+tested"*.
+
+### The tally that started it
+
+Rather than re-run what already passes, the decision journal was tallied by
+venue across every vault the factory has created. Across **51 journalled actions
+on 76 vaults, exactly one had ever executed on chain** — an Aave supply
+(`0x760cf269…`). No executed Uniswap swap, no Aqua ship, no Morpho.
+
+That is not as bad as it sounds: `test_slice_ship` rotates into WETH through
+Uniswap as its own setup, and the 44 Aqua/SwapVM fork tests drive ship, dock and
+a real taker fill against the deployed contracts. Each venue *was* covered.
+**What was covered nowhere was the composition** — one vault taken through all of
+them in sequence — and composition is exactly what a demo does.
+
+`tests/e2e/test_slice_full_cycle.py` is that: create → deposit → Uniswap rotate →
+Aave supply and withdraw → Aqua ship → atomic multi-intent batch → pause →
+redeem → `redeemInKind` → and then the question the whole file exists to ask,
+*does the vault still add up*. Nine legs, each its own test so a failure names
+the leg rather than the cycle. **All nine pass, none skipped.**
+
+### 1. `eth_estimateGas` is short against Aave, and the symptom is alarming
+
+Three legs failed on the first run. All three were the same root cause and none
+was a contract bug: the helper borrowed from `test_slice_read` builds
+transactions without an explicit gas limit, so web3 estimates.
+
+The Aave `withdraw` died `OutOfGas` inside the aToken burn. Worse, a `redeem`
+**had already emitted `Withdraw` and transferred the USDC** and then reverted
+with `ReentrancySentryOOG` while closing the guard — a successful redemption
+undone by a short limit, which on a first read looks exactly like a reentrancy
+bug in our own vault.
+
+The estimator is not wrong so much as unlucky: EIP-150 reserves a sixty-fourth
+of remaining gas at each nested call, and against Aave that is several frames
+deep, so the estimate falls short by roughly what the last storage write needs.
+
+**The agent is not exposed to this** — `vault_client.py` uses a fixed
+`_GAS_LIMIT = 3_000_000` rather than estimating, and unspent gas is refunded so
+the ceiling costs nothing. Worth recording because the fixed limit reads like a
+lazy default and is in fact the right call, and because the next person to write
+a test against Aave will hit this and think they found a reentrancy hole.
+
+### 2. Morpho is advertised and unreachable
+
+`MorphoVenue` exists, has tests, and `GET /venues` reports it available — the
+dApp's venue strip shows it. But the frozen schema pins `SupplyIntent.venue` and
+`WithdrawIntent.venue` to `Literal["aave"]`, and `agent/loop/planning.py` routes
+on `intent.venue`. **There is no intent the model can emit that reaches Morpho.**
+Constructing one raises `ValidationError` at the schema, which is how the test
+found it.
+
+Pinned as a test rather than fixed. `packages/schema/` is frozen after Wave 0,
+and widening a venue literal days before a mainnet deploy is not a unilateral
+call. If Morpho is meant to be reachable that is a Lane F schema change plus a
+routing test; if it is not, `capabilities.py` should stop advertising it.
+`test_04_morpho_is_registered_but_unreachable_from_an_intent` fails the moment
+either happens, which is the point.
+
+### 3. Aqua's XYC is a two-token curve
+
+A one-sided ship is not something the strategy can represent, and the venue says
+so before building calldata. Obvious in hindsight; the test now ships both legs
+and skips with a stated reason if the Uniswap leg has not run to produce the
+WETH.
+
+### What is now proven together
+
+| | |
+|---|---|
+| Contracts | **162 passed, 0 failed, 0 skipped** — including all 9 fork tests, which skip silently without `ANVIL_RPC_URL` in forge's own environment |
+| Aqua / SwapVM against the deployed contracts | **44 passed** — ship, dock, a third-party taker fill moving real ERC-20s, and the vault earning its maker fee |
+| Python suites | **1018 passed, 8 skipped** |
+| `tests/e2e` | **46 passed, 4 skipped** |
+| Full cycle | **9/9**, no skips — Uniswap, Aave, Aqua, batching, pause, both exits |
+
+The invariant that matters most is the last leg: after a round trip through four
+venues, `convertToAssets(shares) <= deposited`. No sequence of agent actions
+mints value.
