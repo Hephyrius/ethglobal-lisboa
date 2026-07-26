@@ -70,7 +70,10 @@ cd "$SCRIPT_DIR/.."
 load_dotenv
 
 RPC="${ANVIL_RPC_URL:-http://127.0.0.1:8540}"
-DEPLOYMENTS="deployments/base-fork.json"
+# Which deployment manifest. `DEPLOYMENTS_FILE` is an exact path; otherwise the
+# network name Deploy.s.sol writes with, so reader and writer cannot disagree.
+NETWORK="${DEPLOY_NETWORK:-base-fork}"
+DEPLOYMENTS="${DEPLOYMENTS_FILE:-deployments/${NETWORK}.json}"
 DRY_RUN=0
 
 # anvil account 0 — the deployer, and therefore the factory owner on a fork deploy.

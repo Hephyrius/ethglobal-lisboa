@@ -5035,3 +5035,50 @@ which would break the whole script on the handoff machine.
 `AGENT_CORS_ORIGINS` moved into `.env` in the same pass. It had been living only in the shell that
 launched uvicorn, so the first restart would have narrowed it to the two defaults in `config.py` and
 the dApp would have reported *"the agent API is unreachable"* from every address but localhost.
+
+## Wave 0 — `base-fork.json` was hardcoded in eight places, which is fine until there are two networks
+
+Preparation for a real Base deployment, and the single largest blocker to it.
+
+`deployments/base-fork.json` appeared as a literal in `agent/api/routes/portfolio.py`,
+`agent/chain/vault_client.py`, `agent/performance/backfill.py` (three times),
+`data/curator_data/sources/peers.py`, `scripts/preflight.sh`, `scripts/expand-universe.sh` and
+`tests/e2e/conftest.py`. Only `venues/addresses.py` honoured an override, via `DEPLOYMENTS_FILE`.
+
+While one network exists that is not a bug — it is a shared constant with a clear owner. The moment
+a second one exists it becomes a **silent** bug, and silent is the operative word: a process pointed
+at Base mainnet would read the fork's factory address, find no bytecode, and report an empty
+portfolio, no vaults and no peers. `/health` stays green on all three seams throughout. Nothing in
+any response distinguishes *"this vault holds nothing"* from *"you are reading a different chain's
+address book"*.
+
+The contract is now two environment variables, and they are ones that already existed rather than
+new ones:
+
+* `DEPLOYMENTS_FILE` — an exact path. Already what `venues/` honoured, so one name keeps one meaning.
+* `DEPLOY_NETWORK` — resolves `deployments/<network>.json`. Deliberately the **same variable
+  `Deploy.s.sol` uses to choose which file to write**, so the reader and the writer cannot disagree
+  about the name. It already had to be set correctly for a real deploy, because it also derives the
+  oracle staleness window.
+
+`agent/deployments.py` implements it for Lane B. `data/` and `venues/` each keep their own copy
+rather than importing it — lanes integrate through the frozen schema and their READMEs, and
+`curator-data` is published to PyPI on its own, so an import across a lane boundary would make that
+package depend on code that is not in it. What is shared is the two variable names.
+
+### Two things found while doing it
+
+**`portfolio.py` was calling FastAPI's `Path`, not `pathlib`'s.** The module imports
+`from fastapi import APIRouter, HTTPException, Path`, so `Path("deployments/base-fork.json")` built a
+FastAPI parameter descriptor and `manifest.is_file()` would have raised `AttributeError`. It never
+fired only because `VAULT_FACTORY_ADDRESS` is set in `.env` and short-circuits the fallback — the
+same variable whose staleness caused #99. A latent 500 waiting for the day someone unsets it.
+
+**Rewriting shell scripts from Python converted them to CRLF**, and `#!/usr/bin/env bash\r` fails
+under WSL with `/usr/bin/env: 'bash\r': No such file or directory`. `.gitattributes` pins `*.sh` to
+`eol=lf` precisely because of this, but that governs what git stores, not what a tool writes to the
+working tree. Both scripts were normalised and re-run.
+
+Verified in all three resolution orders, and `preflight.sh` now reports a missing manifest cleanly
+on a network that has not been deployed yet rather than leaking a `sed: can't read` into the middle
+of a report whose entire job is to be read.

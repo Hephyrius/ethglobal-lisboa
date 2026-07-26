@@ -22,7 +22,12 @@ import httpx
 import pytest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
-DEPLOYMENTS = REPO_ROOT / "deployments" / "base-fork.json"
+#: Same resolution the harness uses, so the suite cannot end up asserting
+#: against a different network than the API is reading.
+DEPLOYMENTS = pathlib.Path(
+    os.getenv("DEPLOYMENTS_FILE")
+    or REPO_ROOT / "deployments" / f"{os.getenv('DEPLOY_NETWORK') or 'base-fork'}.json"
+)
 
 RPC_URL = os.getenv("ANVIL_RPC_URL", "http://127.0.0.1:8540")
 API_URL = os.getenv("NEXT_PUBLIC_API_URL", "http://localhost:8000")

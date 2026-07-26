@@ -49,6 +49,7 @@ import httpx
 from curator_schema import PerformancePoint
 
 from ..config import settings as load_settings
+from ..deployments import deployments_path
 from .store import PerformanceStore
 
 __all__ = ["backfill_vault", "main"]
@@ -149,7 +150,7 @@ async def _fork_block(rpc: _Rpc, head: int) -> int:
     import json
     from pathlib import Path
 
-    manifest = Path("deployments/base-fork.json")
+    manifest = deployments_path()
     if manifest.is_file():
         try:
             number = json.loads(manifest.read_text(encoding="utf-8")).get("blockNumber")
@@ -287,7 +288,7 @@ async def _factory_vaults(rpc_url: str) -> list[str]:
     from pathlib import Path
 
     factory = None
-    manifest = Path("deployments/base-fork.json")
+    manifest = deployments_path()
     if manifest.is_file():
         try:
             data = json.loads(manifest.read_text(encoding="utf-8"))
@@ -326,7 +327,7 @@ def _known_vaults(store: PerformanceStore, rpc_url: str) -> list[str]:
     except Exception as exc:  # noqa: BLE001 - discovery is best-effort
         log.warning("could not read the factory's vault list (%s)", exc)
 
-    manifest = Path("deployments/base-fork.json")
+    manifest = deployments_path()
     if manifest.is_file():
         try:
             data = json.loads(manifest.read_text(encoding="utf-8"))
@@ -364,7 +365,7 @@ def main(argv: list[str] | None = None) -> int:
     vaults = args.vaults or _known_vaults(store, rpc_url)
 
     if not vaults:
-        log.error("no vaults given and none found in deployments/base-fork.json")
+        log.error("no vaults given and none found in %s", deployments_path())
         return 1
 
     written = 0

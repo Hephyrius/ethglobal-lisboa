@@ -39,7 +39,10 @@ OLLAMA_ROOT="$(echo "$OLLAMA" | sed 's#/v1/*$##')"
 API="${NEXT_PUBLIC_API_URL:-http://localhost:8000}"
 WEB="${WEB_URL:-http://localhost:3000}"
 USDC="${USDC_ADDRESS:-0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913}"
-DEPLOYMENTS="deployments/base-fork.json"
+# Which deployment manifest. `DEPLOYMENTS_FILE` is an exact path; otherwise the
+# network name Deploy.s.sol writes with, so reader and writer cannot disagree.
+NETWORK="${DEPLOY_NETWORK:-base-fork}"
+DEPLOYMENTS="${DEPLOYMENTS_FILE:-deployments/${NETWORK}.json}"
 MODEL="${MODEL_NAME:-}"
 QUIET=0
 [ "${1:-}" = "--quiet" ] && QUIET=1
@@ -202,7 +205,11 @@ fi
 # neither role nor gas on the fork. Every execution failed and the whole stack
 # reported healthy. This is failure mode #11 in docs/runbook.md, and it costs
 # nothing to catch here instead.
-EXPECTED_AGENT="$(json_addr agent)"
+# Guarded on the file: json_addr seds it directly, and on a network that has not
+# been deployed yet that prints "sed: can't read ..." into the middle of a report
+# whose whole job is to be read.
+EXPECTED_AGENT=""
+[ -f "$DEPLOYMENTS" ] && EXPECTED_AGENT="$(json_addr agent)"
 if [ -n "$CHAIN" ] && [ -n "$EXPECTED_AGENT" ]; then
   GAS="$(json_str "$(rpc eth_getBalance "[\"$EXPECTED_AGENT\",\"latest\"]")" result)"
   if [ "$GAS" = "0x0" ] || [ -z "$GAS" ]; then

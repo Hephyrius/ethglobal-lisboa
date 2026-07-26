@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Final
 
@@ -336,9 +337,29 @@ class PeerVaultSource(BaseSource):
             await self._rpc.aclose()
 
 
+def _deployments_path() -> Path:
+    """Which deployment manifest to read.
+
+    Deliberately duplicated rather than imported from `agent/` or `venues/`:
+    lanes integrate through the frozen schema and their READMEs, not through
+    each other's internals, and `curator-data` is published to PyPI on its own —
+    an import across a lane boundary would make that package depend on code that
+    is not in it.
+
+    What *is* shared is the contract: `DEPLOYMENTS_FILE` for an exact path, else
+    `deployments/<DEPLOY_NETWORK>.json` using the same variable `Deploy.s.sol`
+    writes with, else the local fork. Three lanes now agree on those two names.
+    """
+    override = os.environ.get("DEPLOYMENTS_FILE")
+    if override:
+        return Path(override)
+    network = os.environ.get("DEPLOY_NETWORK") or "base-fork"
+    return Path("deployments") / f"{network}.json"
+
+
 def _factory_from_manifest() -> str | None:
     """`VaultFactory` from the deployment manifest Lane A publishes."""
-    path = Path("deployments/base-fork.json")
+    path = _deployments_path()
     if not path.is_file():
         return None
     try:

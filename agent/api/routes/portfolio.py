@@ -20,6 +20,7 @@ from fastapi import APIRouter, HTTPException, Path
 from pydantic import BaseModel, Field
 
 from ...portfolio import read_portfolio
+from ...deployments import deployments_path
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
 
@@ -106,7 +107,7 @@ def _factory_address() -> str | None:
     if configured := settings().factory_address:
         return configured
 
-    manifest = Path("deployments/base-fork.json")
+    manifest = deployments_path()
     if not manifest.is_file():
         return None
     try:

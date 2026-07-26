@@ -532,9 +532,9 @@ class Web3VaultClient:
         """
         import json
 
-        from ..config import REPO_ROOT
+        from ..deployments import deployments_path
 
-        path = REPO_ROOT / "deployments" / "base-fork.json"
+        path = deployments_path()
         external = json.loads(path.read_text(encoding="utf-8")).get("external", {})
         address = external.get(mandate.base_asset)
         if not address:
