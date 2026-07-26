@@ -262,3 +262,74 @@ model is live.
    Form.**
 
 Nothing on this list is code.
+
+---
+
+# Re-verification — 2026-07-26, against the running stack
+
+Appended rather than edited, per the append-only rule. Where this disagrees with
+anything above, **this is current.**
+
+## Rows that changed
+
+| Claim above | Now |
+|---|---|
+| 🔴 `POST /genesis/finalize` 500s on every call (#99) | ✅ **Closed.** 14 genesis e2e tests pass against the live stack. |
+| `GET /health` reports the Ollama tag while running Grok (#100) | ✅ **Closed.** Reports `grok:grok-4.20-0309-non-reasoning`. |
+| Rotate the credentials exposed in `env.txt` (#53) | ✅ **Done.** All ten rotated, each confirmed different by SHA-256 and live-tested. |
+| `curator-schema` 0.1.0, `curator-data` 0.2.0, `curator-mcp` 0.2.0 on PyPI | ✅ Still live, now **0.2.0 / 0.4.0 / 0.4.0**. |
+| Uniswap key works | ✅ Re-confirmed post-rotation: 1,000 USDC → 0.531929 WETH, `routing=CLASSIC`, slippage 0.5%. |
+
+## Defects found and fixed today, all of them bounty-visible
+
+1. **Layer 6 rejected every decision on any vault with a large lending position.**
+   `_projected_weights` counted a receipt token as its own exposure while
+   `_current_weights` folded it into the underlying, so a vault 80% supplied to
+   Aave read as an 80% position in `aBasUSDC` against a 60% ceiling — a breach in
+   the *book*, not the trade, and therefore uncurable by any trade. Reached by
+   doing exactly what Wave 2 asked: deploying idle capital. The demo vault was in
+   this state and rejected three attempts per tick.
+
+2. **`min_cash_pct` would have stopped binding** once receipts folded. Split:
+   the ceiling reads exposure, the floor reads *unencumbered* base asset, which
+   is what the frozen schema says it is.
+
+3. **R3 (`slice_decide`) was proving nothing** — it ticked the one vault on the
+   deployment that structurally cannot have a mandate, and every assertion
+   skipped on the missing snapshot. 1 passing → 4.
+
+4. **The rotation unplugged the agent.** `AGENT_PRIVATE_KEY` was swept in with
+   the real secrets, replacing anvil #1 with a key holding neither gas nor
+   `AGENT_ROLE`. Every write failed while `/health` stayed green.
+   `scripts/preflight.sh` now gates on it.
+
+5. **Four README anchors had drifted 60–100 lines** — `execute()` pointed at a
+   revert inside a loop, `holdings()` at a blank line — and the address table
+   named a factory and demo vault from two redeploys ago. Uniswap Track 1
+   requires the README to *"clearly point to the relevant contracts and lines of
+   code"*, so `scripts/check-readme-anchors.sh` now gates it, pairing every
+   anchor with a regex its target line must match.
+
+## Criterion 4, re-derived
+
+| | State |
+|---|---|
+| `scripts/preflight.sh` | 6/6 (+1 expected WSL warning) |
+| Python suites | **1018 passed, 8 skipped** |
+| `tests/e2e` | 33 passed, 8 skipped — no failures |
+| Genesis | green |
+| Live tick, live data, live model | `held` with a correct, mandate-grounded reason |
+| Uniswap Trading API | live quote after rotation |
+
+## Still open, and none of it is code
+
+1. **Flip the repo public.** Six of eight tracks require it, and it is now
+   unblocked — rotation is complete. Run `./scripts/check-secrets.sh --tree`
+   immediately before.
+2. **Record the 2–4 minute video.**
+3. **Submit the Uniswap Developer Feedback Form.**
+4. **Confirm the two Continuity tracks at the booth** — the prizes page states
+   their requirements as identical to the base track, but the label often also
+   implies a commitment to keep building. Ask; do not assume.
+5. **Re-run `./scripts/check-readme-anchors.sh` immediately before submitting.**
+   The anchors have now drifted twice from edits made in other files.
