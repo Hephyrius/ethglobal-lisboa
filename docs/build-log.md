@@ -5719,3 +5719,119 @@ graceful degradation without a signal.** A placeholder symbol, a minimal ABI
 fallback, a default on a failed read — each is the right behaviour in isolation
 and each turns an outage into a plausible answer. `/health` cannot see any of
 them, which is why the useful check is always the artefact, never the status.
+
+---
+
+## Wave 0 — "the API keeps disconnecting", which it never did
+
+Reported symptom: the dApp times out every so often and only recovers on a hard
+refresh. Four hypotheses were tested and three of them were wrong, which is the
+part worth recording.
+
+**It was not the container.** `restarts=0`, no OOM, `FailingStreak: 0`, and the
+healthcheck log clean across every probe. **It was not Caddy losing its
+upstream.** All fifteen `connection refused` entries are timestamped 06:23–07:40
+and correlate exactly with that morning's redeploys; nothing after. The
+container's IP was `172.18.0.3` — the same address Caddy was dialling, so no
+stale-DNS problem either. **It was not the transport.** One TLS connection held
+open and reused across 20s / 35s / 65s / 95s idle gaps returned 200 every time,
+so nothing severs idle connections and there is no server-side keep-alive to
+add.
+
+Two real causes, in different places.
+
+### CORS, for anyone not on the apex domain
+
+The allowlist was exactly `https://scipio.capital,https://www.scipio.capital`.
+Every other origin got a 400 with no `Access-Control-Allow-Origin`:
+
+| Origin | Preflight |
+|---|---|
+| `https://scipio.capital` | 200 |
+| `https://www.scipio.capital` | 200 |
+| `https://scipio-git-main-….vercel.app` | **400** |
+| `http://localhost:3000` | **400** |
+
+A browser turns that into a `TypeError`, which reaches the client as
+`cannot reach agent API at …` — the *fetch rejected* branch, indistinguishable
+from a dead server. So a preview deploy, or anyone running `pnpm dev` against
+production, saw a total outage while the apex domain was perfectly healthy. That
+is why it looked intermittent.
+
+Set to `*`, and the security argument for doing so is that there is nothing to
+protect: no cookie, no session, no auth header. CORS only ever blocks drive-by
+browser attacks that abuse a victim's credentials, and an attacker with `curl`
+already reaches every route regardless of the origin list. Note that Starlette,
+with `allow_credentials=True`, echoes the requesting origin rather than emitting
+a bare `*` — which is better than literal allow-all, since `ACAO: *` alongside
+`ACAC: true` is rejected outright by browsers for credentialed requests.
+
+### The browser stopped asking
+
+`refetchOnWindowFocus: false` plus a 3s health timeout with `retry: false`.
+
+Browsers throttle timers in a backgrounded tab and freeze them after a few
+minutes, so `refetchInterval` stops the moment attention moves to a terminal or
+a recording window. With focus refetching also off, nothing re-runs on return —
+the page holds whatever state it froze in, including a transient fixture
+fallback, and a reload is the only recovery. That is the entire "only comes back
+on a hard refresh" half of the report.
+
+The 3s ceiling was the other half. Measured against the deployed API: 0.24s
+warm, 1.4s typical, **2.11s on the first request over a fresh TLS handshake**.
+Every page load starts cold, so the first health check of a session was the most
+likely to fail — and it fails into a FIXTURES badge over data that is live.
+
+A global `retry: 1` is free on the fixture path, and the reason is the thing to
+remember: `apiFetch` catches everything and resolves with a fallback, so it
+**never rejects and therefore never retries**. The setting only reaches queries
+that genuinely throw — `apiFetchStrict` and the chain reads. `all-vaults` needed
+its own `retry: 2` because it sets `retry: false` locally, which overrides the
+default; that query batches a `name()` per vault, the heaviest eth_call burst
+the browser makes, and one 429 was labelling every vault a generic "Vault".
+
+### The RPC, load-balanced rather than chosen
+
+This supersedes the `PROD_RPC_URL → base-rpc.publicnode.com` decision in the
+entry above. Picking the single best free endpoint is not stable: the same
+endpoint measured 0/15 one morning and 15/15 the next. Free endpoints vary by
+the hour, which is the argument for not depending on any one of them.
+
+Caddy was already on the box, so the balancer costs no new service and no
+application change — a `:8545` site block, unpublished, reachable only from the
+compose network. Round-robin across eight upstreams that each passed 15/15, with
+`unhealthy_status 429 5xx` ejecting one that starts refusing. Through it, 30
+concurrent calls × 3 rounds: 26/30, then 30/30, then 30/30 — the first round
+sheds the weak upstream and the rest are clean.
+
+⚠️ Test these with a real `User-Agent`. A first run returned **403 twenty times
+out of twenty** and looked like a broken proxy config; several public endpoints
+refuse `Python-urllib/3.x`. Same trap as the header note in `ticker.py`.
+
+### A watchdog for the case Docker ignores
+
+`restart: unless-stopped` handles a process that exits. It does nothing for a
+container that is running and wedged: Docker marks it `unhealthy` and then acts
+on that not at all. A systemd timer fills exactly that gap and deliberately
+nothing more.
+
+The guards matter more than the restart. Two consecutive failures before acting,
+because restarting on one slow probe on a 1 vCPU box is what wrecked a recording
+earlier. A 300s cooldown, so a genuinely broken container stays down and visible
+rather than papered over. `/health` only and never a vault route, because the
+most common way this API "fails" is an upstream 429 that leaves the process
+perfectly healthy — restarting cannot fix a rate limit and would only add
+downtime. And the ticker is checked for *gone* but never for *unhealthy*: it
+inherits the API image's probe against a port it does not listen on, so treating
+it as wedged would have restarted it every five minutes forever. It flagged 1/2
+on the first run before that was caught.
+
+Proven rather than assumed: `docker compose stop api` — the one case
+`unless-stopped` deliberately will not recover — and the watchdog brought it
+back healthy in 16s.
+
+**The pattern here is the mirror of the previous entry's.** That one was
+graceful degradation without a signal: the server answering plausibly while
+reading nothing. This one is a signal without degradation — a client that
+correctly detects one bad second and then has no path back to healthy. Both
+present to a viewer as "it's broken" and neither shows up in `/health`.

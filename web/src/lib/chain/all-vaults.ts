@@ -68,7 +68,14 @@ export function useAllVaults() {
     // A browse page is worth re-reading fairly often: a vault deployed in
     // another tab, or by the archetype flow moments ago, should appear.
     staleTime: 15_000,
-    retry: false,
+    // Two attempts, ~800ms apart. This query reads the factory and then batches
+    // a `name()` per vault, so it is the heaviest burst of eth_calls the browser
+    // makes — and it goes to a free public RPC, which answers 429 under exactly
+    // that shape of load. With no retry a single refusal rendered the whole
+    // browse page as generic "Vault" labels, which is the reported symptom and
+    // reads as the names never having been set on chain. They were.
+    retry: 2,
+    retryDelay: 800,
     queryFn: async () => {
       if (!factory) return { supported: false, vaults: [] }
       try {

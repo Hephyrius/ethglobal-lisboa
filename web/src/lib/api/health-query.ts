@@ -28,14 +28,30 @@ export function useAgentHealth() {
   const query = useQuery({
     queryKey: ['agent-health'],
     enabled: !FIXTURES_FORCED,
-    retry: false,
+    // Two retries, ~1s apart. This query decides the badge for the whole page,
+    // so a single unlucky poll must not be able to relabel a healthy stack.
+    retry: 2,
+    retryDelay: 1000,
     refetchInterval: 30_000,
+    // Keep polling while the tab is backgrounded. Every other query can wait
+    // for focus; this one is what tells the badge the stack came back, and a
+    // demo left running on a second monitor should not need to be touched.
+    refetchIntervalInBackground: true,
     staleTime: 20_000,
     queryFn: () =>
       apiFetchStrict({
         path: routes.health(),
         schema: schemas.health.response,
-        timeoutMs: 3000,
+        // ⚠️ Not 3000. Measured against the deployed API from a laptop:
+        // 0.24s on a warm connection, 1.4s typical, **2.11s on the first
+        // request over a fresh TLS handshake**. A 3s ceiling left roughly
+        // 900ms of headroom on a cold connection, and every page load starts
+        // with one — so the first health check of a session was the most
+        // likely to fail, and it fails into a FIXTURES badge over data that
+        // is in fact live. The route itself touches no chain and no model;
+        // when it is genuinely down it refuses in milliseconds, so a longer
+        // ceiling costs nothing on the failure path.
+        timeoutMs: 10_000,
       }),
   })
 

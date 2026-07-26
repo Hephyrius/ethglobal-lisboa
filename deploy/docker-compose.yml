@@ -125,6 +125,12 @@ services:
       # find out.
       TICKER_MIN_AGENT_ETH: ${TICKER_MIN_AGENT_ETH:-0.0004}
     command: ["python", "/srv/deploy/ticker.py"]
+    # Inherited from the API image, which probes its own :8000. The ticker runs
+    # no server, so the probe always fails and `docker compose ps` reports a
+    # healthy loop as unhealthy — a misleading signal at exactly the moment
+    # someone is checking whether the stack is fine.
+    healthcheck:
+      disable: true
     mem_limit: 128m
     cpus: 0.2
 

@@ -17,12 +17,118 @@ api.scipio.capital {
 	# Access-Control-Allow-Origin produces two headers on one response, which
 	# every browser rejects outright — a stricter failure than having none.
 	reverse_proxy api:8000 {
+		# ⚠️ Ride out an API restart instead of failing the request.
+		#
+		# `docker compose up -d` recreates the container, and for 10-20s there is
+		# no upstream. Caddy's default is to give up immediately, which reaches
+		# the browser as `TypeError: Failed to fetch` — a network-level error, not
+		# an HTTP status, so the dApp cannot show anything useful and it reads as
+		# the whole backend being down. This happened during a recording.
+		#
+		# 45s of retrying turns a redeploy into a pause rather than a failure.
+		# It cannot mask a real outage: past the window the request still fails.
+		lb_try_duration 45s
+		lb_try_interval 500ms
+
 		# A tick pays a model round trip plus live subgraph queries and can run
 		# well past a minute. Caddy's default would cut a slow-but-working tick
 		# and surface it to the dApp as a 502, which reads as a crashed backend.
 		transport http {
 			response_header_timeout 300s
 			read_timeout 300s
+		}
+	}
+}
+
+# ─────────────────────────────────────────────────────────────────────────
+# Internal JSON-RPC load balancer — http://caddy:8545
+# ─────────────────────────────────────────────────────────────────────────
+#
+# **Not published.** No `ports:` entry maps 8545, so this listens only on the
+# compose network and is reachable from the API and ticker containers and from
+# nowhere else. Set `ANVIL_RPC_URL: http://caddy:8545` to use it.
+#
+# ## Why this exists
+#
+# We have no keyed RPC — every endpoint available is a free public one with a
+# rate limit. A single `GET /vault/{addr}/state` fires ~15 concurrent eth_calls;
+# the ticker does that across 11 vaults in a round, and the dApp polls on top.
+# Pointed at one endpoint that is exactly the shape of traffic that earns a 429:
+#
+#     aiohttp.client_exceptions.ClientResponseError: 429, message='Too Many
+#     Requests', url='https://base-rpc.publicnode.com'
+#
+# And it does not present as a rate limit. `vault_client` degrades a failed
+# `symbol()` to a truncated-address placeholder and a failed read to a default,
+# so the API answers 200 with plausible zeros while the dApp reports the backend
+# unreachable. The process stays healthy throughout, which is why no restart —
+# and no watchdog — can help. The fix has to be fewer requests per endpoint.
+#
+# Round-robin across five spreads each burst five ways, and `unhealthy_status`
+# takes an endpoint that starts refusing out of rotation for `fail_duration`
+# rather than continuing to send it a fifth of everything.
+#
+# ## What this does not do
+#
+# **It does not retry a 429 on another upstream.** `lb_try_duration` retries
+# when Caddy cannot *get* a response; a 429 is a perfectly successful round trip
+# and is passed through. So the first refusal from a given endpoint still
+# reaches the caller — what changes is that the endpoint is then marked down and
+# the next request goes elsewhere. Sustained failure becomes one error instead
+# of all of them.
+#
+# **Only root-path endpoints are listed.** A `reverse_proxy` upstream address
+# cannot carry a path, so 1rpc.io/base and blockpi's /v1/rpc/public cannot go in
+# this list without a per-upstream rewrite, which would defeat the balancing.
+#
+# ## The membership is measured, not assumed
+#
+# Every candidate was burst-tested from this droplet at 15 concurrent
+# eth_blockNumber — the load one vault read actually produces. Only 15/15 got in:
+#
+#     base-rpc.publicnode.com          15/15  ✅
+#     base.drpc.org                    15/15  ✅
+#     mainnet.base.org                 15/15  ✅
+#     base.gateway.tenderly.co         15/15  ✅
+#     base-mainnet.public.blastapi.io  15/15  ✅
+#     base.rpc.thirdweb.com            15/15  ✅
+#     base-pokt.nodies.app             15/15  ✅
+#     base.lava.build                  15/15  ✅
+#     base.meowrpc.com                  1/15  ✗ 429 on the other fourteen
+#     base.llamarpc.com                 0/15  ✗ Cloudflare 521, origin down
+#     public.stackup.sh/...             0/15  ✗ unreachable
+#
+# Note mainnet.base.org, which measured 0/15 in an earlier round and 15/15 in
+# this one. Free endpoints vary by the hour, and that is the argument for the
+# whole block: no single one of these can be trusted, eight together can.
+#
+# ⚠️ Test with a real User-Agent or the results are meaningless. Several of
+# these answer **403** to `Python-urllib/3.x` — a first run of this exact test
+# returned 403 twenty times out of twenty and looked like a broken proxy config.
+# Same trap as the header note in ticker.py; web3/aiohttp send their own UA, so
+# it affects hand-rolled probes only.
+:8545 {
+	reverse_proxy https://base-rpc.publicnode.com https://base.drpc.org https://mainnet.base.org https://base.gateway.tenderly.co https://base-mainnet.public.blastapi.io https://base.rpc.thirdweb.com https://base-pokt.nodies.app https://base.lava.build {
+		lb_policy round_robin
+		lb_try_duration 15s
+		lb_try_interval 250ms
+
+		# Passive health only — no active probe. An active check would add its own
+		# request rate against the very limits this block exists to stay under.
+		fail_duration 60s
+		max_fails 2
+		unhealthy_status 429 5xx
+		unhealthy_latency 20s
+
+		# Both are required and for different reasons: SNI comes from the upstream
+		# address automatically, but the Host header would otherwise be forwarded
+		# as `caddy:8545`, which these endpoints reject or misroute.
+		header_up Host {http.reverse_proxy.upstream.hostport}
+
+		transport http {
+			tls
+			dial_timeout 5s
+			response_header_timeout 30s
 		}
 	}
 }
