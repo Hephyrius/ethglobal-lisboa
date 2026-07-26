@@ -98,6 +98,36 @@ services:
     mem_limit: 600m
     cpus: 0.8
 
+  # Ticks every curated vault on a timer so the decision feed has history by
+  # demo time. Same image as the API — it needs no dependency the API lacks, and
+  # a second image to build on a 1 vCPU box for a 150-line loop is not a trade
+  # worth making. Talks to the API over the compose network, so nothing is
+  # exposed and no credential lives in this service.
+  ticker:
+    build:
+      context: ./src
+      dockerfile: deploy/Dockerfile.api
+    image: scipio-api:local
+    restart: unless-stopped
+    logging: *logging
+    depends_on: [api]
+    env_file: [.env]
+    environment:
+      TICKER_API: http://api:8000
+      ANVIL_RPC_URL: ${PROD_RPC_URL:-https://base-rpc.publicnode.com}
+      # Under the shipped conservative preset's 7200s cooldown. Polling faster
+      # than the cooldown does not produce more decisions, it produces more
+      # REJECTIONS — noise in the judge-facing feed that reads like failure.
+      TICKER_INTERVAL_SECONDS: ${TICKER_INTERVAL_SECONDS:-1800}
+      TICKER_AGENT_ADDRESS: ${TICKER_AGENT_ADDRESS:-0x75E52146e860d9716E5078cd307Ba62bf7e42b5c}
+      # Stops permanently below this. An agent that runs dry keeps /health green
+      # and fails only at the broadcast, which is the worst possible time to
+      # find out.
+      TICKER_MIN_AGENT_ETH: ${TICKER_MIN_AGENT_ETH:-0.0004}
+    command: ["python", "/srv/deploy/ticker.py"]
+    mem_limit: 128m
+    cpus: 0.2
+
   caddy:
     image: caddy:2.8-alpine
     restart: unless-stopped

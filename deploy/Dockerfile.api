@@ -63,6 +63,9 @@ COPY deployments/ deployments/
 # degrades to a minimal bundled fallback — the API starts and answers /health,
 # then 500s on any call reaching a function the fallback lacks.
 COPY contracts/abis/ contracts/abis/
+# The periodic ticker runs from this same image (see the ticker service in
+# docker-compose.yml) -- one image, one build, on a 1 vCPU box.
+COPY deploy/ticker.py deploy/ticker.py
 
 RUN uv sync --frozen --extra agent --extra venues --extra data
 
