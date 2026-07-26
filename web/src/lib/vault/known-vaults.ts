@@ -5,6 +5,7 @@ import type { Mandate as MandateT } from '@curator/schema'
 import { FIXTURE_VAULT_STATE } from '@/lib/api/fixtures'
 import { deployedVaults } from '@/lib/chain/deployments'
 import { useAllVaults } from '@/lib/chain/all-vaults'
+import { isCuratedVault } from '@/lib/chain/deployments'
 import { getStoredMandate, listLocalVaults } from '@/lib/mandate/store'
 
 export type VaultOrigin = 'local' | 'deployed' | 'onchain' | 'sample'
@@ -78,6 +79,10 @@ export function useKnownVaults(): { vaults: KnownVault[]; ready: boolean } {
     // which is every vault from genesis and every one-click archetype.
     const chain: KnownVault[] = (onchain.data?.vaults ?? [])
       .filter((address) => !known.has(address.toLowerCase()))
+      // `vaults()` includes the deploy script's mandate-less vault. Filtered
+      // here as well as in `deployedVaults()`, because the chain returns it
+      // whether or not the manifest lists it.
+      .filter((address) => isCuratedVault(address))
       .map((address) => ({
         address,
         name: 'Vault',

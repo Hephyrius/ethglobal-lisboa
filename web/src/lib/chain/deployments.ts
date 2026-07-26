@@ -78,6 +78,31 @@ export const KNOWN_TOKENS: Record<string, string | undefined> =
     ? deployments.assets
     : { USDC: deployments.external?.USDC, WETH: deployments.external?.WETH }
 
+/**
+ * The vault `Deploy.s.sol` creates, which is **not a curated vault** and must
+ * not be listed as one.
+ *
+ * Mandates are written only by `POST /genesis/finalize` and the archetype
+ * route, so this one has none — `GET /vault/{addr}/mandate` returns 404 and
+ * every tick against it fails with *"no mandate stored"*. Its on-chain
+ * `mandateHash` matches no mandate that exists anywhere, so one cannot be
+ * supplied after the fact either. `tests/e2e/test_slice_wave2.py` says the same
+ * thing from the other side: it is a deployment smoke test.
+ *
+ * Listing it is worse than cosmetic. It renders as a vault a visitor can
+ * deposit into, and a deposit there is real money in something that can never
+ * act on it.
+ */
+export function demoVaultAddress(): `0x${string}` | null {
+  return asAddress(deployments.demoVault?.address)
+}
+
+/** Whether an address is a vault a curator actually runs. */
+export function isCuratedVault(address: string): boolean {
+  const demo = demoVaultAddress()
+  return !demo || demo.toLowerCase() !== address.toLowerCase()
+}
+
 export function vaultFactoryAddress(): `0x${string}` | null {
   return asAddress(deployments.contracts?.VaultFactory)
 }
@@ -90,6 +115,8 @@ export function deployedVaults(): Array<{ address: `0x${string}`; name?: string 
   return raw.flatMap((entry) => {
     const address = asAddress(typeof entry === 'string' ? entry : entry.address)
     if (!address) return []
+    // The deploy script's own vault has no mandate and cannot be curated.
+    if (!isCuratedVault(address)) return []
 
     const named = typeof entry === 'string' ? undefined : entry.name
     // `vaults` is a bare address list, but the deploy script also records the

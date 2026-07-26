@@ -8,54 +8,59 @@ import { Card } from '@/components/ui/Card'
 import { FIXTURE_VAULT_STATE } from '@/lib/api/fixtures'
 import { useVaultState } from '@/lib/api/vault-queries'
 import { useVaultYield } from '@/lib/api/yield-queries'
-import { deployedVaults } from '@/lib/chain/deployments'
-import { listLocalVaults } from '@/lib/mandate/store'
+import { useKnownVaults } from '@/lib/vault/known-vaults'
 import { formatAmount, formatPercent, shortAddress, shortHash } from '@/lib/format/units'
 import { relativeTime } from '@/lib/format/time'
 
 type Entry = {
   address: string
   name: string
-  origin: 'local' | 'deployed' | 'sample'
+  origin: 'local' | 'deployed' | 'onchain' | 'sample'
   createdAt?: string
   mandateHash?: string
 }
 
 /**
- * Vaults this browser knows about, from three places:
+ * Vaults this browser knows about, from four places:
  *   - created here (localStorage — see lib/mandate/store.ts)
- *   - deployed by Lane A (deployments/base-fork.json)
+ *   - recorded in the deployment manifest
+ *   - **everything else the factory created**, read from `vaults()` on chain
  *   - the golden fixture, so the app is explorable before anything is deployed
+ *
+ * The third one used to be missing, and the gap was visible in production: this
+ * list read only the manifest, which records what `Deploy.s.sol` wrote. Genesis
+ * and one-click archetypes both mint through the factory *without* touching
+ * that file, so every vault a user actually created was invisible here while
+ * appearing correctly in the explorer — which reads `useKnownVaults`. Two lists
+ * of the same thing disagreeing is worse than either being wrong.
+ *
+ * `useKnownVaults` is now the single source, so there is one merge order and
+ * one place the mandate-less deploy-script vault is filtered out.
  *
  * The sample entry is labelled as a sample. It is a way in, not a claim that a
  * vault exists.
  */
 export function VaultList() {
   const [entries, setEntries] = useState<Entry[]>([])
+  const { vaults, ready } = useKnownVaults()
 
-  // localStorage is client-only, so the list is read after mount. Rendering it
-  // during SSR would produce a hydration mismatch.
+  // Recomputed when the chain read resolves. `ready` distinguishes "no vaults"
+  // from "not loaded yet", which matters because the sample entry below is
+  // shown only in the first case — rendering it during the load would flash a
+  // fixture at someone who owns real vaults.
   useEffect(() => {
-    const local: Entry[] = listLocalVaults().map((vault) => ({
+    if (!ready) return
+
+    const known: Entry[] = vaults.map((vault) => ({
       address: vault.address,
       name: vault.name,
-      origin: 'local',
+      origin: vault.origin,
       createdAt: vault.createdAt,
       mandateHash: vault.mandateHash,
     }))
 
-    const known = new Set(local.map((entry) => entry.address.toLowerCase()))
-
-    const deployed: Entry[] = deployedVaults()
-      .filter((vault) => !known.has(vault.address.toLowerCase()))
-      .map((vault) => ({
-        address: vault.address,
-        name: vault.name ?? 'Deployed vault',
-        origin: 'deployed',
-      }))
-
     const sample: Entry[] =
-      local.length > 0 || deployed.length > 0
+      known.length > 0
         ? []
         : [
             {
@@ -66,8 +71,8 @@ export function VaultList() {
             },
           ]
 
-    setEntries([...local, ...deployed, ...sample])
-  }, [])
+    setEntries([...known, ...sample])
+  }, [vaults, ready])
 
   if (entries.length === 0) {
     return (
