@@ -1,0 +1,75 @@
+# The agent API.
+#
+# Build from the REPO ROOT, not from this directory:
+#
+#     docker build -f deploy/Dockerfile.api -t scipio-api .
+#
+# The build context has to be the root because this is a uv workspace: the API
+# imports `curator_schema` and `curator_data` from `packages/schema/python` and
+# `data/`, which are workspace members resolved from source, not wheels from an
+# index. A context of `deploy/` cannot see them and the build fails at import
+# time rather than at copy time, which is a slower way to learn the same thing.
+
+FROM python:3.12-slim AS base
+
+# uv rather than pip: the lockfile is `uv.lock` and it is what pins every
+# transitive dependency. Installing from pyproject with pip would resolve fresh
+# versions at build time, which is the exact supply-chain exposure the JS side
+# of this repo has an audit script to prevent — see web/scripts/audit-dependency-age.mjs.
+COPY --from=ghcr.io/astral-sh/uv:0.5.11 /uv /usr/local/bin/uv
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PROJECT_ENVIRONMENT=/opt/venv
+
+WORKDIR /srv
+
+# ── dependencies, cached separately from source ───────────────────────────
+# Only the manifests are copied first, so editing a Python file does not
+# reinstall web3 and its compiled dependencies. Each workspace member needs its
+# own pyproject present or `uv sync` cannot resolve the workspace at all.
+COPY pyproject.toml uv.lock ./
+COPY packages/schema/python/pyproject.toml packages/schema/python/
+COPY data/pyproject.toml data/
+COPY data/curator_mcp/pyproject.toml data/curator_mcp/
+
+# --no-install-project: the root package is the application itself and its
+# source is not here yet. --frozen: fail if uv.lock disagrees with pyproject
+# rather than silently resolving something new inside an image nobody will read.
+RUN uv sync --frozen --no-install-project --extra agent --extra venues --extra data
+
+# ── application source ────────────────────────────────────────────────────
+COPY packages/ packages/
+COPY data/ data/
+COPY agent/ agent/
+COPY venues/ venues/
+COPY deployments/ deployments/
+
+RUN uv sync --frozen --extra agent --extra venues --extra data
+
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Mandates, the decision journal, performance history and every open Aqua
+# position live here. Mount a volume over it — see docker-compose.yml. Aqua can
+# confirm a strategy hash you already hold but offers no way to enumerate a
+# maker's positions, so a lost record is a position that can never be displayed
+# or closed. This is not a cache.
+ENV AGENT_STATE_DIR=/var/lib/scipio/state
+RUN mkdir -p /var/lib/scipio/state
+
+EXPOSE 8000
+
+# `mode` is checked, not just `status`. A fixture-mode API answers every request
+# and validates every response over invented data, so a healthcheck that only
+# looked for HTTP 200 would report a stack serving fiction as healthy.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD python -c "import sys,urllib.request,json; \
+b=json.load(urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=4)); \
+sys.exit(0 if b.get('status')=='ok' and b.get('mode')=='live' else 1)"
+
+# No --reload. It watches the filesystem, doubles memory, and restarts the
+# process on a file event, which on a machine that also runs a deploy is a
+# restart in the middle of a tick.
+CMD ["uvicorn", "agent.api.app:app", "--host", "0.0.0.0", "--port", "8000"]

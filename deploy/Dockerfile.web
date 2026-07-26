@@ -1,0 +1,80 @@
+# The dApp.
+#
+# Build from the REPO ROOT:
+#
+#     docker build -f deploy/Dockerfile.web -t scipio-web \
+#       --build-arg NEXT_PUBLIC_API_URL=https://api.scipio.capital \
+#       --build-arg NEXT_PUBLIC_CHAIN_ID=8453 \
+#       --build-arg DEPLOY_NETWORK=base-mainnet .
+#
+# ⚠️ THE BUILD ARGS ARE NOT OPTIONAL AND CANNOT BE FIXED AT RUN TIME.
+#
+# `NEXT_PUBLIC_*` are inlined into the JavaScript bundle by `next build`. Setting
+# them in the container's environment afterwards does nothing at all — the old
+# values are already compiled in, and the symptom is a deployed site quietly
+# talking to `http://localhost:8000`, which fails only in the visitor's browser
+# and never in any log you own.
+#
+# `DEPLOY_NETWORK` is the same variable the Python side and `Deploy.s.sol` use.
+# Here it selects which `deployments/<network>.json` gets compiled in, because
+# that import is static and resolved at build time too.
+
+FROM node:20.13-slim AS builder
+
+# pnpm from corepack rather than npm install -g: the version is pinned by
+# `packageManager` in package.json and corepack honours it, so the image cannot
+# drift to a pnpm that resolves the tree differently.
+RUN corepack enable && corepack prepare pnpm@9.5.0 --activate
+
+WORKDIR /srv
+
+# Manifests first so a source edit does not re-resolve the tree. .npmrc matters
+# as much as the lockfile here: it carries `resolution-mode=time-based` and
+# `ignore-scripts=true`, which are the two settings keeping transitive
+# dependencies inside the vetted window and postinstall hooks from running.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+COPY web/package.json web/
+COPY packages/schema/ts/package.json packages/schema/ts/
+
+RUN pnpm install --frozen-lockfile
+
+COPY packages/ packages/
+COPY web/ web/
+# Imported directly by web/src/lib/chain/deployments.ts, from above the web
+# directory. Without it the build fails on a module resolution error that reads
+# like a webpack misconfiguration.
+COPY deployments/ deployments/
+
+ARG NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_CHAIN_ID=8453
+ARG NEXT_PUBLIC_WALLETCONNECT_ID
+ARG DEPLOY_NETWORK=base-fork
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL \
+    NEXT_PUBLIC_CHAIN_ID=$NEXT_PUBLIC_CHAIN_ID \
+    NEXT_PUBLIC_WALLETCONNECT_ID=$NEXT_PUBLIC_WALLETCONNECT_ID \
+    NEXT_PUBLIC_DEPLOY_NETWORK=$DEPLOY_NETWORK \
+    NEXT_TELEMETRY_DISABLED=1
+
+# Fails the build rather than shipping a bundle pointed at localhost. This is
+# the single most expensive mistake available here and it has no runtime symptom
+# on the server side.
+RUN test -n "$NEXT_PUBLIC_API_URL" || \
+    (echo "NEXT_PUBLIC_API_URL is empty — the bundle would be built against localhost" >&2; exit 1)
+
+RUN pnpm --filter @curator/web build
+
+# ── runtime ───────────────────────────────────────────────────────────────
+# The whole builder is carried over rather than a standalone trace. `output:
+# 'standalone'` would produce a much smaller image, but it lives in
+# web/next.config.mjs — an actively edited file in another lane's directory —
+# and a deploy is not worth a merge conflict during a hackathon. Revisit after
+# the freeze.
+FROM node:20.13-slim
+RUN corepack enable && corepack prepare pnpm@9.5.0 --activate
+WORKDIR /srv
+COPY --from=builder /srv /srv
+ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD node -e "require('http').get('http://127.0.0.1:3000/',r=>process.exit(r.statusCode<400?0:1)).on('error',()=>process.exit(1))"
+CMD ["pnpm", "--filter", "@curator/web", "start"]

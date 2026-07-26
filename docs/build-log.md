@@ -5082,3 +5082,72 @@ working tree. Both scripts were normalised and re-run.
 Verified in all three resolution orders, and `preflight.sh` now reports a missing manifest cleanly
 on a network that has not been deployed yet rather than leaking a `sed: can't read` into the middle
 of a report whose entire job is to be read.
+
+## Wave 0 — deploying to scipio.capital: real Base, one box, and what a container cannot be told twice
+
+The operator's call: **real Base mainnet**, small size, with the API and dApp on
+one VPS behind Caddy. `deploy/` holds the whole thing.
+
+### Real mainnet changes one thing that had never been exercised
+
+On `base-fork`, `priceMaxAge` is 0 and staleness checking is **off**. On any real network it is
+3600s, and `totalAssets()` *reverts* when a feed for a held token is older than that — which means
+nobody can deposit and nobody can withdraw. That path had never run.
+
+It turns out `Deploy.s.sol` already closes it: `_assertConfiguredAddressesAreLive(priceMaxAge)` calls
+every configured feed at the exact window it is about to freeze, so a stale feed fails the *deploy*
+rather than producing a bricked vault. Confirmed against live Base anyway rather than trusting the
+guard: the ETH/USD feed `0x71041ddd…` had updated 820s earlier against its 1200s heartbeat. Healthy,
+with room. Recorded because it is the number to re-check before deploying, not a fact that stays
+true.
+
+### Two variables that cannot be corrected after the fact
+
+Most misconfiguration is a restart away from fixed. Two here are not, and both are called out in the
+files themselves because a comment at the point of failure is worth more than a paragraph in a doc:
+
+**`NEXT_PUBLIC_*` are inlined by `next build`.** Setting them in the container's environment
+afterwards does nothing — the old values are already in the bundle. The failure is a deployed site
+quietly calling `http://localhost:8000`, which breaks only in a visitor's browser and appears in no
+log the operator owns. So they are `ARG`s in `Dockerfile.web`, the build *fails* if
+`NEXT_PUBLIC_API_URL` is empty, and `deploy/README.md` says `--build` is not optional on redeploy.
+
+**`AGENT_ROLE` cannot be revoked.** A vault deployed with the wrong agent key can only be abandoned.
+`Deploy.s.sol` already refuses anvil keys on a real network for this reason; the runbook adds the
+funding step, because an unfunded agent is the failure this repo has already had — healthy stack,
+correct reasoning, six layers passed, and only the broadcast failing with `-32003`.
+
+### The web manifest import is static, so the network is a build-time choice
+
+The Python side resolves `deployments/<network>.json` at runtime through `DEPLOY_NETWORK`. The dApp
+cannot: `import` specifiers are resolved by the bundler, so a computed path has no runtime at which
+to be computed. Both manifests are imported and one is selected on
+`NEXT_PUBLIC_DEPLOY_NETWORK` — a few kilobytes of JSON for a selection that is visible in the source.
+
+That required committing a null-filled `deployments/base-mainnet.json` *before* the deploy, because
+a TypeScript build cannot import a file that does not exist. That is not a new convention: the
+existing docstring already says the manifest "ships as a shape with nulls in it until Lane A's first
+deploy lands", and the UI already survives that state.
+
+An unrecognised network falls back to the fork here, which is deliberately the **opposite** of
+`Deploy.s.sol`, where an unrecognised `DEPLOY_NETWORK` is treated as a real network so a typo fails
+safe. There, failing safe means assuming production and applying the strict oracle window. Here the
+only consequence is which addresses render, and a dApp that refuses to build over a typo is worse
+than one showing an undeployed state.
+
+### What is verified and what is not
+
+Verified: the mainnet-targeted production build (`NEXT_PUBLIC_DEPLOY_NETWORK=base-mainnet`, 8 routes,
+209 kB worst-case first load), `pnpm typecheck`, `uv sync --frozen` against the image's extras, every
+path both Dockerfiles `COPY`, and that the compose file parses to the three expected services.
+
+**Not verified: the images themselves.** There is no Docker on the build machine — not in Windows,
+not in either WSL distro — so neither `docker build` nor `docker compose config` has ever run. The
+first `--build` on the VPS is the first time these Dockerfiles execute. They are written from the
+lockfiles and the paths, both checked, but that is not the same as a green build and should not be
+read as one.
+
+`.dockerignore` exists mostly for size — the build context is the repo root for both images — but the
+first block is about secrets. Neither Dockerfile copies `.env`, but a `COPY` added later would, and
+**a credential baked into an image layer survives every later deletion**: the layer is still there
+and still pullable. Same class of mistake as `env.txt`.

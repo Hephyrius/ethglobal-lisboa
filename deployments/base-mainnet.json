@@ -1,0 +1,28 @@
+{
+  "_comment": "Placeholder. Written for real by contracts/script/Deploy.s.sol with DEPLOY_NETWORK=base-mainnet. It exists before the first deploy because web/src/lib/chain/deployments.ts imports it STATICALLY -- a TypeScript build cannot import a file that is not there, so an absent manifest would fail the build rather than render an undeployed state. Nulls are the documented shape for that state.",
+  "network": "base-mainnet",
+  "chainId": 8453,
+  "rpcUrl": "",
+  "blockNumber": 0,
+  "deployedAt": 0,
+  "contracts": {
+    "CuratedVaultImplementation": null,
+    "VaultFactory": null
+  },
+  "demoVault": {},
+  "vaults": [],
+  "external": {
+    "Aqua": "0x499943E74FB0cE105688beeE8Ef2ABec5D936d31",
+    "ChainlinkEthUsdFeed": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+    "Permit2": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+    "SwapVM": "0x8fDD04Dbf6111437B44bbca99C28882434e0958f",
+    "USDC": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "UniswapSwapRouter02": "0x2626664c2603336E57B271c5C0b26F421741e481",
+    "UniswapUniversalRouter": "0x6fF5693b99212Da76ad316178A184AB56D299b43",
+    "WETH": "0x4200000000000000000000000000000000000006"
+  },
+  "assets": {},
+  "executeAllowlist": {
+    "targets": []
+  }
+}

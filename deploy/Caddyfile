@@ -1,0 +1,38 @@
+# scipio.capital
+#
+# Caddy obtains and renews certificates for both hostnames automatically over
+# ACME. That needs two things to already be true before the container starts:
+# ports 80 and 443 reachable from the internet, and A records for BOTH names
+# resolving to this box. Caddy retries, but a failed issuance counts against
+# Let's Encrypt's limit of five per hostname per hour, so point DNS first.
+
+scipio.capital, www.scipio.capital {
+	encode gzip zstd
+	reverse_proxy web:3000
+}
+
+api.scipio.capital {
+	encode gzip zstd
+
+	# CORS is answered by the API, not here. FastAPI's CORSMiddleware is what
+	# reads AGENT_CORS_ORIGINS, and a second layer adding its own
+	# Access-Control-Allow-Origin produces two headers on one response, which
+	# every browser rejects outright — a stricter failure than having none.
+	reverse_proxy api:8000 {
+		# A tick pays a model round trip plus live subgraph queries. Caddy's
+		# default read timeout would cut a slow-but-working tick and surface it
+		# to the dApp as a 502, which reads as a crashed backend.
+		transport http {
+			response_header_timeout 300s
+			read_timeout 300s
+		}
+	}
+}
+
+# Anything else resolving here gets a flat refusal rather than the site. Without
+# this, the first hostname block becomes the default and scipio.capital answers
+# on any name someone points at this IP — which is how a demo ends up indexed
+# under a domain nobody controls.
+:80, :443 {
+	respond "Not found" 404
+}

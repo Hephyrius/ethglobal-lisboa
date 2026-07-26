@@ -1,0 +1,87 @@
+# scipio.capital — the whole stack on one box.
+#
+#     docker compose -f deploy/docker-compose.yml up -d --build
+#
+# Run it from the REPO ROOT. Both build contexts are `..` relative to this file,
+# because the API is a uv workspace and the dApp imports `deployments/` from
+# above its own directory; neither can build from inside `deploy/`.
+#
+# There is no anvil service. The chain is real Base — see deploy/README.md.
+
+name: scipio
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.api
+    restart: unless-stopped
+    # One .env for dev and deploy, on the operator's instruction. `override=False`
+    # in agent/config.py means a variable set here in `environment:` beats a stale
+    # line in the file, which is what makes the overrides below reliable.
+    env_file:
+      - ../.env
+    environment:
+      # ── the five that MUST differ from a laptop ──────────────────────────
+      # Named here rather than left to .env because each one fails silently in
+      # its own way if it carries a dev value into production.
+      AGENT_MODE: live
+      DEPLOY_NETWORK: ${DEPLOY_NETWORK:-base-mainnet}
+      # Despite the name, most of the harness reads ANVIL_RPC_URL as "the chain
+      # to talk to". Left at :8540 while BASE_RPC_URL is real, the agent reads
+      # one chain and writes another.
+      ANVIL_RPC_URL: ${BASE_RPC_URL:?BASE_RPC_URL must be set — an archive-capable Base endpoint}
+      AGENT_STATE_DIR: /var/lib/scipio/state
+      # Exact origins, scheme and port included. A missing one returns 400 on the
+      # preflight and the dApp then reports "the agent API is unreachable",
+      # which reads as a dead backend when the backend is fine.
+      AGENT_CORS_ORIGINS: https://scipio.capital,https://www.scipio.capital
+    volumes:
+      # NOT a cache. Mandates cannot be recovered (only the hash is on chain) and
+      # an open Aqua position cannot be recovered at all — Aqua confirms a
+      # strategy hash you already hold but cannot enumerate a maker's positions.
+      # Losing this directory loses positions that can never be closed.
+      - agent-state:/var/lib/scipio/state
+      # Read-only: the manifest is written by `forge script` on the operator's
+      # machine and committed. A container must never be the thing that edits it.
+      - ../deployments:/srv/deployments:ro
+    expose:
+      - "8000"
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.web
+      args:
+        # Build args, not environment. NEXT_PUBLIC_* are compiled into the
+        # bundle; changing them needs a rebuild, and `docker compose up -d`
+        # without --build will happily reuse an image built against localhost.
+        NEXT_PUBLIC_API_URL: https://api.scipio.capital
+        NEXT_PUBLIC_CHAIN_ID: ${NEXT_PUBLIC_CHAIN_ID:-8453}
+        NEXT_PUBLIC_WALLETCONNECT_ID: ${NEXT_PUBLIC_WALLETCONNECT_ID:-}
+        DEPLOY_NETWORK: ${DEPLOY_NETWORK:-base-mainnet}
+    restart: unless-stopped
+    depends_on:
+      - api
+    expose:
+      - "3000"
+
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates and the ACME account key. Losing this volume means
+      # re-issuing on every restart, and Let's Encrypt rate-limits that to five
+      # failures per hostname per hour — enough to take the site down for the
+      # length of a demo.
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  agent-state:
+  caddy-data:
+  caddy-config:

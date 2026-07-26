@@ -1,0 +1,53 @@
+# The build context is the repo root for both images, so without this every
+# `docker build` uploads .venv and node_modules — hundreds of megabytes, most of
+# it platform-specific binaries that would be wrong inside a Linux image anyway.
+
+# Secrets. Neither Dockerfile copies these, but a COPY added later would, and a
+# credential baked into an image layer survives every later deletion — the layer
+# is still there and still pullable. This is the same class of mistake as
+# `env.txt`, which reached a push through `git add -A`.
+.env
+.env.*
+*.env.txt
+env.txt
+Example.env
+
+# Virtualenvs and node_modules are rebuilt inside the image from the lockfiles.
+# Copying a Windows or macOS .venv in would shadow the Linux one uv creates.
+.venv
+**/node_modules
+**/__pycache__
+**/*.pyc
+
+# Build output and caches
+.next
+**/.next
+**/.next-build
+dist
+.ruff_cache
+.pytest_cache
+.mypy_cache
+
+# Local runtime state. `.agent-state` is a laptop's journal and mandates —
+# baking it into the image would ship one machine's vault history to the server
+# and then be shadowed by the volume mount anyway.
+.agent-state
+.logs
+.run
+broadcast
+cache
+out
+
+# Version control and tooling
+.git
+.github
+.claude
+
+# Foundry build artifacts. `contracts/` is not copied into either image at all —
+# the chain is deployed to from an operator's machine, never from a container.
+contracts/out
+contracts/cache
+contracts/lib
+venues/aqua/solidity/out
+venues/aqua/solidity/cache
+venues/aqua/solidity/lib

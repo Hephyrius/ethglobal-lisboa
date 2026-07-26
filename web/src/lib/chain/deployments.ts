@@ -1,7 +1,8 @@
-import deploymentsJson from '../../../../deployments/base-fork.json'
+import forkJson from '../../../../deployments/base-fork.json'
+import mainnetJson from '../../../../deployments/base-mainnet.json'
 
 /**
- * Addresses come from `deployments/base-fork.json`, which Lane A's deploy
+ * Addresses come from `deployments/<network>.json`, which Lane A's deploy
  * script overwrites — never from a constant in this lane. When Lane A deploys,
  * this app picks the addresses up with no code change, which is the whole point
  * of that file existing.
@@ -9,6 +10,19 @@ import deploymentsJson from '../../../../deployments/base-fork.json'
  * Every field is nullable because the file ships as a shape with nulls in it
  * until Lane A's first deploy lands. The UI has to survive that state, so
  * nothing here throws on a missing address.
+ *
+ * ## Why both files are imported rather than one path being computed
+ *
+ * `import` is static. Bundlers resolve the specifier at build time, so
+ * `../../../../deployments/${network}.json` cannot work — there is no runtime
+ * at which the choice could be made, and the Python side's `DEPLOYMENTS_FILE`
+ * has no equivalent here. Both are imported and one is selected instead, which
+ * costs a few kilobytes of JSON and keeps the selection honest.
+ *
+ * `NEXT_PUBLIC_DEPLOY_NETWORK` is read the same way as every other
+ * `NEXT_PUBLIC_*`: **inlined at build time.** Changing the target network needs
+ * a rebuild, not a restart. `deploy/Dockerfile.web` passes it as a build arg for
+ * exactly that reason.
  */
 
 type Deployments = {
@@ -29,7 +43,21 @@ type Deployments = {
   executeAllowlist?: { targets?: string[] }
 }
 
-const deployments = deploymentsJson as unknown as Deployments
+/**
+ * Which manifest this build targets. Defaults to the fork, so a plain
+ * `pnpm dev` behaves exactly as it always has and nobody has to set anything to
+ * work locally.
+ *
+ * An unrecognised value falls back to the fork rather than throwing. That is the
+ * opposite of `Deploy.s.sol`, where an unrecognised `DEPLOY_NETWORK` is treated
+ * as a real network so a typo fails *safe* — there, failing safe means "assume
+ * production and apply the strict oracle window". Here the only consequence is
+ * which addresses render, and a dApp that refuses to build over a typo in an
+ * env var is worse than one showing an undeployed state.
+ */
+const deployments = (
+  process.env.NEXT_PUBLIC_DEPLOY_NETWORK === 'base-mainnet' ? mainnetJson : forkJson
+) as unknown as Deployments
 
 export const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? deployments.chainId ?? 8453)
 
