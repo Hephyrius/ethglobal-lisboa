@@ -8,7 +8,7 @@ import { Card } from '@/components/ui/Card'
 import { FIXTURE_VAULT_STATE } from '@/lib/api/fixtures'
 import { useVaultState } from '@/lib/api/vault-queries'
 import { useVaultYield } from '@/lib/api/yield-queries'
-import { useKnownVaults } from '@/lib/vault/known-vaults'
+import { SHOW_SAMPLE, useKnownVaults } from '@/lib/vault/known-vaults'
 import { formatAmount, formatPercent, shortAddress, shortHash } from '@/lib/format/units'
 import { relativeTime } from '@/lib/format/time'
 
@@ -59,8 +59,19 @@ export function VaultList() {
       mandateHash: vault.mandateHash,
     }))
 
+    // ⚠️ Never on a network holding real money — the same rule, and the same
+    // reason, as the guard in `known-vaults.ts`. This is a *second* copy of the
+    // placeholder, and fixing only the one in the hook left the mock address
+    // still being fetched in production: `/vault/0x1111…1111/state` and
+    // `/yield` against an API that has never heard of it.
+    //
+    // The deeper hazard is not the wasted request. A listing here renders with
+    // the same card and the same deposit form as a real vault, and a visitor
+    // cannot tell which is which. On a fork that is a useful way in before
+    // anything is deployed; on mainnet it is a fabricated listing next to ones
+    // holding actual USDC.
     const sample: Entry[] =
-      known.length > 0
+      !SHOW_SAMPLE || known.length > 0
         ? []
         : [
             {

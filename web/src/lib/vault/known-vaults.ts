@@ -11,8 +11,13 @@ import { getStoredMandate, listLocalVaults } from '@/lib/mandate/store'
 /**
  * Whether the placeholder listing may ever be shown. Off on any real network —
  * see the guards where `sample` is built.
+ *
+ * Exported because the placeholder exists in **two** places: here and in
+ * `VaultList`. Fixing only this one left the mock address still being fetched
+ * in production, so they now share the single rule rather than agreeing by
+ * coincidence.
  */
-const SHOW_SAMPLE = process.env.NEXT_PUBLIC_DEPLOY_NETWORK !== 'base-mainnet'
+export const SHOW_SAMPLE = process.env.NEXT_PUBLIC_DEPLOY_NETWORK !== 'base-mainnet'
 
 export type VaultOrigin = 'local' | 'deployed' | 'onchain' | 'sample'
 
