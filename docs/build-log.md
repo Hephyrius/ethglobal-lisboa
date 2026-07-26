@@ -5151,3 +5151,74 @@ read as one.
 first block is about secrets. Neither Dockerfile copies `.env`, but a `COPY` added later would, and
 **a credential baked into an image layer survives every later deletion**: the layer is still there
 and still pullable. Same class of mistake as `env.txt`.
+
+## Wave 0 — the droplet is 961 MiB, which decides the deployment architecture
+
+The DigitalOcean box turned out to be **1 vCPU, 961 MiB RAM, 24 GB disk, and no swap**. That number
+is not a detail to work around; it settles two design questions on its own.
+
+### Nothing is built on the box
+
+`next build` peaks well above a gigabyte. With the 4 GB swapfile it would probably finish — in
+something like fifteen minutes of thrashing on a single core, while the live site competes for the
+same CPU. So `.github/workflows/deploy-images.yml` builds both images on a GitHub runner and pushes
+them to GHCR, and the droplet only ever pulls. A pull is about thirty seconds and costs the running
+stack nothing.
+
+That constraint produced the better answer anyway. Updating is now `scripts/vps.py deploy`, there is
+no source checkout on the box to drift from `main`, and no toolchain on an internet-facing host that
+holds real keys. `deploy/docker-compose.prod.yml` is the compose file with the `build:` sections
+removed, and it is one of exactly three files the droplet holds.
+
+The action versions are pinned exactly, for the same reason `web/package.json` pins every dependency
+exactly: a floating tag is a standing instruction to run whatever was published last night, on a
+runner holding a token that can write to our package registry.
+
+### 4 GB of swap, and swappiness 20 rather than 1
+
+With no swap, the kernel's only response to a memory spike is the OOM killer, which picks by badness
+score — on this stack, the Python process holding the agent loop, mid-tick. The container restarts
+and looks healthy afterwards, so the symptom is *"a tick occasionally vanished"*, which is close to
+unfindable.
+
+The swappiness value is the part worth writing down, because the usual server advice is wrong here:
+
+* **60** (the default) evicts anonymous pages eagerly. On a box whose working set nearly fills RAM
+  that means paging out live process memory to make room for page cache, and the cost lands on
+  request latency.
+* **1** is what most server guides recommend, and on this box it would mean a memory spike hits the
+  OOM killer *instead of* using the 4 GB we just created. It defeats the swapfile.
+* **20** leans toward keeping the working set resident while still using swap under real pressure.
+
+4 GB rather than the conventional 2× RAM: the multiplier is a rule for swap that absorbs idle pages,
+and this also has to absorb a spike several times the size of RAM.
+
+### Two limits that exist because the disk is small and shared
+
+Docker's default `json-file` driver is **unbounded**, and `systemd-journald` defaults to 10% of the
+filesystem — 2.4 GB here — reclaiming only when it gets there. Between them an idle box can spend
+several gigabytes of a 24 GB disk on logging, and the failure mode of a full disk is that Docker
+cannot write layers and Caddy cannot write certificates *at the same time*. Both are capped, in
+`/etc/docker/daemon.json` and a journald drop-in, and again in the compose file so a container
+started outside it still rotates.
+
+`update.sh` prunes images but deliberately never runs `system prune --volumes`: that would delete
+`agent-state`, and with it every open Aqua position — records that cannot be rebuilt from chain,
+because Aqua can confirm a strategy hash you already hold but cannot enumerate a maker's positions.
+
+### `up -d` is not evidence, so update.sh verifies
+
+`docker compose up -d` returns when containers are *created*. A container that starts and instantly
+crashes satisfies it; so does one whose image is fine and whose config is wrong. `update.sh` polls
+`/health` for up to two minutes and checks `"mode":"live"` specifically — a fixture-mode API answers
+every request and validates every response over invented data, so a 200 proves nothing. It also
+records the running image digests *before* pulling, because once `latest` moves, the digest that was
+working is not otherwise recoverable from the box.
+
+### SSH: a key is installed, the password is not yet disabled
+
+`vps.py keys` generates an ed25519 key and installs it, and then stops. Turning off password
+authentication in the same run means a mistake locks the operator out entirely, with DigitalOcean's
+web console as the only recovery. The command is printed to run once a key login has actually been
+seen to work. Until then `fail2ban` bounds brute force on a public IPv4 that started seeing
+credential stuffing within minutes of first boot.
