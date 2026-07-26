@@ -409,6 +409,66 @@ else
 fi
 rm -f "$DEPLOYMENTS.targets.tmp"
 
+# ── Publish the asset symbols too ─────────────────────────────────────────────────────────────────
+#
+# `executeAllowlist.targets` is addresses only, and `external` carries just USDC and WETH from the
+# deploy. So everything registered above — cbBTC, DAI, AERO, both aTokens, the 4626 share — existed
+# on chain with no symbol recorded anywhere a reader could find it. The dApp's asset-universe panel
+# consequently listed two assets out of eight, and looked like the feature had never been built.
+# That is the same failure mode this script's own comments describe for the Aave venue: an omission
+# is indistinguishable from the thing not existing.
+#
+# So the symbols this script already knows are written back as `assets`. A dedicated block rather
+# than folding into `external`, because everything in `assets` is by definition a token the factory
+# can value — no consumer has to guess which entries are tokens and which are routers.
+
+echo "Publishing asset symbols in $DEPLOYMENTS…"
+
+# USDC and WETH come from the deploy, not from this script's tables, so they are read back out of
+# `external` rather than assumed. Reading them keeps the block honest if Lane A ever redeploys
+# against different addresses.
+manifest_addr() {
+  sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\(0x[0-9a-fA-F]\{40\}\)\".*/\1/p" "$DEPLOYMENTS" | head -1
+}
+BASE_USDC="$(manifest_addr USDC)"
+BASE_WETH="$(manifest_addr WETH)"
+
+{
+  [ -n "$BASE_USDC" ] && printf 'USDC %s\n' "$BASE_USDC"
+  [ -n "$BASE_WETH" ] && printf 'WETH %s\n' "$BASE_WETH"
+  echo "$VALUATIONS" | awk 'NF >= 2 { print $1, $2 }'
+  echo "$ERC4626_VALUATIONS" | awk 'NF >= 2 { print $1, $2 }'
+} | awk 'NF == 2 && !seen[$1]++' > "$DEPLOYMENTS.assets.tmp"
+
+# Replaces any existing `assets` block rather than appending, so re-running stays idempotent.
+awk -v listfile="$DEPLOYMENTS.assets.tmp" '
+  /^  "assets": \{/ { skip = 1; next }
+  skip && /^  \},?$/ { skip = 0; next }
+  skip { next }
+  /^  "chainId":/ && !done {
+    print "  \"assets\": {"
+    n = 0
+    while ((getline line < listfile) > 0) { rows[n++] = line }
+    close(listfile)
+    for (i = 0; i < n; i++) {
+      split(rows[i], f, " ")
+      printf "    \"%s\": \"%s\"%s\n", f[1], f[2], (i < n - 1 ? "," : "")
+    }
+    print "  },"
+    done = 1
+  }
+  { print }
+' "$DEPLOYMENTS" > "$DEPLOYMENTS.tmp2"
+
+if grep -q '"VaultFactory"' "$DEPLOYMENTS.tmp2" && grep -q '"assets"' "$DEPLOYMENTS.tmp2"; then
+  mv "$DEPLOYMENTS.tmp2" "$DEPLOYMENTS"
+  echo "  $(wc -l < "$DEPLOYMENTS.assets.tmp" | tr -d ' ') asset symbol(s) published"
+else
+  echo "  refused to write an asset block that lost VaultFactory — left as-is" >&2
+  rm -f "$DEPLOYMENTS.tmp2"
+fi
+rm -f "$DEPLOYMENTS.assets.tmp"
+
 echo
 echo "Done. The factory now carries $COUNT default target(s)."
 echo "Existing vaults are UNCHANGED by design — create a new vault to use the wider universe."

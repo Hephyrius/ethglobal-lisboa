@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { ScipioMark } from '@/components/brand/ScipioMark'
 import { WalletButton } from '@/components/wallet/WalletButton'
 import { networkLabel } from '@/lib/chain/explorer'
 import { useAgentHealth } from '@/lib/api/health-query'
@@ -76,9 +77,5 @@ function NavLink({
 }
 
 function Mark() {
-  return (
-    <span className="flex h-6 w-6 items-center justify-center rounded-sm bg-agent font-serif text-xs font-semibold text-white">
-      S
-    </span>
-  )
+  return <ScipioMark />
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type { ChatMessage } from '@/lib/api/genesis-sim'
+import { ScipioMark } from '@/components/brand/ScipioMark'
 import { Button, Spinner } from '@/components/ui/Button'
 import { cn } from '@/lib/cn'
 
@@ -114,16 +115,16 @@ function Message({ message }: { message: ChatMessage }) {
 
   return (
     <div className={cn('flex gap-3', isUser && 'flex-row-reverse')}>
-      <div
-        className={cn(
-          'mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-sm text-2xs font-medium',
-          isUser
-            ? 'border border-line-bright bg-raised text-muted'
-            : 'bg-agent font-serif font-semibold text-white',
-        )}
-      >
-        {isUser ? 'You' : 'S'}
-      </div>
+      {/* The curator gets the mark; the depositor stays a text chip. Giving both
+          sides an avatar would flatten the one distinction this transcript has
+          to keep obvious — which turns are the agent's own words. */}
+      {isUser ? (
+        <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-sm border border-line-bright bg-raised text-2xs font-medium text-muted">
+          You
+        </div>
+      ) : (
+        <ScipioMark className="mt-0.5" />
+      )}
       <div
         className={cn(
           'min-w-0 max-w-[88%] break-words rounded-xl px-3.5 py-2.5 text-sm leading-relaxed sm:max-w-[85%]',

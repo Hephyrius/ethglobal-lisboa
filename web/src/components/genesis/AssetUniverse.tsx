@@ -69,7 +69,26 @@ const NOTES: Record<string, string> = {
   WETH: 'Wrapped ether. The main volatile leg on Base.',
   USDT: 'Dollar stablecoin.',
   DAI: 'Dollar stablecoin, collateral backed.',
+  cbBTC: 'Coinbase wrapped bitcoin. The BTC leg, priced by its own Chainlink feed.',
+  AERO: "Aerodrome's token, the main DEX on Base. The most volatile thing here.",
+  // The receipt tokens are the ones a reader is most likely to mistake for a
+  // separate exposure, so both say plainly what they are a claim on.
+  aBasUSDC:
+    'Aave receipt for supplied USDC — not a second exposure. A 1:1 claim, valued by the USDC feed, and what earns the lending yield.',
+  aBasWETH: 'Aave receipt for supplied WETH. Same 1:1 claim, valued by the ETH feed.',
+  gtUSDCp:
+    'Gauntlet USDC Prime, an ERC-4626 share. Valued by composing its share price with the USDC feed rather than by a feed of its own.',
 }
+
+/**
+ * Case-folded once here rather than at each lookup. The keys above are written
+ * the way the tokens spell themselves — `cbBTC`, `aBasUSDC`, `gtUSDCp` — and a
+ * bare `NOTES[symbol.toUpperCase()]` silently misses every one of them, so the
+ * mixed-case assets rendered as bare symbols with no explanation. Only the
+ * already-uppercase entries worked, which is exactly the kind of half-working
+ * that survives review.
+ */
+const NOTE_BY_SYMBOL = new Map(Object.entries(NOTES).map(([k, v]) => [k.toUpperCase(), v]))
 
 export function AssetUniverse() {
   if (AVAILABLE.length === 0) return null
@@ -94,9 +113,9 @@ export function AssetUniverse() {
               <TokenMark symbol={symbol} size="md" />
               <span className="text-sm font-medium text-ink">{symbol}</span>
             </div>
-            {NOTES[symbol.toUpperCase()] ? (
+            {NOTE_BY_SYMBOL.get(symbol.toUpperCase()) ? (
               <p className="mt-2 text-2xs leading-relaxed text-muted">
-                {NOTES[symbol.toUpperCase()]}
+                {NOTE_BY_SYMBOL.get(symbol.toUpperCase())}
               </p>
             ) : null}
           </li>

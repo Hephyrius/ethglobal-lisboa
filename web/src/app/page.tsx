@@ -23,10 +23,10 @@ export default function HomePage() {
               Scipio: <span className="whitespace-nowrap">Agent-Curated</span> Vaults
             </h1>
             <p className="mt-5 max-w-2xl text-[0.95rem] leading-relaxed text-muted">
-              Scipio reads live markets, forms a thesis, and signs its own transactions out of an
-              ERC-4626 vault. After genesis, no one intervenes, including you. What replaces control
-              is visibility: the data it consulted, the reasoning it produced, and the transaction it
-              sent, all in the open.
+              Build and deploy your Scipio Agent Curated Vault. It reads live markets, forms a
+              thesis, and signs its own transactions out of an ERC-4626 vault. After genesis, no one
+              intervenes, including you. What replaces control is visibility: the data it consulted,
+              the reasoning it produced, and the transaction it sent, all in the open.
             </p>
 
             <div className="mt-8 flex flex-wrap items-center gap-4">
