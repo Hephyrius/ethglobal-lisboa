@@ -5222,3 +5222,87 @@ authentication in the same run means a mistake locks the operator out entirely, 
 web console as the only recovery. The command is printed to run once a key login has actually been
 seen to work. Until then `fail2ban` bounds brute force on a public IPv4 that started seeing
 credential stuffing within minutes of first boot.
+
+## Wave 0 — the deployment, corrected twice by the people who own the decision
+
+Three revisions in one session, each of which made the design simpler:
+
+1. Real Base mainnet, one VPS, Caddy — the operator's call.
+2. **No CI.** Build on the box instead of GitHub Actions → GHCR → pull.
+3. **The dApp goes to Vercel.**
+
+(3) is what made (2) reasonable. The argument for CI was entirely `next build`,
+which peaks well above this droplet's 961 MiB. Move the dApp to Vercel and the
+constraint disappears: what is left is a Python image with no compiler in it,
+and that builds on the box in a couple of minutes. Measured after a real deploy:
+**508 MiB of 961 resident, 18 MiB of swap touched.**
+
+So the registry, the workflow, the GHCR visibility question and the
+`read:packages` PAT all went away, and the deploy loop became one command that
+needs no third party at all. `Dockerfile.web`, `docker-compose.prod.yml` and
+`.github/` are deleted.
+
+`vps.py sync` uploads the **working tree**, not `git archive` of HEAD. A deploy
+that silently shipped the last commit rather than what the operator is looking
+at is the worst kind of wrong, and on a hackathon timeline the gap between those
+two is usually where the fix is. It ships one tarball rather than file-by-file
+SFTP — the tree is ~1,500 files and each `put` is a round trip — from an
+allowlist of paths rather than an exclude list, because a forgotten exclusion is
+silent and just makes every deploy slow.
+
+### Three failures found by deploying, not by reasoning
+
+**`update.sh` probed the API from the host and got connection-refused.** The
+container is `expose:`d, not published — reachable only through Caddy and the
+compose network, which is the point. The API was perfectly healthy and the
+deploy reported failure. Both probes now run *inside* the container, using
+`python` rather than `curl` because `python:3.12-slim` has neither curl nor wget
+and adding an apt layer to every build to run a health check is a bad trade.
+
+**The CORS gate earned itself on its first run.** Compose interpolates
+`${AGENT_CORS_ORIGINS:-https://scipio.capital}` against the `.env` sitting beside
+it — and that is the *laptop's* `.env`, which sets `AGENT_CORS_ORIGINS` to
+localhost and WSL bridge addresses. The `:-` default therefore never fired, and
+the deployed API silently inherited a dev CORS policy permitting nothing the real
+site is served from. Preflight from `https://scipio.capital` returned 400.
+
+This is the failure mode worth remembering: a rejected origin means the dApp
+falls back to reading the chain and reports *"the agent API is unreachable"* —
+which reads as a dead backend while `/health` is green on all three seams. The
+fix is a variable name the dev `.env` never sets (`PROD_CORS_ORIGINS`), so the
+default in the compose file is the value that actually applies.
+
+**A build failure caught before it ran.** `data/` and `data/curator_mcp/` both
+declare `readme = "README.md"`. The dependency-cache layer copies only the
+pyproject files, and `--no-install-project` skips *only the root* — uv would
+still build the workspace members and fail on `Readme file does not exist`, from
+inside a layer whose purpose is third-party dependencies. `--no-install-workspace`
+is the correct flag; the members install from the second sync, once their source
+is present.
+
+### What the droplet got
+
+1 vCPU, 961 MiB, 24 GB, **no swap**. `provision-droplet.sh` is idempotent and
+sized against those numbers rather than a generic checklist. The reasoning for
+each value is in the script; the one worth repeating is swappiness.
+
+With no swap, the kernel's only answer to a memory spike is the OOM killer,
+which picks by badness score — here, the Python process holding the agent loop,
+mid-tick. The container restarts and looks healthy afterwards, so the symptom is
+*"a tick occasionally vanished"*, which is close to unfindable. 4 GB of swap
+fixes that. But **swappiness 1, which most server guides recommend, would undo
+it**: it tells the kernel to reclaim page cache almost exclusively, so a spike
+hits the OOM killer instead of the swap we just created. 60 (the default) pages
+out a working set that nearly fills RAM. 20 is the value that matches this box.
+
+Docker's `json-file` driver and journald are both unbounded by default and can
+between them spend gigabytes of a 24 GB disk on logs; a full disk stops Docker
+writing layers and Caddy writing certificates at the same moment. Both capped.
+
+`update.sh` prunes images and build cache but never volumes — `agent-state`
+holds Aqua positions that cannot be rebuilt from chain.
+
+SSH: `vps.py keys` installs an ed25519 key and **stops**. Disabling password auth
+in the same run means a mistake locks the operator out with DigitalOcean's web
+console as the only recovery, so the command is printed to run once a key login
+has actually been seen to work. fail2ban bounds brute force meanwhile.

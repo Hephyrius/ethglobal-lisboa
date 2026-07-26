@@ -6,8 +6,9 @@
     provision   install and tune (idempotent — safe to re-run)
     keys        install an SSH key so password auth can be retired
     push-env    copy .env to /srv/scipio/.env  (0600, never committed anywhere)
-    bootstrap   place compose file, Caddyfile and update.sh on the box
-    deploy      pull the newest images and restart
+    sync        upload the working tree (what deploy builds from)
+    bootstrap   place the compose file, Caddyfile and update.sh on the box
+    deploy      sync + build + restart + verify  (the everyday command)
     logs        tail the stack
     exec "..."  run an arbitrary command
 
@@ -177,6 +178,79 @@ def cmd_push_env(client) -> int:
                        "| tr -d '=' | tr '\\n' ' ' && echo")
 
 
+#: What Dockerfile.api actually needs. An allowlist rather than an exclude list:
+#: the repo carries .venv, node_modules, .git and a Foundry `out/` — hundreds of
+#: megabytes the build must not receive — and a forgotten exclusion is silent,
+#: it just makes every sync slow.
+#:
+#: `web` is NOT here. The dApp is built and served by Vercel; uploading it would
+#: put a Next.js tree on a 961 MiB box for nothing.
+SYNC_PATHS = (
+    "pyproject.toml", "uv.lock", ".dockerignore",
+    "agent", "venues", "data", "packages", "deployments", "deploy",
+)
+
+
+def cmd_sync(client) -> int:
+    """Upload the source the droplet builds from.
+
+    One tarball rather than file-by-file SFTP. The tree is ~1,500 files and each
+    SFTP `put` is a round trip; over a link to a datacentre that is minutes
+    against seconds, and the difference is felt on every single deploy.
+
+    `git archive` is deliberately NOT used. It ships HEAD, and the entire point
+    of this command is to deploy what is in the working tree right now —
+    including changes that have not been committed yet. A sync that silently
+    deployed the last commit instead would be the worst kind of wrong.
+    """
+    import io
+    import tarfile
+
+    missing = [p for p in SYNC_PATHS if not (REPO_ROOT / p).exists()]
+    if missing:
+        sys.exit(f"missing from the repo: {', '.join(missing)}")
+
+    excluded_dirs = {".venv", "node_modules", "__pycache__", ".next", ".next-build",
+                     ".git", ".pytest_cache", ".ruff_cache", "out", "cache", "lib", "broadcast"}
+
+    def keep(info: "tarfile.TarInfo"):
+        parts = set(info.name.replace("\\", "/").split("/"))
+        if parts & excluded_dirs or info.name.endswith((".pyc", ".log")):
+            return None
+        # Uploading .env here would put it in the build context, where a stray
+        # COPY could bake it into an image layer — and an image layer survives
+        # every later deletion. It goes over SFTP to a path outside the context,
+        # by `push-env`.
+        if info.name.endswith(".env") or "/.env" in info.name:
+            return None
+        return info
+
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        for path in SYNC_PATHS:
+            tar.add(REPO_ROOT / path, arcname=path, filter=keep)
+    size = buf.tell()
+    buf.seek(0)
+
+    sftp = client.open_sftp()
+    try:
+        run(client, f"install -d -m 0750 {REMOTE_DIR}/src", echo=False)
+        sftp.putfo(buf, f"{REMOTE_DIR}/src.tar.gz")
+    finally:
+        sftp.close()
+    print(f"uploaded {size / 1_048_576:.1f} MiB")
+
+    # --delete-first equivalent: wipe the tree so a file removed locally does not
+    # linger on the box and get compiled into the next image.
+    return run(client, f"rm -rf {REMOTE_DIR}/src && install -d -m 0750 {REMOTE_DIR}/src && "
+                       f"tar xzf {REMOTE_DIR}/src.tar.gz -C {REMOTE_DIR}/src && "
+                       f"rm -f {REMOTE_DIR}/src.tar.gz && "
+                       # The shell scripts are written on Windows; a CRLF shebang
+                       # fails as `bash\r: No such file or directory`.
+                       f"find {REMOTE_DIR}/src -name '*.sh' -exec sed -i 's/\\r$//' {{}} + && "
+                       f"echo 'extracted:' && du -sh {REMOTE_DIR}/src | cut -f1")
+
+
 def cmd_bootstrap(client) -> int:
     """Place the three files the droplet needs, and nothing else.
 
@@ -188,7 +262,7 @@ def cmd_bootstrap(client) -> int:
     """
     run(client, f"install -d -m 0750 {REMOTE_DIR}", echo=False)
     for local, remote, mode in (
-        (REPO_ROOT / "deploy" / "docker-compose.prod.yml", "docker-compose.prod.yml", 0o644),
+        (REPO_ROOT / "deploy" / "docker-compose.yml", "docker-compose.yml", 0o644),
         (REPO_ROOT / "deploy" / "Caddyfile", "Caddyfile", 0o644),
         (REPO_ROOT / "deploy" / "update.sh", "update.sh", 0o750),
     ):
@@ -203,6 +277,18 @@ def cmd_bootstrap(client) -> int:
 
 
 def cmd_deploy(client) -> int:
+    """Sync the tree, then build and restart. The everyday command.
+
+    Sync is not a separate step you can forget: a build from a stale tree
+    succeeds, restarts cleanly, reports healthy, and serves the previous
+    version — which is the most confusing possible outcome of a deploy.
+    """
+    rc = cmd_bootstrap(client)
+    if rc != 0:
+        return rc
+    rc = cmd_sync(client)
+    if rc != 0:
+        return rc
     return run(client, f"cd {REMOTE_DIR} && bash update.sh")
 
 
@@ -226,6 +312,8 @@ def main() -> int:
             return cmd_keys(client)
         if command == "push-env":
             return cmd_push_env(client)
+        if command == "sync":
+            return cmd_sync(client)
         if command == "bootstrap":
             return cmd_bootstrap(client)
         if command == "deploy":

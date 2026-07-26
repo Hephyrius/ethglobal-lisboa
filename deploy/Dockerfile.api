@@ -35,10 +35,23 @@ COPY packages/schema/python/pyproject.toml packages/schema/python/
 COPY data/pyproject.toml data/
 COPY data/curator_mcp/pyproject.toml data/curator_mcp/
 
-# --no-install-project: the root package is the application itself and its
-# source is not here yet. --frozen: fail if uv.lock disagrees with pyproject
-# rather than silently resolving something new inside an image nobody will read.
-RUN uv sync --frozen --no-install-project --extra agent --extra venues --extra data
+# --no-install-WORKSPACE, not --no-install-project. The difference is the whole
+# point of this layer.
+#
+# `--no-install-project` skips only the root package, so uv would still build
+# and install the workspace members — `curator-data` and `curator-mcp`. Both
+# declare `readme = "README.md"` in their pyproject, their build backend reads
+# it, and at this point only the pyproject files have been copied. The failure
+# is `OSError: Readme file does not exist`, from inside a layer whose purpose is
+# to install third-party dependencies and nothing else.
+#
+# `--no-install-workspace` skips the root and every member, which is exactly
+# what a dependency-cache layer wants. The members are installed by the second
+# sync below, once their source (and their READMEs) is present.
+#
+# --frozen: fail if uv.lock disagrees with pyproject rather than silently
+# resolving something new inside an image nobody will read.
+RUN uv sync --frozen --no-install-workspace --extra agent --extra venues --extra data
 
 # ── application source ────────────────────────────────────────────────────
 COPY packages/ packages/
@@ -50,6 +63,18 @@ COPY deployments/ deployments/
 RUN uv sync --frozen --extra agent --extra venues --extra data
 
 ENV PATH="/opt/venv/bin:$PATH"
+
+# `agent` and `venues` are NOT installed packages. The root pyproject declares no
+# `[build-system]`, so uv treats it as a virtual project and installs only the
+# workspace members (`curator_schema`, `curator_data`); the two lanes are
+# imported from the working directory instead.
+#
+# uvicorn does insert its `--app-dir` (default ".") into sys.path, so this is
+# belt-and-braces — but a console script's sys.path[0] is /opt/venv/bin, not the
+# cwd, so if that behaviour ever changed the failure would be
+# `ModuleNotFoundError: agent` at container start, which reads as a broken image
+# rather than a path assumption.
+ENV PYTHONPATH=/srv
 
 # Mandates, the decision journal, performance history and every open Aqua
 # position live here. Mount a volume over it — see docker-compose.yml. Aqua can

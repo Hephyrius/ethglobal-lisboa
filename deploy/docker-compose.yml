@@ -1,85 +1,98 @@
-# scipio.capital — the whole stack on one box.
+# api.scipio.capital — the agent API and the TLS terminator in front of it.
 #
-#     docker compose -f deploy/docker-compose.yml up -d --build
+#     scripts/vps.py deploy          # from a dev machine
+#     cd /srv/scipio && bash update.sh
 #
-# Run it from the REPO ROOT. Both build contexts are `..` relative to this file,
-# because the API is a uv workspace and the dApp imports `deployments/` from
-# above its own directory; neither can build from inside `deploy/`.
+# **The dApp is not here.** It is deployed on Vercel, which builds it on
+# Vercel's hardware and serves it from their edge. That is not only convenient:
+# this droplet is 1 vCPU / 961 MiB, and `next build` peaks well above that, so a
+# Node build here would either thrash through the swapfile for a quarter of an
+# hour or be OOM-killed. Vercel removes the problem rather than working around
+# it, and what is left — a Python image with no compiler in it — builds on this
+# box in a couple of minutes.
 #
-# There is no anvil service. The chain is real Base — see deploy/README.md.
+# So there is no CI either. `vps.py sync` uploads the working tree, `update.sh`
+# builds and restarts. One command, no registry, no tokens, and it deploys what
+# is actually in the tree rather than what was last committed.
 
 name: scipio
+
+x-logging: &logging
+  # Docker's default json-file driver is UNBOUNDED. One chatty container fills a
+  # 24 GB disk given enough uptime, and a full disk stops Docker writing layers
+  # and Caddy writing certificates at the same moment. Also set in
+  # /etc/docker/daemon.json; repeated here so a container started outside this
+  # file still rotates.
+  driver: json-file
+  options: { max-size: "10m", max-file: "3" }
 
 services:
   api:
     build:
-      context: ..
+      context: ./src
       dockerfile: deploy/Dockerfile.api
+    image: scipio-api:local
     restart: unless-stopped
-    # One .env for dev and deploy, on the operator's instruction. `override=False`
-    # in agent/config.py means a variable set here in `environment:` beats a stale
-    # line in the file, which is what makes the overrides below reliable.
-    env_file:
-      - ../.env
+    logging: *logging
+    env_file: [.env]
     environment:
-      # ── the five that MUST differ from a laptop ──────────────────────────
       # Named here rather than left to .env because each one fails silently in
-      # its own way if it carries a dev value into production.
+      # its own way if a laptop's value reaches the server.
       AGENT_MODE: live
       DEPLOY_NETWORK: ${DEPLOY_NETWORK:-base-mainnet}
       # Despite the name, most of the harness reads ANVIL_RPC_URL as "the chain
-      # to talk to". Left at :8540 while BASE_RPC_URL is real, the agent reads
-      # one chain and writes another.
-      ANVIL_RPC_URL: ${BASE_RPC_URL:?BASE_RPC_URL must be set — an archive-capable Base endpoint}
+      # to talk to". Left pointing at a laptop's :8540 it resolves to nothing
+      # here, and the agent would read one chain and write another.
+      ANVIL_RPC_URL: ${BASE_RPC_URL:?BASE_RPC_URL must be an archive-capable Base endpoint}
       AGENT_STATE_DIR: /var/lib/scipio/state
-      # Exact origins, scheme and port included. A missing one returns 400 on the
-      # preflight and the dApp then reports "the agent API is unreachable",
-      # which reads as a dead backend when the backend is fine.
-      AGENT_CORS_ORIGINS: https://scipio.capital,https://www.scipio.capital
+      # EXACT origins. A missing one gets a 400 on the preflight, the dApp falls
+      # back to reading the chain, and it reports "the agent API is
+      # unreachable" — which reads as a dead backend when the backend is fine.
+      #
+      # ⚠️ Read from PROD_CORS_ORIGINS, NOT from AGENT_CORS_ORIGINS, and the
+      # distinction is not cosmetic. Compose interpolates `${VAR:-default}`
+      # against the `.env` sitting beside this file — and that `.env` is the
+      # laptop's, which sets AGENT_CORS_ORIGINS to a list of localhost and WSL
+      # bridge addresses. The `:-` default therefore never fires, and the
+      # deployed API silently inherits a dev CORS policy that permits nothing
+      # the real site is served from.
+      #
+      # That is precisely what happened, and `update.sh` caught it: preflight
+      # from https://scipio.capital returned 400. A name the dev `.env` never
+      # sets is the fix, so the default here is the value that actually applies.
+      #
+      # Vercel gives every branch and every commit its own hostname, so a
+      # preview's origin is not https://scipio.capital and will be refused. That
+      # is the right default — an allowlist accepting *.vercel.app would accept
+      # anybody's Vercel project. Set PROD_CORS_ORIGINS in .env to add a
+      # specific preview host.
+      AGENT_CORS_ORIGINS: ${PROD_CORS_ORIGINS:-https://scipio.capital,https://www.scipio.capital}
     volumes:
-      # NOT a cache. Mandates cannot be recovered (only the hash is on chain) and
-      # an open Aqua position cannot be recovered at all — Aqua confirms a
-      # strategy hash you already hold but cannot enumerate a maker's positions.
-      # Losing this directory loses positions that can never be closed.
+      # NOT a cache, and the only thing on this box that cannot be recreated.
+      # A mandate survives on chain only as a hash, and an open Aqua position
+      # not at all — Aqua can confirm a strategy hash you already hold but
+      # cannot enumerate a maker's positions. `down -v` deletes positions that
+      # can then never be displayed or closed.
       - agent-state:/var/lib/scipio/state
-      # Read-only: the manifest is written by `forge script` on the operator's
-      # machine and committed. A container must never be the thing that edits it.
-      - ../deployments:/srv/deployments:ro
-    expose:
-      - "8000"
-
-  web:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile.web
-      args:
-        # Build args, not environment. NEXT_PUBLIC_* are compiled into the
-        # bundle; changing them needs a rebuild, and `docker compose up -d`
-        # without --build will happily reuse an image built against localhost.
-        NEXT_PUBLIC_API_URL: https://api.scipio.capital
-        NEXT_PUBLIC_CHAIN_ID: ${NEXT_PUBLIC_CHAIN_ID:-8453}
-        NEXT_PUBLIC_WALLETCONNECT_ID: ${NEXT_PUBLIC_WALLETCONNECT_ID:-}
-        DEPLOY_NETWORK: ${DEPLOY_NETWORK:-base-mainnet}
-    restart: unless-stopped
-    depends_on:
-      - api
-    expose:
-      - "3000"
+    # 1 vCPU total, shared with Caddy. Without a ceiling a tick that spins
+    # starves TLS termination, and the symptom is the whole host timing out
+    # rather than one slow request. cpus is a share; mem_limit is a wall.
+    mem_limit: 600m
+    cpus: 0.8
 
   caddy:
     image: caddy:2.8-alpine
     restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
+    logging: *logging
+    ports: ["80:80", "443:443"]
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      # Certificates and the ACME account key. Losing this volume means
-      # re-issuing on every restart, and Let's Encrypt rate-limits that to five
-      # failures per hostname per hour — enough to take the site down for the
-      # length of a demo.
+      # Certificates and the ACME account key. Losing this re-issues on every
+      # restart, and Let's Encrypt rate-limits failures to five per hostname per
+      # hour — long enough to keep the API down for a demo.
       - caddy-data:/data
       - caddy-config:/config
+    mem_limit: 96m
 
 volumes:
   agent-state:

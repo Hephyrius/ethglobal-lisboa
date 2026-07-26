@@ -1,15 +1,21 @@
 # Deploying scipio.capital
 
-Real Base mainnet, one VPS, Caddy for TLS. Everything here is ordered so that
-each step is verifiable before the next one costs money.
+Real Base mainnet. The dApp is on Vercel; the API is on a DigitalOcean droplet
+behind Caddy. Everything here is ordered so each step is verifiable before the
+next one costs money.
 
 ```
-scipio.capital       ──► Caddy ──► web  :3000   (Next.js)
-api.scipio.capital   ──► Caddy ──► api  :8000   (FastAPI + the agent loop)
-                                      └─► Base mainnet via BASE_RPC_URL
+scipio.capital       ──► Vercel                     (Next.js, built by Vercel)
+api.scipio.capital   ──► Caddy ──► api :8000        (FastAPI + the agent loop)
+                                     └─► Base mainnet via BASE_RPC_URL
 ```
 
-There is **no anvil service.** The chain is real.
+**DNS records: [dns.md](dns.md).** Do that first — Caddy asks Let's Encrypt for
+a certificate the moment it starts, and failed challenges are rate-limited.
+
+There is **no anvil service.** The chain is real. There is also **no CI**:
+`scripts/vps.py deploy` uploads the tree and builds on the box. The dApp is the
+only thing that could not be built there, and Vercel builds that.
 
 ---
 
@@ -84,36 +90,55 @@ plan targets.
 
 ---
 
-## 2. DNS — do this before the first `compose up`
+## 2. DNS
 
-Two A records at your registrar, both to the VPS's IPv4:
+Full Namecheap walkthrough, including the two default records that must be
+deleted first: **[dns.md](dns.md)**.
 
-```
-scipio.capital        A   <VPS IP>
-api.scipio.capital    A   <VPS IP>
-www.scipio.capital    A   <VPS IP>     (optional; the Caddyfile serves it)
-```
+The shape: the apex and `www` point at **Vercel**, and only `api.` points at the
+droplet. Getting that backwards sends API calls to Vercel, which answers 404,
+and the dApp then reports the agent as unreachable.
 
-Caddy issues certificates over ACME on first start. If DNS is not resolving yet
-it retries, but each failure counts against Let's Encrypt's limit of **five per
-hostname per hour** — enough to keep the site down for the length of a demo.
-Confirm resolution first:
+Confirm before starting Caddy — it requests a certificate on first boot, and
+failed ACME challenges are rate-limited to five per hostname per hour:
 
 ```sh
-dig +short scipio.capital api.scipio.capital
+dig +short api.scipio.capital     # → the droplet's IPv4
 ```
 
 ---
 
 ## 3. The box
 
-Docker Engine and the compose plugin. Then, from the repo root:
+The droplet is **1 vCPU, 961 MiB RAM, 24 GB disk, and shipped with no swap**.
+That is the governing fact of this section.
+
+`next build` peaks well above a gigabyte, which is why the dApp is on Vercel
+rather than here. What remains is a Python image with no compiler in it, and
+that builds on the box in a couple of minutes — so there is no registry and no
+CI in the loop. Measured after a real deploy: **508 MiB of 961 in use, 18 MiB of
+swap touched.**
+
+There is no git checkout on the droplet either. It holds `docker-compose.yml`,
+`Caddyfile`, `update.sh`, `.env` and an unpacked `src/` tree that `deploy`
+replaces wholesale each time — so nothing there can drift, and a file deleted
+locally cannot linger and get compiled into the next image.
+
+Everything is driven from a dev machine by one script:
 
 ```sh
-git clone https://github.com/Hephyrius/ethglobal-lisboa && cd ethglobal-lisboa
-cp .env.example .env      # then fill it in — see the checklist below
-docker compose -f deploy/docker-compose.yml up -d --build
+uv run --with paramiko python scripts/vps.py provision   # idempotent
+uv run --with paramiko python scripts/vps.py keys        # then retire the password
+uv run --with paramiko python scripts/vps.py push-env    # .env, over SFTP, 0600
+uv run --with paramiko python scripts/vps.py deploy      # sync + build + restart + verify
+uv run --with paramiko python scripts/vps.py info        # what is it doing
+uv run --with paramiko python scripts/vps.py logs
 ```
+
+`provision` installs Docker, adds a **4 GB swapfile** (the box ships with none,
+so the kernel's only answer to a memory spike is the OOM killer, and it would
+pick the agent loop mid-tick), sets `vm.swappiness=20`, caps Docker and journald
+logs, and enables ufw + fail2ban. It is safe to re-run.
 
 ### The .env lines that must change from a laptop
 
@@ -126,10 +151,19 @@ docker compose -f deploy/docker-compose.yml up -d --build
 | `XAI_API_KEY` | optional | **set it** — without it the backend falls back to Ollama and tries to reach `localhost:11434`, which in a container is nothing at all |
 
 `docker-compose.yml` overrides `AGENT_MODE`, `DEPLOY_NETWORK`, `ANVIL_RPC_URL`,
-`AGENT_STATE_DIR` and `AGENT_CORS_ORIGINS` in `environment:`. That is not
+`AGENT_STATE_DIR` and the CORS origins in `environment:`. That is not
 belt-and-braces: `agent/config.py` loads `.env` with `override=False`, so a real
-environment variable always beats a file line, and each of those five fails
-silently in its own way if a dev value reaches production.
+environment variable always beats a file line, and each of those fails silently
+in its own way if a dev value reaches production.
+
+⚠️ **The CORS origins are read from `PROD_CORS_ORIGINS`, not
+`AGENT_CORS_ORIGINS`, and that is deliberate.** Compose interpolates
+`${VAR:-default}` against the `.env` beside it — the laptop's — which sets
+`AGENT_CORS_ORIGINS` to localhost and WSL bridge addresses. The `:-` default
+would never fire and the deployed API would inherit a dev CORS policy permitting
+nothing the real site is served from. That happened on the first deploy and
+`update.sh` caught it with a 400 on the preflight. A name the dev `.env` never
+sets is the fix.
 
 `ANVIL_RPC_URL` is overridden to `BASE_RPC_URL` deliberately. Despite the name,
 most of the harness reads it as *"the chain to talk to"*; left at `:8540` while
@@ -160,26 +194,39 @@ the backend is fine.
 
 ---
 
-## 5. Rebuilding
+## 5. Updating
 
 ```sh
-git pull
-docker compose -f deploy/docker-compose.yml up -d --build
+uv run --with paramiko python scripts/vps.py deploy
 ```
 
-⚠️ **`--build` is not optional for the web container.** `NEXT_PUBLIC_*` are
-inlined into the JavaScript bundle by `next build`. Without `--build`, compose
-reuses the existing image and the old values stay compiled in — the symptom is a
-deployed site quietly talking to `http://localhost:8000`, which fails only in a
-visitor's browser and appears in none of your logs.
+That is the whole loop. It uploads the current **working tree** (not `HEAD` — a
+deploy that silently shipped the last commit instead of what you are looking at
+would be the worst kind of wrong), rebuilds the API image on the box, restarts,
+and then verifies rather than assuming:
 
-The `agent-state` volume survives rebuilds and must. It holds mandates (a
-mandate cannot be recovered; only its hash is on chain) and **every open Aqua
-position** — Aqua can confirm a strategy hash you already hold but offers no way
-to enumerate a maker's positions, so a lost record is a position that can never
-be displayed or closed.
+- `docker compose up -d` returns when containers are *created*. A crashloop
+  satisfies it. So the script polls until the API answers.
+- It checks `"mode":"live"` specifically, because a fixture-mode API answers
+  every request and validates every response over invented data.
+- It runs a **CORS preflight from `https://scipio.capital`**. That seam fails
+  silently in the worst way: a rejected origin returns 400, the dApp falls back
+  to reading the chain, and it reports *"the agent API is unreachable"* — which
+  reads as a dead backend while everything else is green. This check caught
+  exactly that on the first deploy.
 
----
+Both probes run *inside* the container, because the API is `expose:`d rather
+than published; it is reachable only through Caddy and the compose network. An
+earlier version curled `localhost:8000` from the host, got connection-refused
+against a perfectly healthy API, and called the deploy failed.
+
+The dApp updates itself: Vercel builds on push.
+
+The `agent-state` volume survives rebuilds and must. It holds mandates (only the
+hash is on chain) and **every open Aqua position** — Aqua can confirm a strategy
+hash you already hold but cannot enumerate a maker's positions, so a lost record
+is a position that can never be displayed or closed. `update.sh` prunes images
+and build cache, never volumes.
 
 ## What this deployment does *not* do
 
