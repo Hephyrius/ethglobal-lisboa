@@ -1,6 +1,5 @@
 'use client'
 
-import { Badge } from '@/components/ui/Badge'
 import { TokenMark } from '@/components/ui/TokenMark'
 import { KNOWN_TOKENS } from '@/lib/chain/deployments'
 import { MANDATE_PRESETS } from '@/lib/mandate/presets'
@@ -17,21 +16,17 @@ import { MANDATE_PRESETS } from '@/lib/mandate/presets'
  * actually deployed against, and the `allowed_assets` the shipped presets name.
  * Nothing below is a symbol typed out by hand.
  *
- * ## Why unusable assets are listed rather than hidden
+ * ## Only holdable assets are listed
  *
- * The same reason `VenueStrip` shows unavailable venues instead of filtering
- * them: silence is how a fully-built Aave venue stayed invisible for an entire
- * wave, because an omission looks exactly like the feature not existing. The
- * LSTs are the live case. They are real assets on Base that this project has
- * deliberately not enabled, and the reason is specific rather than "not done
- * yet" — the vault values holdings by reading one Chainlink feed per token and
+ * Assets the vault cannot value — the ETH-quoted LSTs, cbETH and wstETH — used
+ * to be shown with the blocker attached. They are not shown at all now: this is
+ * a surface where someone picks what their vault may hold, and an entry that
+ * cannot be picked is noise in that moment. The constraint itself is still real
+ * and still worth knowing (the vault reads one Chainlink feed per token and
  * cannot compose two, so an ETH-quoted feed cannot be converted into the USD
- * terms `totalAssets()` reports. A reader who does not see them at all learns
- * nothing; a reader who sees them with the constraint attached learns where the
- * edge of the system is.
+ * terms `totalAssets()` reports) — it belongs in the docs, not in the picker.
  */
 
-type PendingAsset = { symbol: string; reason: string }
 
 /** Assets the vault can hold today, from the deploy record and the presets. */
 const AVAILABLE: string[] = (() => {
@@ -46,23 +41,6 @@ const AVAILABLE: string[] = (() => {
   return [...seen]
 })()
 
-/**
- * Real assets on Base that a vault cannot hold yet, each with the actual
- * blocker. Kept short on purpose: an aspirational roadmap in a product surface
- * is a promise, and this is a list of constraints instead.
- */
-const PENDING: PendingAsset[] = [
-  {
-    symbol: 'cbETH',
-    reason:
-      'Its Chainlink feed on Base is quoted in ETH, not USD. The vault reads one feed per token and cannot compose two, and the feed is fixed when the vault is initialised.',
-  },
-  {
-    symbol: 'wstETH',
-    reason:
-      'Same constraint as cbETH: an ETH-quoted feed that the vault cannot convert into the USD terms it reports holdings in.',
-  },
-]
 
 const NOTES: Record<string, string> = {
   USDC: 'Dollar stablecoin. The usual base asset, and what a cash floor is held in.',
@@ -118,20 +96,6 @@ export function AssetUniverse() {
                 {NOTE_BY_SYMBOL.get(symbol.toUpperCase())}
               </p>
             ) : null}
-          </li>
-        ))}
-
-        {PENDING.map((asset) => (
-          <li
-            key={asset.symbol}
-            className="rounded border border-warn/30 bg-warn/[0.04] p-3 opacity-90"
-          >
-            <div className="flex flex-wrap items-center gap-2">
-              <TokenMark symbol={asset.symbol} size="md" />
-              <span className="text-sm font-medium text-ink">{asset.symbol}</span>
-              <Badge tone="warn">not yet holdable</Badge>
-            </div>
-            <p className="mt-2 text-2xs leading-relaxed text-warn/90">{asset.reason}</p>
           </li>
         ))}
       </ul>

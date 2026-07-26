@@ -17,10 +17,11 @@ export default function HomePage() {
         <div className="lg:flex lg:items-center lg:gap-8 xl:gap-14">
           <div className="max-w-3xl">
             <p className="label">ETHGlobal Lisbon 2026</p>
+            {/* No hyphen in "Agent Curated", so the nowrap that used to hold the
+                compound together is gone with it — an unhyphenated pair breaks
+                between words like any other phrase. */}
             <h1 className="mt-4 text-4xl leading-[1.15] tracking-tight text-ink sm:text-5xl">
-              {/* nowrap so the compound never splits across lines at its hyphen,
-                  which at this size reads as "Agent-" hanging on the first line. */}
-              Scipio: <span className="whitespace-nowrap">Agent-Curated</span> Vaults
+              Scipio: Agent Curated Vaults
             </h1>
             <p className="mt-5 max-w-2xl text-[0.95rem] leading-relaxed text-muted">
               Build and deploy your Scipio Agent Curated Vault. It reads live markets, forms a

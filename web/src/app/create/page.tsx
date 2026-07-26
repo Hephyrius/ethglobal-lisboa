@@ -5,7 +5,6 @@ import type { Mandate } from '@curator/schema'
 import { ChatPanel } from '@/components/genesis/ChatPanel'
 import { MandateDraft } from '@/components/genesis/MandateDraft'
 import { DeployPanel } from '@/components/genesis/DeployPanel'
-import { PresetCards } from '@/components/genesis/PresetCards'
 import { ArchetypeCards } from '@/components/genesis/ArchetypeCards'
 import { UniverseStrip } from '@/components/genesis/UniverseStrip'
 import { AssetUniverse } from '@/components/genesis/AssetUniverse'
@@ -16,13 +15,12 @@ import { useGenesisChat, useGenesisSources } from '@/lib/api/genesis-queries'
 import { GENESIS_OPENING, type ChatMessage } from '@/lib/api/genesis-sim'
 import { cn } from '@/lib/cn'
 
-type Track = 'agent' | 'standard' | 'archetype'
+type Track = 'agent' | 'archetype'
 
 /** The chooser's label for each track, in one place so the card and the
  *  `ChosenTrack` banner cannot drift apart. */
 const TRACK_TITLES: Record<Track, string> = {
   agent: 'Deploy a Scipio Agent',
-  standard: 'Deploy a standard mandate',
   archetype: 'Deploy from an archetype',
 }
 
@@ -31,23 +29,25 @@ const TRACK_TITLES: Record<Track, string> = {
  *
  * ## The page is a chooser, not a menu of everything
  *
- * Both routes used to be on screen at once — preset cards, the universe strips
- * and the conversation, stacked. A reader had no way to tell which controls
+ * Every route used to be on screen at once, the universe strips and the
+ * conversation stacked together, and a reader had no way to tell which controls
  * belonged to the path they had picked. Now nothing renders until a track is
- * chosen, and choosing one hides the other *including its description card*:
- * "nothing about the standard mandate is viewable" is not satisfied by a
- * dimmed card that still explains the standard mandate.
+ * chosen, and choosing one hides the other *including its description card*: an
+ * option is not hidden by a dimmed card that still explains it.
  *
- * ## Why each track owns its own draft
+ * ## Why there are two routes and not three
  *
- * A single shared `draft` was survivable when both routes were visible and a
- * preset was framed as a starting point you then amended by talking. With the
- * tracks exclusive it is a trap: load "Conservative", switch across, and the
- * conversation would open on top of a mandate the user cannot see the origin
- * of — or worse, deploy carrying fields from a route they abandoned. Separate
- * drafts mean switching tracks is free and neither one loses its work.
+ * A standard-mandate track sat between these, loading a preset for the reader
+ * to review and then deploy. That is the archetype track with the model swapped
+ * for a fixed file: the same promise and the same click, distinguishable only by
+ * holding both descriptions in mind at once. The archetype route is the one that
+ * survives, because it is the only one of the two that produces a mandate
+ * written for the vault rather than copied into it.
  *
- * The agent draft still accumulates rather than being re-derived each turn:
+ * `PresetCards` and the preset draft went with it. Nothing else consumed either,
+ * so removing the track removed the reason for a second draft to exist.
+ *
+ * The agent draft accumulates rather than being re-derived each turn:
  * `mandate_draft` is a *partial*, each turn contributing the fields it learned
  * about and leaving the rest alone. Merging on top of what we have is what lets
  * the mandate build across a conversation instead of resetting to whatever the
@@ -59,8 +59,6 @@ export default function CreatePage() {
     { role: 'assistant', content: GENESIS_OPENING },
   ])
   const [agentDraft, setAgentDraft] = useState<Partial<Mandate>>({})
-  const [presetDraft, setPresetDraft] = useState<Partial<Mandate>>({})
-  const [presetKey, setPresetKey] = useState<string>()
   const chat = useGenesisChat()
   // What the data registry actually has registered — never a hard-coded list,
   // so a source Lane C adds becomes grantable here with no change. Request #19.
@@ -90,28 +88,20 @@ export default function CreatePage() {
     }
   }
 
-  /**
-   * Load a whole archetype into the standard-mandate track.
-   *
-   * This used to announce itself in the chat transcript, so that the mandate
-   * panel filling with values nobody typed did not read as the app deciding for
-   * them. That instrument no longer works: on this track the transcript is not
-   * on screen at all, so the announcement would be written somewhere the reader
-   * cannot see. The mandate panel appears directly beneath the cards instead,
-   * which shows the fill where the click happened.
-   */
-  function loadPreset(mandate: Mandate, key: string) {
-    setPresetDraft(mandate)
-    setPresetKey(key)
-  }
-
   return (
     <div className="space-y-6">
       <header>
         <h1 className="text-xl font-semibold tracking-tight text-ink sm:text-2xl">Create a vault</h1>
 
+        {/* Two routes, not three. The standard-mandate track loaded a preset
+            for you to read and then deploy, which is the archetype track with
+            the model swapped out for a fixed file: same promise, same click,
+            and a reader had to hold both descriptions in mind to tell them
+            apart. The archetype route is the one that survives, since it is the
+            only one of the two that produces a mandate written for the vault
+            rather than copied into it. */}
         {track === null ? (
-          <ol className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <ol className="mt-5 grid gap-4 sm:grid-cols-2">
             <TrackCard index={1} title={TRACK_TITLES.agent} onSelect={() => setTrack('agent')}>
               Describe the vault&apos;s objective in plain language. Alesia translates it into an
               operating mandate: hard constraints, permitted data sources, permitted venues.
@@ -120,21 +110,6 @@ export default function CreatePage() {
             </TrackCard>
             <TrackCard
               index={2}
-              title={TRACK_TITLES.standard}
-              onSelect={() => setTrack('standard')}
-            >
-              Preset risk profiles with every parameter already configured. Conservative for tight
-              exposure limits, Aggressive for wide ones. You review the finished mandate before it
-              deploys. Every vault is a distinct instance, owned by the address that deploys it.
-            </TrackCard>
-            {/* The third route is neither of the other two, which is why it is
-                its own track rather than a button inside the standard one. The
-                others load or compose a mandate you then read; this one asks
-                the model to write a fresh one and deploys it in the same click.
-                Mixing "review, then deploy" with "deploys on click" inside one
-                track is exactly the ambiguity the chooser exists to remove. */}
-            <TrackCard
-              index={3}
               title={TRACK_TITLES.archetype}
               onSelect={() => setTrack('archetype')}
             >
@@ -158,12 +133,12 @@ export default function CreatePage() {
               checkboxes that were never there. */}
           <section className="rounded border border-agent/20 bg-agent/[0.03] px-4 py-3.5">
             <h2 className="text-sm font-semibold text-ink">
-              How to create your Scipio agent-curated vault
+              How to create your Scipio Agent Curated Vault
             </h2>
             <p className="mt-1.5 text-xs leading-relaxed text-muted">
-              You build the mandate by talking. Name what you want in the conversation and it
-              becomes part of the mandate. Anything you do not grant, the agent cannot use, and once
-              deployed none of it can be revisited.
+              You build the mandate by talking or typing. Name what you want in the conversation and
+              it becomes part of the mandate. Anything you do not grant, the agent cannot use, and
+              once deployed none of it can be revisited.
             </p>
 
             <p className="mt-2.5 text-xs leading-relaxed text-muted">These three are required:</p>
@@ -184,7 +159,8 @@ export default function CreatePage() {
             </ul>
 
             <p className="mt-2.5 text-xs leading-relaxed text-muted">
-              Then define your strategy parameters, for example:
+              <strong className="text-ink">Then define your strategy parameters</strong>, for
+              example:
             </p>
 
             {/* The six are the actual fields of `constraints` on the mandate, so
@@ -225,68 +201,6 @@ export default function CreatePage() {
         </>
       ) : null}
 
-      {track === 'standard' ? (
-        <>
-          {/* The counterpart to the agent guide, and it carries more weight than
-              a mirror image would suggest: choosing this track replaces the pair
-              of chooser cards, so the description that used to introduce the
-              presets is no longer on screen. This is now the only place that
-              says what the track is. Deliberately does not restate the profiles
-              themselves, for the reason `presets.ts` gives: their headlines come
-              from `index.json` so a preset whose limits change cannot leave a
-              stale description behind. Naming them here would reintroduce that. */}
-          <section className="rounded border border-agent/20 bg-agent/[0.03] px-4 py-3.5">
-            <h2 className="text-sm font-semibold text-ink">How to deploy a standard mandate</h2>
-            <p className="mt-1.5 text-xs leading-relaxed text-muted">
-              Every parameter is already configured. You are choosing a finished mandate rather than
-              writing one, so there is no conversation and nothing to grant. What you pick is what
-              deploys.
-            </p>
-
-            <p className="mt-2.5 text-xs leading-relaxed text-muted">Three steps:</p>
-
-            <ul className="mt-1.5 space-y-1 text-xs leading-relaxed text-muted">
-              <li>
-                <strong className="text-ink">Pick a risk tier below.</strong> Conservative and
-                Aggressive set how much room the agent has to move.
-              </li>
-              <li>
-                <strong className="text-ink">Check the mandate underneath.</strong> It carries the
-                same fields an agent-built vault would, filled in for you.
-              </li>
-              <li>
-                <strong className="text-ink">Click Deploy vault.</strong>
-              </li>
-            </ul>
-
-            <p className="mt-2.5 text-xs leading-relaxed text-muted">
-              Every vault is a distinct instance, owned by the address that deploys it. Once
-              deployed the mandate is locked and only the agent may amend it.
-            </p>
-          </section>
-
-          {/* The Randomized tier is not backed by a preset and never will be —
-              it describes drawing allocations at deploy, which is what the
-              archetype track actually does. Handing it the track switch turns a
-              "Coming soon" placeholder into the route it was always describing. */}
-          <PresetCards
-            onSelect={loadPreset}
-            selectedKey={presetKey}
-            onRandomized={() => setTrack('archetype')}
-          />
-
-          {/* Held back until a card is chosen. An empty mandate panel and a
-              dead deploy button occupy the space a reader is scanning for the
-              result of their click. */}
-          {presetKey ? (
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
-              <MandateDraft draft={presetDraft} available={available} />
-              <DeployPanel draft={presetDraft} />
-            </div>
-          ) : null}
-        </>
-      ) : null}
-
       {track === 'archetype' ? (
         <>
           {/* The guide the archetype track opens on. It has one job the other
@@ -309,7 +223,7 @@ export default function CreatePage() {
               </li>
               <li>
                 <strong className="text-ink">It is checked against those bounds.</strong> One that
-                escapes them is regenerated, never deployed — nobody reads it first, so the check is
+                escapes them is regenerated, never deployed. Nobody reads it first, so the check is
                 what stands in for review.
               </li>
               <li>

@@ -29,10 +29,22 @@ export function ChatPanel({
   suggestions?: string[]
 }) {
   const [draft, setDraft] = useState('')
-  const endRef = useRef<HTMLDivElement>(null)
+  const transcriptRef = useRef<HTMLDivElement>(null)
 
+  // Follow the newest message by scrolling the TRANSCRIPT, never the document.
+  //
+  // This used to be `endRef.current.scrollIntoView()`, which walks every
+  // scrollable ancestor — so it moved the page as well as the panel. Picking a
+  // route on /create mounts this panel and appends the opening message in the
+  // same beat, and the reader was thrown ~985px down to Execution venues,
+  // straight past the "How to create your vault" intro they had just chosen.
+  //
+  // Setting scrollTop on the transcript's own container cannot move anything
+  // outside it, so the page stays exactly where the reader left it.
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    const el = transcriptRef.current
+    if (!el) return
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
   }, [messages.length, pending])
 
   function submit() {
@@ -48,7 +60,7 @@ export function ChatPanel({
     // producing — entirely below the fold. It takes a bounded height there and
     // only fills the viewport once the two sit side by side.
     <div className="card flex h-[26rem] flex-col sm:h-[32rem] lg:h-[calc(100vh-13rem)] lg:min-h-[32rem]">
-      <div className="scroll-slim flex-1 space-y-5 overflow-y-auto px-5 py-5">
+      <div ref={transcriptRef} className="scroll-slim flex-1 space-y-5 overflow-y-auto px-5 py-5">
         {messages.map((message, index) => (
           <Message key={index} message={message} />
         ))}
@@ -60,7 +72,6 @@ export function ChatPanel({
           </div>
         ) : null}
 
-        <div ref={endRef} />
       </div>
 
       <div className="border-t border-line p-3">

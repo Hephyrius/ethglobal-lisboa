@@ -44,7 +44,11 @@ const CUSTODY: Record<string, { tone: BadgeTone; label: string; note: string }> 
 }
 
 export function VenueStrip({ className }: { className?: string }) {
-  const { rows, enriched } = useVenueManifest()
+  const { rows: allRows, enriched } = useVenueManifest()
+  // Only venues that can actually be traded through. An unavailable venue used
+  // to be shown with its blocker attached; this is a surface where someone picks
+  // where their vault may trade, and an entry that cannot be picked is noise.
+  const rows = allRows.filter((row) => row.available)
   if (rows.length === 0) return null
 
   return (
