@@ -1,7 +1,7 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import { readContract } from '@wagmi/core'
+import { readContract, readContracts } from '@wagmi/core'
 import { vaultFactoryAddress } from './deployments'
 import { wagmiConfig } from './wagmi'
 
@@ -50,9 +50,14 @@ const factoryAbi = [
 
 export type AllVaultsResult =
   /** The factory answered. An empty list is a real answer. */
-  | { supported: true; vaults: readonly `0x${string}`[] }
+  | { supported: true; vaults: readonly `0x${string}`[]; names?: readonly (string | null)[] }
   /** No factory address, an unreachable node, or a factory without the view. */
-  | { supported: false; vaults: readonly [] }
+  | { supported: false; vaults: readonly []; names?: readonly [] }
+
+/** Minimal ERC-20 `name()` — the vault's own, written at genesis from the mandate. */
+const nameAbi = [
+  { type: 'function', name: 'name', stateMutability: 'view', inputs: [], outputs: [{ type: 'string' }] },
+] as const
 
 export function useAllVaults() {
   const factory = vaultFactoryAddress()
@@ -72,7 +77,35 @@ export function useAllVaults() {
           abi: factoryAbi,
           functionName: 'vaults',
         })
-        return { supported: true, vaults }
+
+        // Every vault's own `name()`, in ONE multicall rather than N requests.
+        //
+        // The list previously rendered every chain-discovered vault as the
+        // literal string "Vault", on the reasoning that the chain does not
+        // carry the mandate text. True, but beside the point: `createVault`
+        // writes the mandate's name into the ERC-20 `name()`, so the chain has
+        // "Curated Split-Yield USDC Allocator" and the UI was showing "Vault".
+        //
+        // Batched because the alternative is one request per vault, and a
+        // public RPC rate-limits a fan-out like that — the same shape that made
+        // the API return placeholder token symbols earlier today. A failed name
+        // degrades to null and the caller falls back; it never fails the list.
+        let names: readonly (string | null)[] = []
+        try {
+          const results = await readContracts(wagmiConfig, {
+            allowFailure: true,
+            contracts: vaults.map((address) => ({
+              address,
+              abi: nameAbi,
+              functionName: 'name' as const,
+            })),
+          })
+          names = results.map((r) => (r.status === 'success' ? (r.result as string) : null))
+        } catch {
+          names = []
+        }
+
+        return { supported: true, vaults, names }
       } catch {
         // Deliberately not rethrown: the explorer still has its other three
         // sources, and a browse page that renders nothing because one read

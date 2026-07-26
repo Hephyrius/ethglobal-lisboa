@@ -77,6 +77,7 @@ export function useKnownVaults(): { vaults: KnownVault[]; ready: boolean } {
 
     // Everything the factory created that the two local sources missed —
     // which is every vault from genesis and every one-click archetype.
+    const chainNames = onchain.data?.names ?? []
     const chain: KnownVault[] = (onchain.data?.vaults ?? [])
       .filter((address) => !known.has(address.toLowerCase()))
       // `vaults()` includes the deploy script's mandate-less vault. Filtered
@@ -85,7 +86,11 @@ export function useKnownVaults(): { vaults: KnownVault[]; ready: boolean } {
       .filter((address) => isCuratedVault(address))
       .map((address) => ({
         address,
-        name: 'Vault',
+        // The vault's own on-chain name, written from the mandate at genesis.
+        // "Vault" is the last resort, not the default.
+        name:
+          chainNames[(onchain.data?.vaults ?? []).indexOf(address)]?.replace(/^Curated /, '') ??
+          'Vault',
         origin: 'onchain' as const,
         // The chain says a vault exists; it does not carry the mandate text.
         // `GET /vault/{addr}/mandate` does (cross-lane request #6, since
