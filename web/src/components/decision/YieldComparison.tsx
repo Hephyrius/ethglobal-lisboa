@@ -98,7 +98,7 @@ function MarketComparison({ market, rows }: { market: string; rows: Row[] }) {
         {deepestIsNotBest && deepest?.tvl ? (
           <span className="text-2xs text-muted">
             Deepest is <span className="text-ink">{deepest.protocol}</span> at{' '}
-            {formatUsd(deepest.tvl)} — not the highest yield.
+            {formatUsd(deepest.tvl)}, not the highest yield.
           </span>
         ) : null}
       </div>

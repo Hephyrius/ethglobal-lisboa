@@ -137,7 +137,7 @@ function TxLink({ hash }: { hash: string }) {
           {shortHash(hash)}
         </a>
       ) : (
-        <span className="font-mono text-2xs text-ok/90" title={`${hash} — local fork, not on BaseScan`}>
+        <span className="font-mono text-2xs text-ok/90" title={`${hash} · local fork, not on BaseScan`}>
           {shortHash(hash)}
         </span>
       )}

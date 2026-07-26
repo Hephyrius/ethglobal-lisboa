@@ -76,13 +76,13 @@ export function DeployPanel({ draft }: { draft: Partial<MandateT> }) {
 
         {finalize.isError ? (
           <div className="rounded-lg border border-bad/25 bg-bad/[0.05] px-3 py-2.5">
-            <p className="text-2xs font-medium text-bad">Deploy failed — nothing was deployed.</p>
+            <p className="text-2xs font-medium text-bad">Deploy failed. Nothing was deployed.</p>
             <p className="mt-1 text-2xs leading-relaxed text-bad/80">
               {finalize.error instanceof Error ? finalize.error.message : 'Unknown error'}
             </p>
             <p className="mt-2 text-2xs leading-relaxed text-muted">
               The agent API at <span className="font-mono">{API_BASE}</span> has to be running to
-              deploy. We will not invent a vault address for you — but you can{' '}
+              deploy. We will not invent a vault address for you, but you can{' '}
               <Link
                 href={`/vault/${FIXTURE_VAULT_STATE.address}`}
                 className="text-agent underline-offset-2 hover:underline"

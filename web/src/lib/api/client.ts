@@ -76,7 +76,7 @@ export async function apiFetch<T>({
   timeoutMs = DEFAULT_TIMEOUT_MS,
 }: FetchOptions<T>): Promise<Sourced<T>> {
   if (FIXTURES_FORCED) {
-    return { data: fallback(), mode: 'fixture', note: 'NEXT_PUBLIC_FIXTURES=1 — forced offline mode' }
+    return { data: fallback(), mode: 'fixture', note: 'NEXT_PUBLIC_FIXTURES=1, forced offline mode' }
   }
 
   try {

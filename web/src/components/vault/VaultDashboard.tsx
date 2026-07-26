@@ -97,7 +97,7 @@ export function VaultDashboard({ address }: { address: `0x${string}` }) {
               </div>
               <p className="mt-1.5 text-2xs leading-relaxed text-warn/90">
                 The agent API has no mandate stored for this vault, and this browser did not create
-                it. Showing the golden fixture so the viewer is not blank — it is{' '}
+                it. Showing the golden fixture so the viewer is not blank, and it is{' '}
                 <span className="font-medium">not</span> necessarily the mandate this vault was
                 deployed with. Verify against <span className="font-mono">mandate_hash</span> above.
               </p>
@@ -136,7 +136,7 @@ function MissingVaultNotice({ address }: { address: string }) {
       </div>
       <p className="mt-2 text-xs leading-relaxed text-bad/90">
         Nothing is deployed here on <span className="font-medium">{networkLabel}</span>. If anvil was
-        restarted, its fork state was in memory and every vault deployed into it is gone — the
+        restarted, its fork state was in memory and every vault deployed into it is gone. The
         address survives only in this browser and in{' '}
         <span className="font-mono">deployments/base-fork.json</span>. Re-run the deploy and seed
         scripts; the file will have the new address and this page will follow it.

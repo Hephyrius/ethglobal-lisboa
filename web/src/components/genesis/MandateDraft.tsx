@@ -29,7 +29,7 @@ export function MandateDraft({
     <Card>
       <CardHeader
         title={draft.name ?? 'Mandate draft'}
-        subtitle="Crystallised at genesis. After deployment only the agent may amend it — you cannot."
+        subtitle="Crystallised at genesis. After deployment only the agent may amend it. You cannot."
         right={draft.risk_posture ? <Badge tone="agent">{draft.risk_posture}</Badge> : null}
       />
       <CardBody className="space-y-4">
@@ -65,7 +65,7 @@ export function MandateDraft({
         >
           <DataSourceGrants
             sources={draft.permitted_data_sources}
-            emptyHint="No sources granted — the agent would be blind."
+            emptyHint="No sources granted. The agent would be blind."
           />
           {ungranted.length > 0 ? (
             <p className="mt-1.5 text-2xs text-faint">

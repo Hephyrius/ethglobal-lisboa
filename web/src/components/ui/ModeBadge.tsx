@@ -40,7 +40,7 @@ export function ModeBadge() {
     return (
       <Badge
         tone="data"
-        title={`Read directly from the vault contract — the agent API at ${API_BASE} is unreachable. These numbers are real.`}
+        title={`Read directly from the vault contract. The agent API at ${API_BASE} is unreachable. These numbers are real.`}
       >
         <Dot tone="data" pulse />
         <span className="hidden sm:inline">ON-CHAIN</span>
@@ -53,7 +53,7 @@ export function ModeBadge() {
       tone="warn"
       title={
         notes.length > 0
-          ? `Some data is from golden fixtures — ${notes.join(' · ')}`
+          ? `Some data is from golden fixtures: ${notes.join(' · ')}`
           : 'Some data on this page comes from packages/schema/fixtures'
       }
     >

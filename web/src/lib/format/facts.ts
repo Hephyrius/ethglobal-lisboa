@@ -82,7 +82,7 @@ export function factSubject(fact: Fact): string {
 
 /** One-line summary, for dense contexts like a tooltip or a collapsed row. */
 export function factHeadline(fact: Fact): string {
-  return `${kindLabel(fact.kind)} ${factSubject(fact)} — ${factValue(fact)}`
+  return `${kindLabel(fact.kind)} ${factSubject(fact)}: ${factValue(fact)}`
 }
 
 /**

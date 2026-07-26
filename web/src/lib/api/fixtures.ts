@@ -166,7 +166,7 @@ function buildFeed(): AgentActionT[] {
     decision: {
       action: 'enter',
       reasoning:
-        'Holding both legs at the 50/50 target with no rotation required, so the idle inventory can earn rather than sit. Shipping the full book into Aqua as a maker: the tokens never leave the vault — Aqua tracks a virtual balance against them — so totalAssets() is unchanged and a redemption is still honoured from the same USDC. A constant-product curve suits a pair I am willing to be filled on in either direction, and 30bp covers the inventory risk at this depth without pricing the quote out of the market.',
+        'Holding both legs at the 50/50 target with no rotation required, so the idle inventory can earn rather than sit. Shipping the full book into Aqua as a maker: the tokens never leave the vault (Aqua tracks a virtual balance against them) so totalAssets() is unchanged and a redemption is still honoured from the same USDC. A constant-product curve suits a pair I am willing to be filled on in either direction, and 30bp covers the inventory risk at this depth without pricing the quote out of the market.',
       facts_used: ['f5', 'f6'],
       venue_intents: [
         {

@@ -41,13 +41,30 @@ import { cn } from '@/lib/cn'
  */
 
 /** Same palette and order as AllocationChart. Base asset first. */
+// Validated with the dataviz palette checker (light surface, categorical):
+// lightness band, chroma floor, CVD separation, normal-vision floor and
+// contrast all PASS. Worst adjacent pair is teal↔magenta at ΔE 9.2 (deutan),
+// above the 8 floor.
+//
+// These are NOT the brand blues, and that is deliberate. A run of blues and
+// greys FAILS badly as a categorical set: the two grey steps came out at
+// ΔE 1.7 from each other — "hard to tell apart even with full colour vision" —
+// and three bands fell under the chroma floor, i.e. they read as grey rather
+// than as an identity. A near-monochrome brand simply cannot supply six
+// categorical hues. The base asset keeps the brand blue; the rest step away
+// far enough to be distinguishable.
+//
+// Solid, not alpha. The checker was run on these exact values; compositing
+// them at 0.85 over white changes the colour and voids the result.
+//
+// No orange: it would sit next to the semantic `warn` amber, and status
+// colours are reserved rather than reused as "series 5".
 const BANDS = [
-  'rgba(29,59,107,0.85)',
-  'rgba(27,106,102,0.80)',
-  'rgba(20,107,60,0.75)',
-  'rgba(138,82,9,0.70)',
-  'rgba(158,43,32,0.65)',
-  'rgba(91,100,111,0.55)',
+  '#005BCC', // base asset — the brand blue
+  '#B23A7A',
+  '#00A38F',
+  '#7A5AD6',
+  '#7C8794', // overflow / "other" — a neutral, not an identity
 ]
 
 const SIZE = 132
@@ -75,7 +92,7 @@ export function HoldingsDonut({ state }: { state: VaultState }) {
     <Card>
       <CardHeader
         title="Holdings"
-        subtitle="The vault is sole custodian — committed balances are encumbered by a venue, not held by it."
+        subtitle="The vault is sole custodian. Committed balances are encumbered by a venue, not held by it."
       />
       <CardBody>
         {held.length === 0 ? (
@@ -108,7 +125,7 @@ export function HoldingsDonut({ state }: { state: VaultState }) {
                     {slice.committedTo ? (
                       <Badge
                         tone="agent"
-                        title={`Backing an open position on ${slice.committedTo}. The tokens remain in the vault — this flags encumbrance, not location.`}
+                        title={`Backing an open position on ${slice.committedTo}. The tokens remain in the vault. This flags encumbrance, not location.`}
                       >
                         {slice.committedTo}
                       </Badge>

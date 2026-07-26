@@ -95,7 +95,7 @@ export function ChatPanel({
             }}
             rows={2}
             placeholder="Describe what this vault should do…"
-            className="scroll-slim max-h-40 flex-1 resize-none rounded-lg border border-line bg-base px-3 py-2 text-sm leading-relaxed text-ink outline-none transition-colors placeholder:text-faint focus:border-agent/50"
+            className="scroll-slim max-h-40 flex-1 resize-none rounded-lg border border-line bg-canvas px-3 py-2 text-sm leading-relaxed text-ink outline-none transition-colors placeholder:text-faint focus:border-agent/50"
           />
           <Button variant="primary" onClick={submit} disabled={!draft.trim() || pending}>
             Send
@@ -122,7 +122,7 @@ function Message({ message }: { message: ChatMessage }) {
             : 'bg-agent font-serif font-semibold text-white',
         )}
       >
-        {isUser ? 'You' : 'C'}
+        {isUser ? 'You' : 'S'}
       </div>
       <div
         className={cn(

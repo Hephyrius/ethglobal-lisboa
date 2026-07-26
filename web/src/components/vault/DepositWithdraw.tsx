@@ -60,7 +60,7 @@ export function DepositWithdraw({
         <CardBody>
           <p className="text-xs leading-relaxed text-warn/90">
             No ERC-4626 vault responded at this address on the configured RPC. That is expected
-            before the factory has deployed one — the rest of this page still renders from the agent
+            before the factory has deployed one. The rest of this page still renders from the agent
             API.
           </p>
           <p className="mt-2 text-2xs text-faint">
@@ -205,7 +205,7 @@ export function DepositWithdraw({
             }}
             placeholder="0.0"
             className={cn(
-              'tabular mt-1.5 w-full rounded-lg border bg-base px-3 py-2.5 text-sm text-ink outline-none transition-colors',
+              'tabular mt-1.5 w-full rounded-lg border bg-canvas px-3 py-2.5 text-sm text-ink outline-none transition-colors',
               'placeholder:text-faint focus:border-agent/50',
               overMax ? 'border-bad/50' : 'border-line',
             )}

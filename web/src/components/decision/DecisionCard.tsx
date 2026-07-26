@@ -233,7 +233,7 @@ function Outcome({ action, maxSlippageBps }: { action: AgentAction; maxSlippageB
     return (
       <div className="rounded-lg border border-line bg-raised/50 p-3">
         <p className="text-xs leading-relaxed text-muted">
-          No transaction. The agent held the current position — a first-class answer under the
+          No transaction. The agent held the current position, a first-class answer under the
           mandate, and the cheaper expression of an unchanged view.
         </p>
       </div>
@@ -246,7 +246,7 @@ function Outcome({ action, maxSlippageBps }: { action: AgentAction; maxSlippageB
         <div className="rounded-lg border border-bad/25 bg-bad/[0.05] p-3">
           <p className="text-xs leading-relaxed text-bad/90">
             Nothing reached the chain. Validation rejected the decision before it could be
-            submitted — the agent holds a key, so a plan that breaches the mandate is discarded
+            submitted. The agent holds a key, so a plan that breaches the mandate is discarded
             rather than trimmed to fit.
           </p>
         </div>

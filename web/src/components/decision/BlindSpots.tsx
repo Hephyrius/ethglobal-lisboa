@@ -20,7 +20,7 @@ export function BlindSpots({ snapshot }: { snapshot: MarketSnapshot }) {
         {snapshot.errors.map((error, index) => (
           <li key={`${error.source}-${index}`} className="text-2xs leading-relaxed text-warn/90">
             <span className="font-mono font-medium">{error.source}</span>
-            <span className="text-warn/60"> — </span>
+            <span className="text-warn/60"> · </span>
             {error.message}
           </li>
         ))}

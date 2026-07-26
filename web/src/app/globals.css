@@ -8,7 +8,7 @@
   }
 
   body {
-    @apply bg-base text-ink antialiased;
+    @apply bg-canvas text-ink antialiased;
   }
 
   ::selection {
@@ -31,14 +31,18 @@
     @apply text-2xs font-semibold uppercase tracking-[0.09em] text-faint;
   }
 
-  /* Section heading with a rule beneath — the research-note convention. */
+  /* Section heading with a rule beneath — the research-note convention.
+     The rule is where the highlight lives: a single blue hairline under each
+     section title is the entire accent on a page. Used as a rule rather than
+     as fill because the accent at any real area competes with the figures, and in
+     this UI the figures are the point. Held at /70 for the same reason. */
   .rule-heading {
-    @apply border-b border-line pb-2 text-sm font-semibold text-ink;
+    @apply border-b border-agent-bright/70 pb-2 text-sm font-semibold text-ink;
   }
 
   .scroll-slim {
     scrollbar-width: thin;
-    scrollbar-color: #cfc9bf transparent;
+    scrollbar-color: #acb1b9 transparent;
   }
 
   .scroll-slim::-webkit-scrollbar {
@@ -52,5 +56,62 @@
 
   .scroll-slim::-webkit-scrollbar-track {
     background: transparent;
+  }
+
+  /* ── Alesia motif ────────────────────────────────────────────────────────
+     Six beats, ~0.8s each: town, ring, ring, arrows in, arrows out. Plays once
+     and holds (`forwards`) rather than looping — a figure that keeps redrawing
+     itself behind a paragraph is the kind of thing people ask you to remove on
+     the second day. See SiegeMotif.tsx. */
+  .siege {
+    color: theme('colors.agent');
+    opacity: 0.16;
+  }
+
+  .siege-ring {
+    stroke-dasharray: 100;
+    stroke-dashoffset: 100;
+    animation: siege-draw 0.9s ease-out forwards;
+  }
+
+  .siege-ring--1 { animation-delay: 0.15s; }
+  .siege-ring--2 { animation-delay: 1s; }
+  .siege-ring--3 { animation-delay: 1.85s; }
+
+  .siege-arrows polygon {
+    opacity: 0;
+    animation: siege-mark 0.7s ease-out forwards;
+  }
+
+  /* Staggered a beat apart within each group so the four heads land in
+     sequence rather than all at once — the siege closes, it does not snap. */
+  .siege-arrows--in polygon:nth-child(1) { animation-delay: 2.7s; }
+  .siege-arrows--in polygon:nth-child(2) { animation-delay: 2.82s; }
+  .siege-arrows--in polygon:nth-child(3) { animation-delay: 2.94s; }
+  .siege-arrows--in polygon:nth-child(4) { animation-delay: 3.06s; }
+
+  .siege-arrows--out polygon:nth-child(1) { animation-delay: 3.6s; }
+  .siege-arrows--out polygon:nth-child(2) { animation-delay: 3.72s; }
+  .siege-arrows--out polygon:nth-child(3) { animation-delay: 3.84s; }
+  .siege-arrows--out polygon:nth-child(4) { animation-delay: 3.96s; }
+
+  @keyframes siege-draw {
+    to { stroke-dashoffset: 0; }
+  }
+
+  @keyframes siege-mark {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  /* Motion is the decorative part; the figure is not. Anyone who has asked for
+     less of it still gets the finished drawing, just without the drawing of it. */
+  @media (prefers-reduced-motion: reduce) {
+    .siege-ring,
+    .siege-arrows polygon {
+      animation: none;
+      stroke-dashoffset: 0;
+      opacity: 1;
+    }
   }
 }

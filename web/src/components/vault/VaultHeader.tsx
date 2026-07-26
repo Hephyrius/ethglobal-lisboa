@@ -49,7 +49,7 @@ export function VaultHeader({ state, name }: { state: VaultState; name?: string 
           able to link someone to. One line stays, because a reader who never
           opens the docs should still know the vault has no human override. */}
       <p className="mt-4 max-w-3xl text-xs leading-relaxed text-muted">
-        No human override after genesis — the mandate is the only thing constraining the agent.{' '}
+        No human override after genesis. The mandate is the only thing constraining the agent.{' '}
         <Link href="/docs" className="text-agent underline-offset-2 hover:underline">
           How this works
         </Link>

@@ -57,7 +57,7 @@ export function useAgentHealth() {
       report('agent-health', {
         mode: 'fixture',
         note: `the agent reports itself degraded${
-          health.model_reachable === false ? ' — the model is not reachable or not pulled' : ''
+          health.model_reachable === false ? ', the model is not reachable or not pulled' : ''
         }`,
       })
     } else {
