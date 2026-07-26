@@ -131,4 +131,10 @@ def render_presets() -> str:
         "invent a fourth, and do not present one as the safe or obvious choice: "
         "which tradeoff is acceptable is the user's judgement, not yours."
     )
+    lines.append(
+        "Offer them AT MOST ONCE, and only while the objective is still unknown. "
+        "The moment the user states an objective or any constraint of their own, "
+        "build on what they said - do not steer them back to a starting point, "
+        "and never ask which one is closest a second time."
+    )
     return "\n".join(lines)
