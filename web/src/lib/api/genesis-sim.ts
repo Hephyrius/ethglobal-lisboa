@@ -50,7 +50,7 @@ const STAGES: Array<{
 }> = [
   {
     reply: () =>
-      "Understood. I've started a mandate from that. Before it can be deployed I need three more things — the first is your risk limits.\n\nHow much of the vault may sit in a single non-base asset, how much cash should always stay free for redemptions, and what slippage will you tolerate on a rebalance?",
+      "Understood. I've started a mandate from that. Before it can be deployed I need three more things. The first is your risk limits.\n\nHow much of the vault may sit in a single non-base asset, how much cash should always stay free for redemptions, and what slippage will you tolerate on a rebalance?",
     draft: (userText) => ({
       version: 1,
       name: deriveName(userText),
@@ -60,7 +60,7 @@ const STAGES: Array<{
   },
   {
     reply: (_userText, available) =>
-      `Recorded. Those become hard constraints I check before every action, not preferences.\n\nNext: which data sources am I permitted to consult? Registered right now: ${listPhrase(available.sources)}. I can only reason about markets I'm allowed to see, and I cannot grant myself a source later — changing this list is a mandate amendment.`,
+      `Recorded. Those become hard constraints I check before every action, not preferences.\n\nNext: which data sources am I permitted to consult? Registered right now: ${listPhrase(available.sources)}. I can only reason about markets I'm allowed to see, and I cannot grant myself a source later. Changing this list is a mandate amendment.`,
     draft: (_userText, previous) => ({
       ...previous,
       constraints: {
@@ -79,7 +79,7 @@ const STAGES: Array<{
   },
   {
     reply: (_userText, available) =>
-      `Granted — ${listPhrase(available.sources)}. Every fact I use will carry the source it came from, so you can audit which number drove which decision.\n\nLast question: which execution venues may I use? Uniswap lets me rotate what the vault holds; Aqua lets me hold a market-making position without the tokens ever leaving the vault.`,
+      `Granted: ${listPhrase(available.sources)}. Every fact I use will carry the source it came from, so you can audit which number drove which decision.\n\nLast question: which execution venues may I use? Uniswap lets me rotate what the vault holds; Aqua lets me hold a market-making position without the tokens ever leaving the vault.`,
     draft: (_userText, previous, available) => ({
       ...previous,
       // Whatever the registry actually has, not a baked-in list.
@@ -89,7 +89,7 @@ const STAGES: Array<{
   },
   {
     reply: () =>
-      "That completes the mandate. Review it on the right — once you deploy, it is crystallised at genesis and you cannot change it. Only I can, and only in pursuit of the objective you just gave me.\n\nDeploy when you're ready.",
+      "That completes the mandate. Review it on the right. Once you deploy, it is crystallised at genesis and you cannot change it. Only I can, and only in pursuit of the objective you just gave me.\n\nDeploy when you're ready.",
     draft: (_userText, previous, available) => ({
       ...previous,
       permitted_venues: venueGrants(available),
@@ -101,7 +101,7 @@ const STAGES: Array<{
 ]
 
 const CLOSING_REPLY =
-  'The mandate is complete and ready to deploy. If you want to change something, tell me what and I will amend the draft — after deployment that is no longer possible.'
+  'The mandate is complete and ready to deploy. If you want to change something, tell me what and I will amend the draft. After deployment that is no longer possible.'
 
 function deriveName(userText: string): string {
   const words = userText
@@ -151,8 +151,14 @@ function listPhrase(items: string[]): string {
   return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
 }
 
-/** The opening prompt, shown before the user has said anything. */
+/**
+ * The opening prompt, shown before the user has said anything.
+ *
+ * It names the three grants in the same order the page lists them below, so a
+ * reader following the conversation and a reader scrolling the strips are being
+ * walked through the mandate the same way round.
+ */
 export const GENESIS_OPENING =
-  "I'll be the curator for this vault. Describe what you want it to do — the objective, and anything you would refuse to let it do. I'll turn that into a mandate you can inspect before it is deployed."
+  "Describe your strategy. Add the asset universe, data sources and execution venues, as well as any other instructions. Check the mandate draft as you go and we'll workshop it together. When you're finished, click Deploy vault."
 
 export type { ChatMessage, MandateDraft }

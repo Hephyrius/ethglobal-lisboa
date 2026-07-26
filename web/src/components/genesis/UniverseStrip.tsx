@@ -20,15 +20,16 @@ import type { AvailableGrants } from '@/lib/api/genesis-queries'
 
 const SOURCE_NOTES: Record<string, string> = {
   messari: 'Standardised lending and DEX metrics across protocols, via The Graph',
-  aave: 'Aave V3 Base — its own subgraph schema, not the standardised one',
-  chainlink: 'On-chain price feeds — the same oracle the vault values holdings with',
+  aave: 'Aave V3 Base, on its own subgraph schema rather than the standardised one',
+  chainlink: 'On-chain price feeds, the same oracle the vault values its holdings with',
   token_api: 'Prices derived from executed DEX swaps',
   defillama: 'Cross-protocol TVL and yield',
   peers: 'What comparable vaults are doing',
   feargreed: 'Market sentiment index',
-  gas: 'Base gas price — what an action costs to take',
+  gas: 'Base gas price, what an action costs to take',
   morpho: "Base's largest lending market by TVL",
-  prediction: 'Implied odds from prediction markets — a forward-looking view, unlike every rate beside it',
+  prediction:
+    'Implied odds from prediction markets, a forward-looking view unlike every rate beside it',
 }
 
 /**
@@ -40,49 +41,32 @@ export function UniverseStrip({ available }: { available: AvailableGrants }) {
   if (available.sources.length === 0) return null
 
   return (
-    <section className="rounded border border-line bg-raised/40 p-4">
-      <Group
-        title="Data it could consult"
-        caption="The agent can only reason about markets it is granted. This list is exhaustive — anything absent from a mandate, it cannot see."
-        keys={available.sources}
-        notes={SOURCE_NOTES}
-        tone="data"
-      />
-    </section>
-  )
-}
-
-function Group({
-  title,
-  caption,
-  keys,
-  notes,
-  tone,
-}: {
-  title: string
-  caption: string
-  keys: string[]
-  notes: Record<string, string>
-  tone: 'data' | 'agent'
-}) {
-  return (
-    <div>
-      <div className="flex items-baseline justify-between gap-2">
-        <h3 className="label">{title}</h3>
-        <span className="text-2xs text-faint">{keys.length} registered</span>
+    <section>
+      {/* Headed like `AssetUniverse` and `VenueStrip` rather than as a tinted
+          box, so the three selection parameters read as one sequence. */}
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-line pb-2">
+        <h2 className="text-sm font-semibold text-ink">Data sources</h2>
+        <span className="text-2xs text-faint">{available.sources.length} registered</span>
       </div>
-      <p className="mt-1 text-2xs leading-relaxed text-faint">{caption}</p>
 
-      <ul className="mt-2.5 space-y-1.5">
-        {keys.map((key) => (
-          <li key={key} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-            <Badge tone={tone}>{key}</Badge>
-            {notes[key] ? (
-              <span className="text-2xs leading-relaxed text-muted">{notes[key]}</span>
+      <p className="mt-3 text-2xs leading-relaxed text-faint">
+        The agent can only reason about markets it is granted. This list is exhaustive: anything
+        absent from a mandate, it cannot see.
+      </p>
+
+      {/* One source per row on its own line, the badge above its description
+          rather than beside it. Inline, the longer notes wrapped under the
+          badge and the rows lost their left edge, so the list read as prose. */}
+      <ul className="mt-4 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+        {available.sources.map((key) => (
+          <li key={key} className="rounded border border-line bg-surface p-3">
+            <Badge tone="data">{key}</Badge>
+            {SOURCE_NOTES[key] ? (
+              <p className="mt-2 text-2xs leading-relaxed text-muted">{SOURCE_NOTES[key]}</p>
             ) : null}
           </li>
         ))}
       </ul>
-    </div>
+    </section>
   )
 }
