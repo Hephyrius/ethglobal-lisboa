@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import type { ReactNode } from 'react'
 import { Providers } from './providers'
 import { Disclaimer } from '@/components/layout/Disclaimer'
+import { NetworkGuard } from '@/components/layout/NetworkGuard'
 import { Header } from '@/components/layout/Header'
 import './globals.css'
 
@@ -66,6 +67,10 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <body className="min-h-screen">
         <Providers>
           <Disclaimer />
+          {/* Below the disclaimer, above the header: a wrong chain is a
+              condition of *this session*, not a standing property of the app,
+              so it sits closer to the content than the permanent warning. */}
+          <NetworkGuard />
           <Header />
           <main className="mx-auto max-w-[1400px] px-4 pb-20 pt-6 sm:px-6 sm:pb-24 sm:pt-8">
             {children}

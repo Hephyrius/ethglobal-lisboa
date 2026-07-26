@@ -11,7 +11,36 @@ import {
 import { maxUint256 } from 'viem'
 import { erc20Abi, erc4626Abi, pausableVaultAbi } from './abis'
 import { readShareDecimals } from './vault-state'
-import { wagmiConfig } from './wagmi'
+import { chain, wagmiConfig } from './wagmi'
+
+/**
+ * Pinned on **every** write, and this is a safety property rather than a tidiness one.
+ *
+ * `writeContract` without a `chainId` signs against whatever chain the wallet
+ * happens to be on. Reads are safe — the config's transport is bound to Base,
+ * so the page always *displays* Base regardless — which is exactly what makes
+ * the write path dangerous: everything on screen is correct while the
+ * transaction goes somewhere else entirely.
+ *
+ * Concretely, with a wallet left on Ethereum mainnet: `approve` targets
+ * `0x833589fC…`, which is Base's USDC and something else entirely on Ethereum,
+ * and `deposit` targets a vault address that has no code there — a call to a
+ * codeless address succeeds, burns gas, moves nothing, and returns a real
+ * transaction hash the UI will happily render as success.
+ *
+ * Passing `chainId` makes wagmi assert the connection matches and throw
+ * `ChainMismatchError` if it does not, so the wrong-chain write becomes
+ * impossible instead of merely discouraged. The banner in `NetworkGuard` is the
+ * courteous half; this is the half that has to be right when the banner is
+ * ignored, dismissed by a stale render, or never seen.
+ *
+ * `chain.id` and not `CHAIN_ID`: wagmi types `chainId` as a literal union drawn
+ * from the config's `chains` tuple, and `CHAIN_ID` widens to `number` because
+ * it may come from an env var. Beyond satisfying the compiler this is the more
+ * honest source — the config declares exactly one chain, so it is the only
+ * chain a write can reach, whatever an env var claims.
+ */
+const WRITE_CHAIN = { chainId: chain.id } as const
 
 /**
  * On-chain reads and writes for the deposit/withdraw panel.
@@ -196,6 +225,7 @@ export function useVaultActions(vault: `0x${string}`, account?: `0x${string}`) {
   const approve = useMutation({
     mutationFn: async ({ token, amount }: { token: `0x${string}`; amount: bigint }) => {
       const hash = await writeContract(wagmiConfig, {
+        ...WRITE_CHAIN,
         address: token,
         abi: erc20Abi,
         functionName: 'approve',
@@ -213,6 +243,7 @@ export function useVaultActions(vault: `0x${string}`, account?: `0x${string}`) {
     mutationFn: async (assets: bigint) => {
       if (!account) throw new Error('Connect a wallet first')
       const hash = await writeContract(wagmiConfig, {
+        ...WRITE_CHAIN,
         address: vault,
         abi: erc4626Abi,
         functionName: 'deposit',
@@ -227,6 +258,7 @@ export function useVaultActions(vault: `0x${string}`, account?: `0x${string}`) {
     mutationFn: async (shares: bigint) => {
       if (!account) throw new Error('Connect a wallet first')
       const hash = await writeContract(wagmiConfig, {
+        ...WRITE_CHAIN,
         address: vault,
         abi: erc4626Abi,
         functionName: 'redeem',
@@ -257,6 +289,7 @@ export function useVaultActions(vault: `0x${string}`, account?: `0x${string}`) {
     mutationFn: async (shares: bigint) => {
       if (!account) throw new Error('Connect a wallet first')
       const { request } = await simulateContract(wagmiConfig, {
+        ...WRITE_CHAIN,
         address: vault,
         abi: pausableVaultAbi,
         functionName: 'redeemInKind',
