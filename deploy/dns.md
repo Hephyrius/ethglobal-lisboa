@@ -77,6 +77,23 @@ dig +short www.scipio.capital    # → cname.vercel-dns.com. then an IP
 dig +short api.scipio.capital    # → 138.68.159.44
 ```
 
+**Measured 2026-07-26 — none of section 3 has been applied yet.** The
+nameservers are already `dns1/dns2.registrar-servers.com` (Namecheap BasicDNS),
+so section 1 is satisfied and the Advanced DNS tab is live. But the host records
+are still the shipped defaults:
+
+| Name | Resolves to | |
+|---|---|---|
+| `scipio.capital` | `192.64.119.212` | Namecheap parking, not Vercel |
+| `www.scipio.capital` | `216.227.142.170` | Namecheap parking, not Vercel |
+| `api.scipio.capital` | `NXDOMAIN` | no record exists |
+
+The droplet itself is up and answering on both 80 and 443 at `138.68.159.44`, so
+the API is running and simply has no name pointing at it. Until the `api.` A
+record exists, Caddy cannot complete an ACME challenge, `https://api.scipio.capital`
+is unresolvable, and the dApp — wherever it is hosted — will report the agent as
+unreachable. This is the first blocking step, ahead of anything on Vercel.
+
 Namecheap is usually live within a few minutes but says up to 30. **Do not start
 Caddy before `api.scipio.capital` resolves.** Caddy requests a certificate on
 first boot, and a failed ACME challenge counts against Let's Encrypt's limit of
@@ -106,7 +123,26 @@ it and restarting does nothing.
 | `NEXT_PUBLIC_API_URL` | `https://api.scipio.capital` |
 | `NEXT_PUBLIC_CHAIN_ID` | `8453` |
 | `NEXT_PUBLIC_DEPLOY_NETWORK` | `base-mainnet` |
-| `NEXT_PUBLIC_WALLETCONNECT_ID` | *(only if the WalletConnect connector is used)* |
+| `NEXT_PUBLIC_RPC_URL` | the same archive-capable URL as `BASE_RPC_URL` |
+
+⚠️ **`NEXT_PUBLIC_RPC_URL` is the row that gets forgotten, and it fails quietly.**
+It is the browser's own read RPC — every `totalAssets()`, share balance and
+wallet balance on the dashboard goes through it, not through the API. Left
+unset, `src/lib/chain/wagmi.ts` calls `http(undefined)` and viem falls back to
+Base's public endpoint, which is `https://mainnet.base.org` — the exact endpoint
+[README.md](README.md) tells you not to use, now serving every judge who opens
+the page. Nothing errors; the vault panels just get slow and start dropping
+reads under rate limiting.
+
+Do **not** paste a localhost URL here. `src/lib/chain/explorer.ts` treats a
+local hostname as proof it is on the anvil fork and suppresses every BaseScan
+link on the site, because the fork also reports chain id 8453.
+
+There is no `NEXT_PUBLIC_WALLETCONNECT_ID`. The connector is injected-only and
+nothing reads that variable — see the rationale at the top of
+`src/lib/chain/wagmi.ts`. `NEXT_PUBLIC_SITE_URL` exists but already defaults to
+`https://scipio.capital`, so it only needs setting on a preview deployment whose
+link previews should point at itself.
 
 Build settings for this repo, which is a pnpm workspace:
 

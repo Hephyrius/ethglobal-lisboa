@@ -8,6 +8,46 @@ the hackathon window.
 
 ---
 
+## 2026-07-26 — Deploy readiness: the browser's RPC was missing from the Vercel table, and the domain is still parked
+
+**What changed.** Two corrections to `deploy/dns.md`, both measured rather than assumed. §5 gains
+`NEXT_PUBLIC_RPC_URL` and loses `NEXT_PUBLIC_WALLETCONNECT_ID`. §4 gains the actual resolution state
+of the domain as of today.
+
+**Why `NEXT_PUBLIC_RPC_URL` matters more than its absence suggested.** The Vercel env table listed
+the API URL, the chain id and the deploy network, which reads like a complete set — the API is the
+backend, so the API URL must be the connection that matters. It is not the only one. The dApp talks
+to Base *directly* for every `totalAssets()`, share balance and wallet balance;
+`src/lib/chain/wagmi.ts` builds that transport from `NEXT_PUBLIC_RPC_URL` alone. Unset, `http(undefined)`
+resolves to viem's default for Base, which is `https://mainnet.base.org` — the endpoint
+`deploy/README.md` explicitly rules out as not archive-capable and rate-limited. The failure is the
+bad kind: nothing throws, no badge turns amber, the vault panels just get slow and intermittently
+blank while every other health check stays green. Confirmed against a real production build
+(`NEXT_PUBLIC_DEPLOY_NETWORK=base-mainnet`): 10 routes, compiled clean.
+
+**Why the WalletConnect row was removed rather than left as harmless.** `grep` finds zero readers of
+it; the connector is injected-only and `wagmi.ts` documents at length why. A credential named in a
+deployment table is a credential someone goes looking for at 03:00, and not finding it reads as a
+blocker. Deleting the row is the whole fix.
+
+**Why the DNS state is now written down.** `deploy/README.md` describes a two-destination setup as
+though it were in place. Resolved today: the apex and `www` still answer with Namecheap parking
+addresses and `api.scipio.capital` is NXDOMAIN, while the droplet answers on 80 and 443 at its raw
+IP. So the API is running with no name pointing at it, Caddy has never been able to complete an ACME
+challenge, and none of section 3 has been applied. Recording the measurement, rather than the
+intent, is what stops the next person reading the Vercel section as the remaining work when the
+blocking step is upstream of it.
+
+**Alternative rejected: adding `web/vercel.json`.** The two settings that actually matter for this
+repo — Root Directory `web`, and "include source files outside the Root Directory" for the
+`../../../../deployments/*.json` and `packages/schema/fixtures/*.json` imports — cannot be expressed
+in `vercel.json`; they are dashboard-only. Everything else Vercel already detects correctly
+(`pnpm@9.5.0` from the root `packageManager` field, Next.js from the framework preset). A config
+file that duplicates dashboard settings without being able to carry the two load-bearing ones is a
+second source of truth that is wrong in exactly the cases you would consult it.
+
+---
+
 ## 2026-07-25 — Lane C, Wave 3 §5: sanitising untrusted strings, and being precise about what that buys
 
 **What changed.** `curator_data/sanitize.py`, applied at two chokepoints — `FactBuilder.subject()`
